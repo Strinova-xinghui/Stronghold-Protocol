@@ -71,6 +71,12 @@ if (-not $Tunnel) {
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
     Write-Host '关服: 关闭弹出的服务器窗口（可最小化，别关）。'
+    # 固定网址自动进剪贴板：Ctrl+V 直接发朋友，不用手动选中复制
+    $invite = '浏览器(电脑/iOS/安卓): https://frp-end.com:15810' + "`r`n" +
+              '安卓APK: http://frp-cup.com:30756' + "`r`n" +
+              '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
+    Set-Clipboard -Value $invite
+    Write-Host '[固定网址已自动复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process "http://localhost:$chosen"
     exit 0
 }

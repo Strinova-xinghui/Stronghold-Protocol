@@ -5,4 +5,6 @@ chcp 65001 >nul
 cd /d "%~dp0"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-online.ps1" %*
 echo.
-pause
+echo [固定网址已自动复制到剪贴板，Ctrl+V 直接发给朋友]
+echo [服务器在后台独立运行，本窗口随手点 X 关闭都不影响联机]
+cmd /k
