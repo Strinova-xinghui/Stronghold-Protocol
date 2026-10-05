@@ -2,7 +2,7 @@
 # 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 3000]
 # 前提：已 npm install && node tools/setup.mjs --no-local；Clash 若开 TUN 需给 cloudflared.exe 加直连规则
 # 注意：本文件必须保存为 UTF-8 带 BOM，否则 Windows PowerShell 5.1 会解析失败（中文变乱码）
-param([int]$Port = 0)
+param([int]$Port = 24500)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -22,8 +22,8 @@ function Test-GameAlive([int]$p) {
     } catch { return $false }
 }
 
-# 1. 选端口：指定了 -Port 就只用它；否则按 3000 → 3100 → 8080 顺序挑第一个可用的
-if ($Port -gt 0) { $candidates = @($Port) } else { $candidates = @(3000, 3100, 8080) }
+# 1. 选端口：默认 24500（固定，樱花 frp 隧道绑定此端口；远离 Hyper-V 保留区）
+if ($Port -gt 0) { $candidates = @($Port) } else { $candidates = @(24500, 3000, 3100, 8080) }
 $chosen = $null; $alreadyRunning = $false
 foreach ($p in $candidates) {
     if (Test-GameAlive $p) { $chosen = $p; $alreadyRunning = $true; break }
@@ -82,6 +82,13 @@ if ($url) {
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
     Write-Host "  $url" -ForegroundColor Cyan
+    # 樱花 frp 固定网址（frpc 由官方启动器管理，隧道常驻，地址不变）
+    $frpc = Get-Process frpc -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($frpc) {
+        Write-Host "  [樱花frp 已在运行] 用启动器面板里的固定网址发给朋友（优先）" -ForegroundColor Cyan
+    } else {
+        Write-Host "  [樱花frp 未运行] 想要固定网址+低延迟：打开「樱花frp启动器」启动隧道" -ForegroundColor DarkGray
+    }
     # Radmin VPN 网卡地址（26.x）：低延迟方案，朋友装 Radmin VPN 进同一网络后访问
     $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
