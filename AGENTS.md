@@ -68,7 +68,7 @@
 - 要换节点/加隧道都在 natfrp 后台操作；本地端口统一填 24500。
 - **双隧道并存**（2026-10-05 深夜定稿）：同一服务器挂多条隧道，朋友从任一地址进的都是同一个房。
   - **合肥 #83 `https://frp-end.com:15810`**（TCP+自动 HTTPS）：浏览器用户主力，你侧 connect 54–73ms，加密。
-  - **日本2 #74 `http://frp-cup.com:30756`**（TCP，自动 HTTPS 禁用，**明文**）：**APK 专用**——安卓 APK 的 WebView 对 wss 自签证书大概率直接拒连（不走 onReceivedSslError 回调），明文 http→ws 全程不碰证书，零构建兼容官方 APK；你侧 connect ~98–121ms（偶发抖动），海外节点允许明文 HTTP。
+  - **日本2 #74 `http://frp-cup.com:30756`**（TCP，自动 HTTPS 禁用，**明文**）：**APK 专用**——安卓 APK 的 WebView 对 wss 自签证书大概率直接拒连（不走 onReceivedSslError 回调），明文 http→ws 全程不碰证书，零构建兼容官方 APK；你侧 connect ~98–121ms（偶发抖动），海外节点允许明文 HTTP。**也是 iOS 的兜底线**：Safari 页面能开但卡在连接（自签未继承给 wss）时换这条，无证书参与，同一个房。
   - 日本2 建站类型补充：日本等海外节点比内地节点多出「HTTP/HTTPS 建站隧道」类型（需绑自有域名），TCP 明文仍是 APK 兼容的最简解；HTTPS 建站 + Let's Encrypt 证书是理论完美方案，有域名再说。
   - 已否决路线：自建魔改 APK（改 WebView 信任自签证书）——需要 JDK17+Android SDK+Gradle 环境，且 wss 自签在 Chromium 内核内部拒连、壳层豁免无效，性价比远低于明文隧道；本机仅 Java 8，环境全缺。
 
