@@ -82,9 +82,16 @@ if ($url) {
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
     Write-Host "  $url" -ForegroundColor Cyan
+    # Radmin VPN 网卡地址（26.x）：低延迟方案，朋友装 Radmin VPN 进同一网络后访问
+    $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
+        Select-Object -First 1
+    if ($rad) {
+        Write-Host "  http://$($rad.IPAddress):$chosen   <- Radmin VPN 组网（低延迟，朋友装 Radmin 后用这个）" -ForegroundColor Cyan
+    }
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
-    Write-Host '注意: 地址每次运行本脚本都会变化；关服 = 任务管理器结束 node.exe 和 cloudflared.exe。'
+    Write-Host '注意: 隧道地址每次运行都会变；关服 = 任务管理器结束 node.exe 和 cloudflared.exe。'
     Start-Process $url
 } else {
     Write-Host "隧道地址获取失败。排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）？2) 日志: $tlog" -ForegroundColor Red
