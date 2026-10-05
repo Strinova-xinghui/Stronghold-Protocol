@@ -1,4 +1,4 @@
-# 卫戍协议：盟约 —— 一键公网开服脚本（Cloudflare 临时隧道）
+﻿# 卫戍协议：盟约 —— 一键公网开服脚本（Cloudflare 临时隧道）
 # 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 3000]
 # 前提：已 npm install && node tools/setup.mjs --no-local；开服前退出 Clash/Mihomo（TUN 会掐断隧道）
 param([int]$Port = 3000)
@@ -33,7 +33,7 @@ for ($i = 0; $i -lt 30; $i++) {
         $m = Select-String -Path $tlog -Pattern 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -Last 1
         if ($m) { $url = $m.Matches[0].Value; break }
     }
-    Write-Host "    等待隧道建立… ($($i + 1)0s)" -ForegroundColor DarkGray
+    Write-Host ("    等待隧道建立… {0}s" -f (($i + 1) * 2)) -ForegroundColor DarkGray
 }
 
 if ($url) {
