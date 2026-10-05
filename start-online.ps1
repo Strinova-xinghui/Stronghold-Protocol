@@ -2,7 +2,7 @@
 # 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 3000]
 # 前提：已 npm install && node tools/setup.mjs --no-local；Clash 若开 TUN 需给 cloudflared.exe 加直连规则
 # 注意：本文件必须保存为 UTF-8 带 BOM，否则 Windows PowerShell 5.1 会解析失败（中文变乱码）
-param([int]$Port = 24500)
+param([int]$Port = 24500, [switch]$Tunnel)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -22,8 +22,10 @@ function Test-GameAlive([int]$p) {
     } catch { return $false }
 }
 
-# 1. 选端口：默认 24500（固定，樱花 frp 隧道绑定此端口；远离 Hyper-V 保留区）
-if ($Port -gt 0) { $candidates = @($Port) } else { $candidates = @(24500, 3000, 3100, 8080) }
+# 1. 端口语义：樱花隧道按端口绑定到 24500，所以**钉死 24500，绝不静默换端口**——
+#    换了端口服务器照样能跑，但朋友的固定网址会 502。24500 被占（Hyper-V 保留区漂移）时明确报错让人处理。
+if ($Port -le 0) { $Port = 24500 }
+$candidates = @($Port)
 $chosen = $null; $alreadyRunning = $false
 foreach ($p in $candidates) {
     if (Test-GameAlive $p) { $chosen = $p; $alreadyRunning = $true; break }
@@ -31,7 +33,8 @@ foreach ($p in $candidates) {
     Write-Host "[skip] 端口 $p 不可用（被占用或被 Hyper-V 保留区圈走）" -ForegroundColor Yellow
 }
 if (-not $chosen) {
-    Write-Host '所有候选端口都不可用。排查: netsh interface ipv4 show excludedportrange protocol=tcp' -ForegroundColor Red
+    Write-Host "端口 $Port 不可用。樱花隧道固定绑定此端口，不能换。排查: netsh interface ipv4 show excludedportrange protocol=tcp" -ForegroundColor Red
+    Write-Host '临时解法: 管理员 PowerShell 运行重启后重试，或 natfrp 后台把隧道本地端口改成脚本 -Port 指定的值。' -ForegroundColor Red
     exit 1
 }
 
@@ -53,8 +56,26 @@ if ($alreadyRunning) {
     Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen" -ForegroundColor Green
 }
 
-# 3. 隧道：清掉旧 cloudflared 再起，日志写 .cache\tunnel.log（地址在 stderr 里）
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
+# 3. Cloudflare 隧道：默认跳过（樱花 frp 已提供两条固定网址）。需要兜底隧道时加 -Tunnel 参数
+if (-not $Tunnel) {
+    Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
+    Write-Host ''
+    Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
+    Write-Host '  [樱花frp 在线] 固定网址（浏览器: https://frp-end.com:15810 · APK: http://frp-cup.com:30756）' -ForegroundColor Cyan
+    $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
+        Select-Object -First 1
+    if ($rad) {
+        Write-Host "  http://$($rad.IPAddress):$chosen   <- Radmin VPN 组网（低延迟，朋友装 Radmin 后用这个）" -ForegroundColor Cyan
+    }
+    Write-Host '=============================================================' -ForegroundColor Green
+    Write-Host "本机游玩: http://localhost:$chosen"
+    Write-Host '关服: 关闭弹出的服务器窗口（可最小化，别关）。'
+    Start-Process "http://localhost:$chosen"
+    exit 0
+}
+
+# 3b.（可选兜底）起 cloudflared 临时隧道，日志写 .cache\tunnel.log（地址在 stderr 里）
 Start-Sleep -Seconds 1
 $cf = Join-Path ${env:ProgramFiles(x86)} 'cloudflared\cloudflared.exe'
 if (-not (Test-Path $cf)) { $cf = 'cloudflared' }
@@ -82,12 +103,12 @@ if ($url) {
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
     Write-Host "  $url" -ForegroundColor Cyan
-    # 樱花 frp 固定网址（frpc 由官方启动器管理，隧道常驻，地址不变）
+    # 樱花 frp 固定网址（frpc 由官方守护进程服务管理，开机自启，地址永久不变）
     $frpc = Get-Process frpc -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($frpc) {
-        Write-Host "  [樱花frp 已在运行] 用启动器面板里的固定网址发给朋友（优先）" -ForegroundColor Cyan
+        Write-Host "  [樱花frp 在线] 固定网址发给朋友（浏览器: https://frp-end.com:15810 · APK: http://frp-cup.com:30756）" -ForegroundColor Cyan
     } else {
-        Write-Host "  [樱花frp 未运行] 想要固定网址+低延迟：打开「樱花frp启动器」启动隧道" -ForegroundColor DarkGray
+        Write-Host "  [樱花frp 未运行] 固定网址暂不可用——请检查 natfrp 守护进程服务是否在跑" -ForegroundColor Yellow
     }
     # Radmin VPN 网卡地址（26.x）：低延迟方案，朋友装 Radmin VPN 进同一网络后访问
     $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -98,7 +119,7 @@ if ($url) {
     }
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
-    Write-Host '注意: 隧道地址每次运行都会变；关服 = 任务管理器结束 node.exe 和 cloudflared.exe。'
+    Write-Host '关服: 关闭弹出的服务器窗口，或任务管理器结束 node.exe。服务器窗口可最小化，别关。'
     Start-Process $url
 } else {
     Write-Host "隧道地址获取失败。排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）？2) 日志: $tlog" -ForegroundColor Red
