@@ -449,7 +449,7 @@ function MatchScreen() {
     }
     if (earlySnap) {
       view.pushSnapshot(earlySnap);
-      hudRef.current = snapHud(earlySnap);
+      hudRef.current = snapHud(earlySnap, myId);
       setHud(hudRef.current);
     }
   }, [view, showPrep, priv, editable, field, combat, mode, watchingOther, watching, holdSeq]);
@@ -482,7 +482,7 @@ function MatchScreen() {
         for (const t of snap.units) if (Array.isArray(t)) mp.set(t[0], t);
         snapUnitsRef.current = mp;
       }
-      hudRef.current = snapHud(snap);
+      hudRef.current = snapHud(snap, myId);
       const dt = performance.now() - last;
       if (dt >= HUD_HZ_MS) flush();
       else if (!pending) pending = setTimeout(flush, HUD_HZ_MS - dt);
@@ -861,6 +861,14 @@ function MatchScreen() {
         }
         await runIntent(intent);
       }),
+      // The deploy voice line hangs off the unit actually reaching the board (render/app.js
+      // announceDeploy) instead of off the manual drop, so combat auto-deploy, a merge's elite and a
+      // raid redeploy speak too — it used to sound only when the player tapped a piece into place.
+      view.on('unitDeploy', (e) => {
+        try { audio.deploy?.(e, gd); } catch { /* ignore */ }
+        const vk = voiceKey(e?.defId || e?.chessId, gd);
+        if (vk) audio.voice(vk, 'place');
+      }),
       view.on('pieceDragEnd', (e) => {
         // a cancelled drag (no pieceDrop) must not leave the highlights behind; a release on a tile that takes nothing
         // (the drag controller found no legal target there) says why
@@ -880,6 +888,8 @@ function MatchScreen() {
       view.on('pieceClick', (e) => {
         if (!e) return;
         audio.sfx('click', { volume: 0.4 });
+        const vk = voiceKey(e.piece || (e.uid != null ? live.current.placeCtx?.pieces.get(e.uid)?.piece : null) || e.unit, gd);
+        if (vk) audio.voice(vk, 'select');
         // an enemy of the preview pen (research 09 §2.2 "Intel": tap it for its detail card)
         const penKey = previewEnemyKey(e);
         if (penKey) { setDetail({ kind: 'enemy', id: penKey }); return; }
@@ -967,6 +977,19 @@ function MatchScreen() {
     return () => host.removeEventListener('pointerdown', onDown, true);
   }, []);
 
+  // click outside detail panel on non-interactive backdrop/hud space closes the panel
+  useEffect(() => {
+    const onDocDown = (e) => {
+      if (!live.current.detail) return;
+      if (e.target.closest('.dpanel, .uframe, .scard, .lvcard, .toolbtn, .funds, .shopbar-tab, .fwheel, .bpop, .modal, .edrawer, .gm__corner, .gtop')) {
+        return;
+      }
+      setDetail(null);
+    };
+    window.addEventListener('pointerdown', onDocDown, true);
+    return () => window.removeEventListener('pointerdown', onDocDown, true);
+  }, []);
+
   // ---- direction step (research 09 §1.2) and the selected piece's underframe ------------------------------------
   // DESIGN §16: previews show the range the unit fights with under the player's loadout (an elite's module grid)
   const lookups = useMemo(() => ({ getChess: gd.chess, getToken: gd.token, getItem: gd.item,
@@ -995,6 +1018,7 @@ function MatchScreen() {
     const f = live.current.facing;
     if (!f) return;
     setFacing(null);
+    audio.sfx('click', { volume: 0.5 });
     const intent = facingIntent(f.piece, { row: f.row, col: f.col }, dir);
     heldRef.current.set(f.uid, { row: f.row, col: f.col, t: Date.now() });
     const ok = intent.t === 'g.art'
@@ -1004,6 +1028,10 @@ function MatchScreen() {
       if (f.piece.kind !== 'item') setPieceDir(view, f.uid, pieceDir(f.piece));
       releaseHold(f.uid);
       return;
+    }
+    if (f.piece && f.piece.kind !== 'item') {
+      const vk = voiceKey(f.piece, gd);
+      if (vk) audio.voice(vk, 'place');
     }
     // accepted: the piece stays on the tile until m.private shows it there (or a short grace passes)
     setTimeout(() => { if (heldRef.current.has(f.uid)) releaseHold(f.uid); }, 1500);
@@ -1273,7 +1301,7 @@ function MatchScreen() {
   // bonds this mode never activates (标准: 10 of 23, 奥术 among them) — shown 本局禁用 on cards, chips and the popup
   const offBonds = modeOffBonds(getMode(pub?.modeId));
 
-  return html`<div class=${cx('screen', 'gm', `gm--${mode}`, drag && 'is-dragging', collapsed && 'is-collapsed', sp && 'has-sp', pen && 'is-pen', readyWhy && 'has-readywhy')}
+  return html`<div class=${cx('screen', 'gm', `gm--${mode}`, drag && 'is-dragging', collapsed && 'is-collapsed', sp && 'has-sp', pen && 'is-pen', readyWhy && 'has-readywhy', detail && 'has-dpanel')}
       data-camera=${pen ? 'pen' : camKind}>
     <div class="gm__field" ref=${hostRef} onContextMenu=${(e) => e.preventDefault()}></div>
     ${viewKind === 'loading' ? html`<div class="gm__loading"><${Spinner} label="LOADING FIELD" /></div>` : null}
@@ -1356,7 +1384,7 @@ function MatchScreen() {
         onClose=${() => setBondOpen(null)} onMember=${(id, items) => setDetail({ kind: 'chess', id, owner: bondPop.ownerId, items: items || null })} />` : null}
 
       ${resolved ? html`<${DetailPanel} detail=${resolved} snapHp=${snapHp} onClose=${() => { setDetail(null); setSel(null); }}
-        bonds=${detailBonds} offBonds=${offBonds} loadout=${detailLoadout} side=${dSide} shopOpen=${shopOpen} live=${liveStats} voice=${combat}
+        bonds=${detailBonds} offBonds=${offBonds} loadout=${detailLoadout} side=${dSide} shopOpen=${shopOpen} live=${liveStats} voice=${true}
         onBond=${(id) => openBond(id, detailOwner, 'detail')} />` : null}
 
       ${selEntry && editable && !facing && !drag && showPrep ? html`<${Underframe} key=${sel.uid} view=${view} uid=${sel.uid}

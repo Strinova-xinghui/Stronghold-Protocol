@@ -14,7 +14,7 @@ import { GameScreen } from '/js/screens/game.js';
 import { store, emptyMatch, selectRoute } from '/js/store.js';
 import { net, NetError } from '/js/net.js';
 import { data } from '/js/data.js';
-import { installAudio } from '/js/audio.js';
+import { installAudio, audio } from '/js/audio.js';
 import { settingsStore } from '/js/ui/settings.js';
 import { awayStore } from '/js/ui/matchChrome.js';
 import { GAME_FILES } from '/js/ui/gameComponents.js';
@@ -769,10 +769,16 @@ async function boot() {
   installDeviceSupport();
   installAudio({ getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute, settings: settingsStore.get() });
   const phase = params.get('phase') || 'PREP';
+  const stageParam = params.get('stage');
   setPhase(PHASE[phase] || PHASE.PREP, params.get('variant') || '');
+  if (stageParam && S?.pub) {
+    S.pub.stageId = stageParam;
+    pushPublic();
+  }
   render(html`<div class="app-root"><div class="app-bg" aria-hidden="true"></div><${GameScreen} /><${ConnectionBanner} /><${ToastHost} /><${UiHosts} /><${GuideHost} /></div>`, document.getElementById('app'));
   renderBar();
   store.subscribe(() => renderBar());
   globalThis.__MOCK__ = { store, S: () => S, setPhase, mutate: (fn) => { fn(S); refreshPrivate(); }, pushPublic: () => pushPublic() };
+  globalThis.__SP__ = { store, net, data, audio, version: 1 };
 }
 boot().catch((err) => console.error('[mock] boot failed', err));

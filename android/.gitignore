@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+/app/src/main/assets/app_bundle.zip
+
+# release signing material — keystore and credentials must never be committed
+/keystore/
+*.jks
+*.keystore

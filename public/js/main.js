@@ -39,12 +39,13 @@ import { TitleScreen, sanitizeName } from './screens/title.js';
 import { LobbyScreen, rememberRoom, parseRoomParam } from './screens/lobby.js';
 import { RoomScreen } from './screens/room.js';
 import { GameScreen } from './screens/game.js';
-import { installAudio } from './audio.js';
+import { installAudio, audio } from './audio.js';
 import { settingsStore } from './ui/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { installLoadoutSync } from './ui/loadoutSync.js';
+import { installSkinsSync } from './ui/skins.js';
 import { startBuildGuard } from './ui/buildGuard.js';
 
 const RESTORE_GRACE_MS = 1500;
@@ -306,7 +307,42 @@ function installGlobalErrorHandlers() {
   window.addEventListener('error', (ev) => {
     if (!(ev instanceof ErrorEvent)) return; // resource load errors are not script errors
     console.error('[app] uncaught error', ev.error || ev.message);
+    // An uncaught throw after boot leaves nothing on screen (the toast path only covers rejections), and on a device
+    // whose WebView surface is broken even a toast would be invisible — so the shell has to hear about it.
+    reportClientState({ error: String((ev.error && ev.error.message) || ev.message || 'unknown').slice(0, 200) });
   });
+}
+
+/**
+ * One line of "what the page can see about itself", handed to the Android shell (AndroidBridge.reportClientState).
+ * A WebView that fails to composite shows a black screen the page cannot annotate — the message would be painted on
+ * the same broken surface — so the native side keeps this and complains when it never arrives.
+ */
+function reportClientState(extra = {}) {
+  const native = globalThis.AndroidNative;
+  if (typeof native?.reportClientState !== 'function') return;
+  const gl = (type) => { try { return !!document.createElement('canvas').getContext(type); } catch { return false; } };
+  const root = document.querySelector('.app-root');
+  const renderedW = root?.clientWidth || 0;
+  const renderedH = root?.clientHeight || 0;
+  const layoutCollapsed = renderedW === 0 || renderedH === 0;
+  try {
+    native.reportClientState(JSON.stringify({
+      at: Date.now(),
+      booted: !!globalThis.__SP__ && !layoutCollapsed,
+      layoutCollapsed,
+      renderedW,
+      renderedH,
+      rootChildren: document.getElementById('app')?.childElementCount ?? -1,
+      canvases: document.querySelectorAll('canvas').length,
+      webgl2: gl('webgl2'), webgl: gl('webgl'),
+      dpr: globalThis.devicePixelRatio || 1,
+      vw: globalThis.innerWidth || 0, vh: globalThis.innerHeight || 0,
+      ua: String(navigator.userAgent).slice(0, 160),
+      ...(layoutCollapsed ? { error: `UI layout collapsed (w=${renderedW}, h=${renderedH})` } : {}),
+      ...extra,
+    }));
+  } catch { /* the shell is already on its own timeout path */ }
 }
 
 async function boot() {
@@ -329,10 +365,12 @@ async function boot() {
 
   wireNet();
   installLoadoutSync({ net });
+  installSkinsSync({ net });
   net.attachBrowserHooks();
   // Audio: unlock on first gesture, BGM follows the route / match phase (js/audio.js).
   installAudio({ getManifest: () => data.get('assets'), subscribe: store.subscribe, getState: store.get, selectRoute, settings: settingsStore.get() });
   data.load('assets').catch(() => {});
+  data.load('skins').catch(() => {});
   // Warm the data cache in the background (missing files are tolerated).
   data.loadAll('config').catch(() => {});
   // Optional local-client art manifest (emotes, tutorial pages, official UI sprites; DESIGN §13).
@@ -351,7 +389,8 @@ async function boot() {
     splash.classList.add('is-done');
     setTimeout(() => splash.remove(), 300);
   }
-  globalThis.__SP__ = { store, net, data, version: 1 };
+  globalThis.__SP__ = { store, net, data, audio, version: 1 };
+  reportClientState();
   // A page keeps the modules it imported at load time for its whole lifetime, so a deploy cannot reach an open tab
   // (ui/buildGuard.js): watch `/healthz.build`. Outside a match the page reloads itself; during a match the guard says
   // so instead (the connection banner offers 刷新页面) and reloads once the match — settlement screen included — is over,

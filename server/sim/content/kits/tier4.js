@@ -152,7 +152,7 @@ const downed = (u) => (u.bossPool ? !(u.bossPool.hp > 0) : !(u.hp > 0));
 // install / talent logic that belongs to ONE skill is gated on that skill being the selected one.
 
 /** Id of the selected skill. */
-const selId = (def) => def?.skill?.id ?? def?.raw?.skill?.skillId ?? null;
+const selId = (def) => def?.skill?.skillId ?? def?.skill?.id ?? def?.raw?.skill?.skillId ?? def?.raw?.skill?.id ?? null;
 /** Is `id` the selected skill? */
 const isSel = (def, id) => selId(def) === id;
 /** `skills` map of a kit: the spec of the selected skill when a builder exists for it (DESIGN §16 kit contract). */
@@ -540,7 +540,8 @@ const kits = {
           const key = `ines:aspd:${unit.id}`;
           const cur = target.findBuff(key);
           battle.addBuff(target, { key, mods: { aspd: (cur?.mods?.aspd ?? 0) - s }, source: unit });
-          if (!(unit.mem.inesAspdVictims ||= []).includes(target.id)) unit.mem.inesAspdVictims.push(target.id);
+          if (!unit.mem.inesAspdVictims) unit.mem.inesAspdVictims = [];
+          if (!unit.mem.inesAspdVictims.includes(target.id)) unit.mem.inesAspdVictims.push(target.id);
           battle.addBuff(unit, { key: 'ines:aspdGain', mods: { aspd: unit.mem.inesAspd } });
         },
         onEnd({ battle, unit }) { clearAspd(battle, unit); },
@@ -1934,7 +1935,7 @@ const kits = {
     const S1 = isSel(def, 'skchr_cetsyr_1'), S2 = isSel(def, 'skchr_cetsyr_2'), S3 = isSel(def, 'skchr_cetsyr_3');
     const baseCnt = Math.max(0, Math.floor(num(t0.cnt, 3)));
     const MOTE_GAP = 0.5; // [ASSUMED] minimal time between two motes hitting the same enemy (s)
-    const setTrait = (unit, v) => { unit.mem.bardBase ??= unit.profile.auraRatio; unit.profile.auraRatio = num(v, unit.mem.bardBase); };
+    const setTrait = (unit, v) => { if (unit.mem.bardBase == null) unit.mem.bardBase = unit.profile.auraRatio; unit.profile.auraRatio = num(v, unit.mem.bardBase); };
     const resetTrait = (unit) => { if (unit.mem.bardBase != null) unit.profile.auraRatio = unit.mem.bardBase; };
     return {
       skills: alt(def, {

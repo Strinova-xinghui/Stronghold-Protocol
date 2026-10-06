@@ -37,3 +37,15 @@ desktop.ini
 .idea/
 .vscode/
 .claude/
+vibe_images/
+
+# --- Build artifacts ----------------------------------------------------------------
+*.apk
+*.aab
+*.zip
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/app_bundle.zip
+android/app/src/main/assets/bundle.sha256
+

@@ -240,6 +240,24 @@ export function LobbyScreen() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(null);
   const [recent] = useState(recentRooms);
+  // The Android shell can ask the local network who hosts a key, so a guest never types an address: the code is enough.
+  const nativeShell = globalThis.AndroidNative?.isNativeApp?.() ? globalThis.AndroidNative : null;
+  const [lanRoom, setLanRoom] = useState(null);
+  const [lanNote, setLanNote] = useState('');
+  useEffect(() => {
+    if (!nativeShell || roomMode !== 'coop' || !codeOk) { setLanRoom(null); return undefined; }
+    let cancelled = false;
+    setLanRoom(null);
+    setLanNote('正在局域网中查找该房间…');
+    globalThis.__onRoomFound = (list) => {
+      if (cancelled) return;
+      const host = (list || []).find((h) => !h.self);
+      if (host) { setLanRoom(host); setLanNote(`已找到房主 ${host.ip}（${host.humans || 0} 人在房）· 点「加入同盟」进入`); }
+      else setLanNote('局域网里没有这个房间：确认房主已创建同盟模拟房间，且两台设备在同一网络');
+    };
+    nativeShell.findRoom(code);
+    return () => { cancelled = true; delete globalThis.__onRoomFound; };
+  }, [code, roomMode]);
   const alive = useRef(true);
   const inFlight = useRef(false); // synchronous guard against double clicks (state updates are async)
   useEffect(() => () => { alive.current = false; }, []);
@@ -265,7 +283,14 @@ export function LobbyScreen() {
     // `onClick=${join}` hands the click EVENT as the first argument, and a default parameter only applies to
     // `undefined` — codeArg keeps an event target out of the key and falls back to the input field
     const k = codeArg(c, code);
-    if (!k) { toast(`同盟密钥为 ${ROOM_CODE_LEN} 位字母或数字`, 'warn'); return; }
+    if (!CODE_RE.test(k)) { toast(`同盟密钥为 ${ROOM_CODE_LEN} 位字母或数字`, 'warn'); return; }
+    // A room found on another phone is a different origin: hand the WebView over to it instead of asking the
+    // server we are on, which by definition does not have that room.
+    if (nativeShell && lanRoom) {
+      nativeShell.connectToHost(lanRoom.ip, k);
+      setLanNote(`正在进入 ${lanRoom.ip} 的房间…`);
+      return;
+    }
     run('join', () => net.request('room.join', { code: k }));
   };
   // a spectator seat: no player seat taken, nothing to do but watch (also a match already running)
@@ -324,6 +349,10 @@ export function LobbyScreen() {
 
         <div class="section-label"><span class="section-label__idx num">03</span>加入同盟<${MicroLabel}>JOIN WITH ALLIANCE KEY<//></div>
         <${Panel} class="join-panel" tone="amber">
+          ${nativeShell && roomMode === 'coop' && codeOk ? html`<div class="join-foot">
+            <span class=${lanRoom ? 't-lo' : 't-dim'}>${lanNote || '正在局域网中查找该房间…'}</span>
+            <button type="button" class="code-chip" onClick=${() => { setLanRoom(null); setLanNote('正在局域网中查找该房间…'); nativeShell.findRoom(code); }}>重新搜索</button>
+          </div>` : null}
           <div class="join-row">
             <${TextField} size="code" icon="key" value=${code} placeholder="输入同盟密钥 / 粘贴邀请链接"
               transform=${normalizeCode} onInput=${(v) => setCode(normalizeCode(v))} onEnter=${() => join()} />

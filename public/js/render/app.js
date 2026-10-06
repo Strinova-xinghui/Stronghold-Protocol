@@ -126,6 +126,7 @@ import { layoutPen, penSignature } from './pen.js';
 import { IDENTITY, bossPrepField, tilesToDisp, leaderStand } from './prepfield.js';
 import { pickOnTile, pickBattle, hitRectAt, hitTiles } from './pick.js';
 import { promotionsOf } from './promote.js';
+import { skinFor } from '../ui/skins.js';
 
 const VENDOR = { pixi: '/vendor/pixi.min.js', spine: '/vendor/pixi-spine.js' };
 const PIECE_DIRS = new Set(['UP', 'RIGHT', 'DOWN', 'LEFT']);
@@ -285,6 +286,7 @@ export function renderInfo(u) {
   return {
     id: u.id, uid: u.uid ?? null, kind: u.kind || 'enemy', side: u.side === 'ally' ? 'ally' : 'enemy', ownerId: u.ownerId ?? null,
     defId: u.defId ?? null, name: u.name ?? '', tier: u.tier ?? 1, golden: !!u.golden, spine: u.spine ?? u.defId ?? null,
+    skin: u.skin ?? null,
     avatar: u.avatar ?? u.defId ?? null, x: Number(u.x) || 0, y: Number(u.y) || 0, facing: u.facing === -1 ? -1 : 1,
     maxHp: Number(u.maxHp) || 1, boss: !!u.boss, motion: u.motion,
     // deploy direction of allies (UnitInfo.dir, DESIGN §3): the model (Back for UP, mirrored for LEFT) and the
@@ -364,9 +366,11 @@ function makeData(src) {
   };
 }
 
-const QUALITY_RES = { high: 2, medium: 1.5, low: 1 };
+// 'high' follows the screen density: a cap of 2 on a 480dpi phone (dpr 3) paints the board at 2/3 native and the system
+// upscales it, which reads as soft operators. Desktop dpr is 1-2, so lifting 'high' only changes phones.
+const QUALITY_RES = { high: 3, medium: 1.5, low: 1 };
 /** Pixel-ratio cap of the 3D board canvas per quality (its fill cost is the PBR board, not the sprites). */
-const BOARD_RES = { high: 2, medium: 1.25, low: 1 };
+const BOARD_RES = { high: 3, medium: 1.25, low: 1 };
 
 /**
  * Before a renderer is destroyed: free its GL copies of every texture / buffer / geometry / framebuffer it
@@ -429,9 +433,10 @@ export async function createFieldView(host, options = {}) {
   const boardDpr = () => Math.min(globalThis.devicePixelRatio || 1, BOARD_RES[settings.quality] || 2);
   const s0 = size();
   const app = new P.Application({
-    // MSAA only where it pays: dense (DPR ≥ 1.5) screens are sharp enough without it and it would cost 4× the fill
+    // MSAA only where it pays: judge the ratio the canvas is actually painted at, not the screen's dpr — a capped
+    // resolution on a dense screen was sharp enough for neither.
     // transparent: the 3D board canvas shows through (the 2D board paints an opaque backdrop itself)
-    width: s0.width, height: s0.height, antialias: opts.antialias ?? (settings.quality === 'high' && (globalThis.devicePixelRatio || 1) < 1.5), backgroundColor: 0x0a0e0d, backgroundAlpha: 0,
+    width: s0.width, height: s0.height, antialias: opts.antialias ?? dpr() < 2, backgroundColor: 0x0a0e0d, backgroundAlpha: 0,
     resolution: dpr(), autoDensity: true, powerPreference: 'high-performance',
   });
   const canvas = app.view;
@@ -489,6 +494,17 @@ export async function createFieldView(host, options = {}) {
     const set = listeners.get(name);
     if (!set) return;
     for (const fn of [...set]) { try { fn(payload); } catch (err) { console.error(`[render] ${name} listener failed`, err); } }
+  };
+
+  /**
+   * Announce that a unit reached the board. The deploy voice line hangs off this event rather than off
+   * the manual drop handler, so it follows every route in: manual placement, combat auto-deploy, a
+   * merge's elite and a raid redeploy.
+   */
+  const announceDeploy = (v, e) => {
+    const info = v?.info;
+    if (!info || info.side === 'enemy') return;
+    emit('unitDeploy', { uid: e?.uid ?? null, defId: info.defId ?? null, chessId: e?.piece?.id ?? info.id ?? null });
   };
 
   let destroyed = false;
@@ -598,7 +614,7 @@ export async function createFieldView(host, options = {}) {
       host.insertBefore(c3, canvas);
       board3dCanvas = c3;
       const b = new BoardScene(THREE, pack, {
-        canvas: c3, antialias: settings.quality !== 'low' && (globalThis.devicePixelRatio || 1) < 2, shadows: settings.quality !== 'low',
+        canvas: c3, antialias: settings.quality !== 'low' && boardDpr() < 2, shadows: settings.quality !== 'low',
       });
       const sz = size();
       b.resize(sz.width, sz.height, boardDpr());
@@ -884,9 +900,11 @@ export async function createFieldView(host, options = {}) {
       return { kind: 'token', side: 'ally', defId: piece.id, spine: rec?.assets?.spine || piece.id, avatar: rec?.assets?.avatar || piece.id, tier: piece.tier || 1, golden: false, dir };
     }
     const rec = data.chess(piece.id);
+    const baseId = rec?.baseId || piece.id;
     return {
       kind: 'op', side: 'ally', defId: piece.id,
       spine: rec?.assets?.spine || rec?.charId || null, avatar: rec?.assets?.avatar || rec?.charId || null,
+      skin: piece.skin ?? skinFor(baseId) ?? skinFor(piece.id) ?? null,
       tier: rec?.tier || piece.tier || 1, golden: !!(piece.golden || rec?.isGolden), dir,
     };
   }
@@ -962,7 +980,7 @@ export async function createFieldView(host, options = {}) {
       const key = 'p:' + e.uid;
       e.key = key;
       const info = pieceInfo(e.piece, e.area);
-      const sig = `${info.kind}|${info.defId}|${info.golden ? 1 : 0}`;
+      const sig = `${info.kind}|${info.defId}|${info.golden ? 1 : 0}|${info.skin || ''}`;
       let v = views.get(key);
       if (v && v._sig !== sig) { dropView(key); v = null; }
       const w = slotWorld(e);
@@ -976,11 +994,11 @@ export async function createFieldView(host, options = {}) {
         views.set(key, v);
         if (promoFrom.has(e.uid)) {
           // a merge's elite: on the tile of the deployed copy it replaced, or on its bench slot
-          if (e.area === 'board') v.onDeploy?.();
+          if (e.area === 'board') { v.onDeploy?.(); announceDeploy(v, e); }
           fx.promote(v, promoFrom.get(e.uid).filter((f) => Math.abs(f.x - w.x) + Math.abs(f.y - w.y) > 1e-3));
           promotions.push({ uid: e.uid, id: e.piece.id, area: e.area, row: e.row ?? null, col: e.col ?? null, idx: e.idx ?? null, copies: promoFrom.get(e.uid).length });
           if (promotions.length > 20) promotions.shift();
-        } else if (e.area === 'board' && prevBoard.size && !prevBoard.has(e.uid)) { v.onDeploy?.(); fx.deploy(v); }
+        } else if (e.area === 'board' && prevBoard.size && !prevBoard.has(e.uid)) { v.onDeploy?.(); announceDeploy(v, e); fx.deploy(v); }
         else if (before.length && (e.area === 'hand' || e.area === 'temp') && !before.some((g) => g.uid === e.uid)) fx.deploy(v);
       } else {
         const prevHome = v._home;
@@ -993,7 +1011,7 @@ export async function createFieldView(host, options = {}) {
           pending.delete(key);
           if (moved || Math.abs(v.x - w.x) + Math.abs(v.y - w.y) > 1e-3) v._tween = { fx: v.x, fy: v.y, fz: v.z, tx: w.x, ty: w.y, tz: w.z, t: 0 };
           v.lift = 0;
-          if (e.area === 'board' && !prevBoard.has(e.uid) && v.onDeploy) { v.onDeploy(); fx.deploy(v); }
+          if (e.area === 'board' && !prevBoard.has(e.uid) && v.onDeploy) { v.onDeploy(); announceDeploy(v, e); fx.deploy(v); }
         }
       }
       v._home = w;
@@ -1561,12 +1579,18 @@ export async function createFieldView(host, options = {}) {
       case 'deploy': {
         gone.delete(e[1]);
         const v = battleView(e[1]);
-        if (v) { v.onDeploy?.(); if (v.info?.kind !== 'device') fx.deploy(v); }
+        const isInitial = !!(e[2]?.initial || (typeof e[2] === 'object' && e[2]?.initial));
+        if (v) {
+          v.onDeploy?.();
+          if (!isInitial) announceDeploy(v, e);
+          if (v.info?.kind !== 'device' && !isInitial) fx.deploy(v);
+        }
         break;
       }
       case 'atk': {
         const src = views.get(e[1]) || battleView(e[1]);
         const tgt = views.get(e[2]) || battleView(e[2]);
+        if (tgt && !tgt.alive) break;
         // chain / chainHeal bounces: the "source" is the previous target of the bounce, not an attacker
         if (src && !CHAIN_KINDS.has(e[3])) src.onAttack?.(tgt, now, e[3]);
         if (e[3] === 'none' || !e[3]) { if (tgt && src) meleePending.set(tgt.id, { src, t: now }); }
@@ -1588,7 +1612,15 @@ export async function createFieldView(host, options = {}) {
       case 'die': {
         const v = views.get(e[1]);
         const used = consumedIds.delete(e[1]);
-        if (v && v.alive) { v.die(e[2] === FORCED_EXIT); if (showsDeathFx(v.info, used, e[2])) fx.death(v); }
+        if (v && v.alive) {
+          v.die(e[2] === FORCED_EXIT);
+          if (showsDeathFx(v.info, used, e[2])) fx.death(v);
+          for (const u of views.values()) {
+            if (u && u !== v && u.lastTargetId === v.id) {
+              u.finishAttack?.();
+            }
+          }
+        }
         break;
       }
       case 'leak': {

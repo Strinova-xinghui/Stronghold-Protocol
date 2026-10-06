@@ -460,6 +460,25 @@ p{margin:8px 0}a{color:#4ed8af}</style></head><body><main><h1>${status}</h1><p>$
 ${detail ? `<p style="opacity:.6">${escapeHtml(detail)}</p>` : ''}<p><a href="/">返回首页 · Back to home</a></p></main></body></html>`;
 }
 
+/**
+ * Whether a socket peer is this machine or a private network. `/lan/room` answers only to these, so a client
+ * reaching the server through a tunnel or a public interface cannot probe which room codes exist.
+ */
+function isPrivateAddress(addr) {
+  if (!addr) return false;
+  const a = String(addr).toLowerCase().replace(/^::ffff:/, '');
+  if (a === '::1') return true;
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(a);
+  if (v4) {
+    const o1 = +v4[1];
+    const o2 = +v4[2];
+    return o1 === 10 || o1 === 127 || (o1 === 192 && o2 === 168) || (o1 === 172 && o2 >= 16 && o2 <= 31)
+      || (o1 === 100 && o2 >= 64 && o2 <= 127) // RFC 6598 CGNAT (Tailscale, ZeroTier, UU 等虚拟专网)
+      || (o1 === 169 && o2 === 254);
+  }
+  return /^f[cd][0-9a-f]{1,2}:/.test(a); // IPv6 unique-local (fc00::/7)
+}
+
 function sendError(req, res, status, title, detail) {
   if (res.headersSent) { res.destroy(); return; }
   const body = Buffer.from(errorPage(status, title, detail));
@@ -522,6 +541,22 @@ export function createStaticHandler({ publicDir, dataDir, sharedDir, simDir = pa
       res.writeHead(200, headers);
       res.end(req.method === 'HEAD' ? undefined : shimBody);
       return;
+    }
+    if (decoded === '/sim/simdata.js') {
+      try {
+        const rawCode = await fsp.readFile(path.join(simDir, 'simdata.js'), 'utf8');
+        // Strip Node-only top-level await block so Chrome < 89 (e.g. Chrome 80-88 WebView) parses cleanly without 'Unexpected reserved word'
+        const browserCode = rawCode.replace(/if\s*\(\s*IS_NODE\s*\)\s*\{[\s\S]*?\n\}/, '/* browser: nodeLoader omitted (setSimData injects data) */');
+        const bBody = Buffer.from(browserCode);
+        const bTag = `"simdata-${bBody.length.toString(16)}"`;
+        const headers = { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-cache', ETag: bTag, 'Content-Length': bBody.length };
+        if (isNotModified(req, bTag, new Date(0))) { delete headers['Content-Length']; res.writeHead(304, headers); res.end(); return; }
+        res.writeHead(200, headers);
+        res.end(req.method === 'HEAD' ? undefined : bBody);
+        return;
+      } catch (err) {
+        log.warn?.('[static] failed to serve browser simdata', err);
+      }
     }
     // Extension-less audio (download-manager avoidance): /media/bgm/act1 → /assets/audio/bgm/act1.mp3
     if (decoded.startsWith(MEDIA_PREFIX)) {
@@ -823,6 +858,20 @@ export async function startServer(opts = {}) {
         .replace('__PHASE_NAMES__', JSON.stringify(PHASE_NAMES));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(html);
+      return;
+    }
+    // LAN room probe, so a guest can join with only the 4-letter key: the phone sweeps its own /24 and asks each
+    // server it finds whether that room is open. It answers with a yes/no plus seat counts — never a room list, and
+    // nothing at all to a peer outside the private ranges, so a public or tunnelled client cannot enumerate codes.
+    if (parts.rawPath === '/lan/room') {
+      if (!isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, '未找到 · Not found'); return; }
+      const code = String(new URLSearchParams(parts.query).get('code') || '').toUpperCase();
+      const room = /^[A-Z0-9]{4}$/.test(code) ? lobby.getRoom(code) : null;
+      if (!room || room.mode !== 'coop') { sendError(req, res, 404, '未找到 · Not found'); return; }
+      sendJson(req, res, 200, {
+        ok: true, code: room.code, mode: room.mode, difficulty: room.difficulty,
+        seats: room.seats.length, humans: room.seats.filter((s) => s && !s.isBot).length, inMatch: !!room.match,
+      });
       return;
     }
     await serveStatic(req, res, parts.rawPath, parts.query);

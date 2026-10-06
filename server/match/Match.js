@@ -297,6 +297,9 @@ export class Match {
     this.rngBots = rng('bots');
     this.rngMeta = rng('meta');
 
+    this._pubDirty = false;
+    this._privDirty = new Set();
+
     /** @type {Map<string, PlayerState>} */
     this.players = new Map();
     const seen = new Set();
@@ -448,6 +451,23 @@ export class Match {
     this.guard(() => {
       if (!ps.setLoadout(loadout)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
       this.markPrivate(ps);
+    });
+    return res;
+  }
+
+  /**
+   * room.skins during the match (docs/SKINS.md): replace a player's chosen operator skins.
+   * @param {string} playerId
+   * @param {Record<string, string> | null} skins
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  setSkins(playerId, skins) {
+    const ps = this.players.get(playerId);
+    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
+    let res = OK;
+    this.guard(() => {
+      ps.setSkins(skins);
+      this.markPublic();
     });
     return res;
   }
@@ -902,6 +922,7 @@ export class Match {
         fieldId: this.fieldOf(ps),
         status: this.statusOf(ps),
         autoplay: ps.autoplay,
+        ...(Object.keys(ps.skins).length ? { skins: ps.skins } : {}),
         // the LP this round's own battle will cost at settlement so far (COMBAT / 联防 only, omitted when 0)
         ...this._pendingLpView(ps),
       })),
@@ -948,7 +969,8 @@ export class Match {
     return previewOf([...this.wave.spawns, ...bounty]);
   }
 
-  /** UnitInfo list of a player's board (prep scouting). */
+  /** UnitInfo list of a player's board and hand (prep scouting): board pieces on their tiles, held pieces on the
+   *   hand row (row 7) — the scout renders like the own prep bench. */
   prepFieldMeta(ps) {
     const units = [];
     for (const { r, c, piece } of boardOrder(ps.board)) {
@@ -961,6 +983,7 @@ export class Match {
         id: piece.uid, uid: piece.uid, kind: piece.kind === 'token' ? 'token' : 'op', side: 'ally', ownerId: ps.playerId, defId: piece.id,
         name: rec ? rec.name : piece.id, tier: rec && Number.isInteger(rec.tier) ? rec.tier : 1, golden: !!(rec && rec.isGolden),
         spine: assets.spine || (rec && rec.charId) || piece.id, avatar: assets.avatar || (rec && rec.charId) || piece.id,
+        skin: piece.kind === 'chess' ? (ps.skins?.[rec?.baseId || piece.id] || ps.skins?.[piece.id]) : undefined,
         x: c, y: r, dir: pieceDir(piece), facing: pieceDir(piece) === 'LEFT' ? -1 : 1, maxHp: rec && rec.stats && Number.isFinite(rec.stats.maxHp) ? rec.stats.maxHp : 1,
         skillIndex: lo && Number.isInteger(lo.skillIndex) ? lo.skillIndex : undefined,
         moduleId: lo && typeof lo.moduleId === 'string' ? lo.moduleId : undefined,
@@ -968,19 +991,63 @@ export class Match {
         items: piece.kind === 'chess' && Array.isArray(piece.items) && piece.items.length ? piece.items.map((it) => it.id) : undefined,
       });
     }
+    // the hand (整备区) and the 临时整备区 scout exactly like the own prep bench renders them: pieces as units on
+    // their rows (hand row 7, col = hand slot; temp row 8, cols 4..8 = temp slots; no dir — bench pieces face right),
+    // items included (the client draws their floating plates). PRTS 帮助 counts the temp area with the hand (review of
+    // PR #129). Part of the meta for every watcher alike — the spectator seat's copy equals a teammate's
+    // (test/match/spectator.test.js). User playtest #2 item 1 (GitHub #44).
+    const benchUnit = (piece, i, y) => {
+      const rec = piece.kind === 'item' ? this.gd.item(piece.id) : piece.kind === 'token' ? this.gd.token(piece.id) : this.gd.chess(piece.id);
+      const assets = (rec && rec.assets) || {};
+      const lo = piece.kind === 'chess' && rec ? ps.loadoutFor(rec) : null;
+      units.push({
+        id: piece.uid, uid: piece.uid, kind: piece.kind === 'token' ? 'token' : piece.kind === 'item' ? 'item' : 'op',
+        side: 'ally', ownerId: ps.playerId, defId: piece.id,
+        name: rec ? rec.name : piece.id, tier: rec && Number.isInteger(rec.tier) ? rec.tier : 1, golden: !!(rec && rec.isGolden),
+        spine: assets.spine || (rec && rec.charId) || piece.id, avatar: assets.avatar || (rec && rec.charId) || piece.id,
+        skin: piece.kind === 'chess' ? (ps.skins?.[rec?.baseId || piece.id] || ps.skins?.[piece.id]) : undefined,
+        x: i, y, maxHp: rec && rec.stats && Number.isFinite(rec.stats.maxHp) ? rec.stats.maxHp : 1,
+        skillIndex: lo && Number.isInteger(lo.skillIndex) ? lo.skillIndex : undefined,
+        moduleId: lo && typeof lo.moduleId === 'string' ? lo.moduleId : undefined,
+        items: piece.kind === 'chess' && Array.isArray(piece.items) && piece.items.length ? piece.items.map((it) => it.id) : undefined,
+      });
+    };
+    for (let i = 0; i < ps.hand.length; i++) {
+      if (ps.hand[i]) benchUnit(ps.hand[i], i, GEO.HAND_ROW);
+    }
+    for (let i = 0; i < ps.temp.length; i++) {
+      if (ps.temp[i]) benchUnit(ps.temp[i], GEO.TEMP_C0 + i, GEO.TEMP_ROW);
+    }
     // `nextEnemies`: the scouted player's coming enemies — their preview pen shows on the scouting board too (research 09
     // §2.2 "Teammates"; render/app.js enterBattle({ prep: true, nextEnemies }))
     let nextEnemies = [];
     try { nextEnemies = this.nextEnemiesFor(ps); } catch (e) { this.reportError('nextEnemies', e); }
-    return { t: 'm.field', fieldId: `n:${ps.playerId}`, kind: 'normal', rect: { ...GEO.NORMAL_RECT }, stageId: this.stageId, units, prep: true, nextEnemies };
+    // the scouted player's effects column (策略 / 机变 / 悬赏 …), display-ready (user playtest #2: while scouting, the
+    // right column shows the watched player's effects, not one's own)
+    return { t: 'm.field', fieldId: `n:${ps.playerId}`, kind: 'normal', rect: { ...GEO.NORMAL_RECT }, stageId: this.stageId, units, effects: ps.effectsView(), prep: true, nextEnemies };
   }
 
-  /** Board signature of a prep scout view (units only: a shop or funds change is not a board change). */
+  /** Board signature of a prep scout view (units and hand: a shop or funds change is not a board change). */
+  /** Board signature of a prep scout view (board, hand and temp rows: a shop or funds change is not a board change).
+   *  Hand / temp entries carry their slot — `prepFieldMeta` draws x from it, so a piece moved to another slot is a
+   *  change (review of PR #129). */
   _prepScoutSig(ps) {
     const parts = [];
     for (const { r, c, piece } of boardOrder(ps.board)) {
       const items = piece.kind === 'chess' && Array.isArray(piece.items) ? piece.items.map((it) => `${it.uid}:${it.id}`).join(',') : '';
       parts.push(`${piece.uid}:${piece.id}@${r},${c}:${pieceDir(piece)}:${items}`);
+    }
+    for (let i = 0; i < ps.hand.length; i++) {
+      const piece = ps.hand[i];
+      if (!piece) continue;
+      const items = piece.kind === 'chess' && Array.isArray(piece.items) ? piece.items.map((it) => `${it.uid}:${it.id}`).join(',') : '';
+      parts.push(`h${i}:${piece.uid}:${piece.id}:${items}`);
+    }
+    for (let i = 0; i < ps.temp.length; i++) {
+      const piece = ps.temp[i];
+      if (!piece) continue;
+      const items = piece.kind === 'chess' && Array.isArray(piece.items) ? piece.items.map((it) => `${it.uid}:${it.id}`).join(',') : '';
+      parts.push(`t${i}:${piece.uid}:${piece.id}:${items}`);
     }
     return parts.join(';');
   }

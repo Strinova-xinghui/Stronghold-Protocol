@@ -1,6 +1,6 @@
 {
   "name": "stronghold-protocol-alliance",
-  "version": "0.1.3",
+  "version": "0.1.6-pre-skin",
   "private": true,
   "description": "明日方舟「卫戍协议：盟约」非官方同人联机网页复刻（1–4 人合作，Node.js 服务器 + 浏览器客户端）",
   "license": "GPL-3.0-or-later",
@@ -32,7 +32,10 @@
     "postinstall": "node tools/vendor.mjs",
     "setup": "node tools/setup.mjs",
     "doctor": "node tools/doctor.mjs",
-    "launch": "node scripts/launch.mjs"
+    "launch": "node scripts/launch.mjs",
+    "bundle:android": "node tools/bundle-android.mjs",
+    "build:android": "node scripts/build-android.mjs",
+    "voices": "node tools/fetch-bilingual-voices.mjs"
   },
   "engines": {
     "node": ">=22"
