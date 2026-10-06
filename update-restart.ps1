@@ -1,4 +1,4 @@
-# 卫戍协议 —— 安全换装重启：只在没有进行中对局时才重启服务器（matches == 0）
+﻿# 卫戍协议 —— 安全换装重启：只在没有进行中对局时才重启服务器（matches == 0）
 # 用法: 双击 update-restart.bat，或 powershell -File update-restart.ps1 [-Port 24500]
 # 对局进行中(matches>0)时什么都不做，绝不坑到在线玩家；大厅/挂机状态会被断开(可重连)。
 param([int]$Port = 24500)
