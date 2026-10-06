@@ -62,6 +62,14 @@
 - `update-restart.ps1` 安全重启逻辑：查 `/healthz` → `matches > 0` 时**拒绝重启**（打印对局数，exit 1，绝不坑在线玩家）→ `matches == 0` 时杀旧进程拉新代码 → 健康检查通过才报成功。
 - 使用：对局间隙双击 `update-restart.bat` 即可换代（监控器/盟约加成/未来一切服务器改动通用）。
 
+### 上游同步方法论（2026-10-06 定稿，下次直接照做）
+
+- **同步流程**：① `api.github.com` 查远程 HEAD（github.com 直连常被墙，codeload/api/jsDelivr 可用）→ ② `codeload.github.com/.../tar.gz/<sha>` 下载精确 commit 的 tarball → ③ 解压后 robocopy 覆盖（**绝不用 /MIR**！）→ ④ `git status` 审查 → 恢复被覆盖的自研文件 → ⑤ 跑关键测试 → 提交。
+- **血的教训（robocopy /MIR 事故）**：`/MIR` 会把上游没有的本地文件全部删除（AGENTS.md、自有脚本、测试工具等 14 个文件被删）。**永远用 `/E`（只增改不删）代替 `/MIR`**；被删文件靠 `git checkout HEAD -- <paths>` 秒回，git 提交纪律再次救场。
+- **自研文件清单（同步后必须逐个验证仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`scripts/register-wake.*`、`scripts/uninstall-task.*`、`scripts/wake-start.ps1`、`tools/test-monitor.mjs`、`tools/test-bond-boost-math.mjs`；`server/index.js`（monitor）、`server/match/pool.js`+`PlayerState.js`+`Match.js`（bondBoost）中的自研代码。
+- **冲突判断**：先从 API 查上游 commit 动了哪些文件；上游没动的文件，自研版本直接 `git show <commit>:<path> > <path>` 恢复即零冲突。本轮上游 4 个 commit（d582925/f6f5ed5/f6794a2/19a8908）均未触碰 server/，恢复无冲突。
+- **验证三件套**：`node --check` 逐文件语法 → `node --test test/match/pool.test.js`（10/10）+ `node tools/test-bond-boost-math.mjs`（PASS）→ 临时端口起服打 `/monitor?json`。
+
 ## 4. 和朋友一起玩（2026-10-05 实测：Cloudflare 临时隧道已打通）
 
 ### 公网联机（朋友零安装，当前采用）
