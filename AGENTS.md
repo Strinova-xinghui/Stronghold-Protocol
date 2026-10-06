@@ -118,6 +118,49 @@
 - **合并/同步后必跑：`node tools/check-missing-imports.mjs`**（扫描「被调用但未导入且未定义」的符号）。**血案（2026-10-06 `voiceKey is not defined`）**：合并 fork 0.1.6 时，`game.js` 取了 fork 的代码（调用 `voiceKey` 3 处：选中/部署/卖人路径），但同一文件我改回了我方 import、`audio.js` 也退回我方版本（不导出该符号）→ 运行时 ReferenceError，表现为「卖不了人」等操作失败。**教训：解决冲突要按「符号依赖」判断，不能按「文件」判断**——取了一侧的代码，就必须补齐它依赖的导入/导出；合并后立刻跑扫描器 + 用无头浏览器走一遍真实操作路径。
 - **目录变更注意**：上游同步曾把 `public/vendor/` 清空（不进 git，靠 postinstall 重建），症状 = 游戏页加载到一半报「游戏脚本加载失败」；修复 = `node tools/vendor.mjs`，无需回退代码。
 
+### 不打扰线上玩家的验证方法论（2026-10-06 定稿，必读）
+
+> **概念澄清**：隔离验证**不是**「另开一个浏览器 profile 换端口」——那是同一份代码、同一个进程目录，只是换个入口，改代码照样影响线上服。真正的隔离是**另开一份代码副本**，端口只是第二道保险。
+
+- **机制：git worktree（独立代码副本）+ 独立端口**，两层都要有：
+  1. **代码层（关键）**：`git worktree add --detach E:\sp6p-verify HEAD` —— 在仓库外开一份**独立检出**，在副本里随便改、随便起服，主工作区与线上进程**完全不受影响**。验证完 `git worktree remove --force <path>` 一键清除，主仓库零残留。
+  2. **进程/端口层**：副本里用 `PORT=24599`（避开线上的 24500），`SP_MAX_SEATS=6` 等环境变量只作用于这个进程。
+- **省掉 86 MB 重装**：副本里用 **junction 复用主仓库依赖**（不要 `npm install`）：
+  `New-Item -ItemType Junction -Path <副本>\node_modules -Target E:\卫戍协议\node_modules`；`public/vendor`（不进 git，靠 postinstall 重建）同理 junction 复用。
+- **动手前的三条铁律**：
+  1. 先查线上状态：`curl.exe -s http://127.0.0.1:24500/healthz` —— 看到 `matches > 0` 说明**有真实对局在进行**，绝不在主工作区改代码 / 重启服。
+  2. 改代码前 `git status --porcelain` 必须为空（干净），否则先提交或 stash，避免把未完成改动混进验证。
+  3. **日志目录先建再起进程**：`Start-Process -RedirectStandardOutput` 在目录不存在时会直接失败（本次踩坑）；先 `New-Item -ItemType Directory -Force`。
+- **起副本服**（`Start-Process` 的日志重定向路径必须已存在）：
+  `$env:SP_MAX_SEATS='6'; $env:PORT='24599'; $env:HOST='127.0.0.1'; Start-Process node -ArgumentList "server/index.js" -WorkingDirectory <副本> -PassThru -WindowStyle Hidden -RedirectStandardOutput <副本>\.cache\s6.out.log -RedirectStandardError <副本>\.cache\s6.err.log`
+- **收尾必做**：① 按端口精确停服（`Get-NetTCPConnection -LocalPort 24599 -State Listen` → 只杀 `node`），**不要**用 `taskkill /IM node.exe`（会连线上服一起杀）；② 复查 `curl` 线上 24500 仍 200 且 `matches` 数未变；③ `git worktree remove --force`；④ 主工作区 `git status` 仍干净。
+- **验证分层（性价比从高到低）**：`node --check` 语法 → `node --test` 单测 → 副本起服打 `/healthz` 看新字段（如 `maxSeats:6`）→ **真实 WebSocket 走一遍完整路径**（用仓库自带 `test/helpers/wsClient.js` 的 `TestClient`，别手写协议：回包类型是 `t:'ok'|'error'|'welcome'`，`room.state` 载荷是**顶层展开**（`m.seats`/`m.code`），不是 `m.room.*`）。
+- 本次实战记录：6 人联机改动在副本里 **46/46 锚点全中**、`seats6.test.js` 10/10、核心回归 87/87、自研甄选 9/9、真实 WS 建房 6 座全通；线上 4 人局全程 `uptime` 未中断。
+- **⚠️ 删除副本的致命细节**：副本里 `node_modules` / `public/vendor` 是指向主仓库的 **junction**，`Remove-Item -Recurse -Force` **会跟进删除主仓库的依赖**！`git worktree remove --force` 也会残留 junction 目录。正确做法：先 `Get-Item <副本>\node_modules -Force` 确认 Target，再用 **`cmd /c rmdir /s /q <副本>`**（rmdir 不跟进 junction），最后复查主仓库 `node_modules` 文件数正常。
+
+### 第三方「6 人联机」包调研（2026-10-06 定稿，结论：可移植，待用户决定是否落实）
+
+- **来源**：`D:\Download\Stronghold-Protocol-v0.1.2(gai (2).zip`（306 MB，13,312 条目）。基于**上游 v0.1.2** 的第三方改版，自带 `docs/6人版与原版的差别.md`。**无 `.git`**，是纯源码快照。
+- **核心机制**：**不用改代码，只加一个启动开关 `SP_MAX_SEATS=6`**（默认不设 = 官方 4 人，逐字节等同原版）。`/healthz` 新增 `maxSeats` 字段自证。
+- **改动集（相对 59e5ff0/111e918 基线，共 16 个既有文件 + 2 个新文件，全部是加性小改）**：
+  - 新文件 `server/match/scaling.js`（67 行，三个纯函数 + 常量）、`test/match/seats6.test.js`（188 行，10 个测试）。
+  - `shared/constants.js`：`MAX_SEATS_LIMIT = 6` + `setMaxSeats()`（模块级可变值，默认 4）。
+  - `shared/protocol.js`：`RESULT_LIMITS` 由 `Object.freeze` 改为**可变对象** + `setSeatLimit()`；`room.removeBot` 的 seat 上界由 `MAX_SEATS-1` 改为 `RESULT_LIMITS.players-1`。
+  - `server/index.js`：读 `SP_MAX_SEATS`（仅接受 2–6，非法直接 throw）→ `lobbyOptions.maxSeats`。
+  - `server/lobby.js`：`LOBBY_DEFAULTS.maxSeats`、`Room` 座位数组按 `maxSeats` 分配、`room.state` 携带 `maxSeats`、`Lobby` 构造器 clamp + `setSeatLimit`、`stats()` 加 `maxSeats`。
+  - `server/match/Match.js`：`this.seatCount = players.size`，传给 `drawDisabledBonds` / `SharedPool` / `bossPoolHp`。
+  - `server/match/gamedata.js`：`poolCopies(id, players)`、`bans(difficulty, players)`、`bossPoolHp(id, alive, players)` 三个签名加可选参数（默认 0 ⇒ 原版值）。
+  - `server/match/pool.js`：`drawDisabledBonds(gd, rng, {players})`、`SharedPool(gd, {banned, players})`。
+  - `server/match/finalAssault.js` / `audit.js`：`bossPoolHp` 透传 `players` / `m.seatCount`。
+  - 客户端 4 处：`screens/room.js` 新增 `seatCapacity()`（从 `room.state.maxSeats` 读容量，`normalizeSeats` 用它）、`net.js` 收到 `room.state` 时 `setSeatLimit`、`battle/runner.js` 两处 `slice(0,4)` 改 `RESULT_LIMITS.players`、`ui/gameComponents.js` 座位色 `[162,196,38,280]` → 6 色 `SEAT_HUES`、`css/screens/room.css` 座位网格 `repeat(4,…)` → `repeat(auto-fit,…)`。
+- **两条数值规则（只在 >4 人时生效，≤4 时每个系数恒为 1）**：
+  1. **共享干员池按人数放大**：`× 人数/4`（5 人 ×1.25、6 人 ×1.5）。按干员单独设定的份数（如缪尔赛思固定 4）属内容设定，**不放大**。
+  2. **领袖血条按战场数放大**：6 人分 **3 个战场**（`b1/b2/b3`，每队 2 人一张图），`× 1.5`；**全队仍共用同一条血条与同一个 LP**。淘汰不会让血条缩水。
+  3. 附带：**>4 人时主/副盟约各少 ban 一个**（绝境 4 人 `core3+addon4` → 6 人 `core2+addon3`）。
+- **移植可行性（已实证，非推测）**：在 git worktree 副本里把整套改动打到我们 **v0.1.6-pre-skin** 上 → **46/46 锚点全中**（唯一需调整的是 `shared/constants.js`，因为上游 0.1.3+ 在 `MAX_SEATS` 与 `ROOM_CODE_LEN` 之间插入了 `MAX_SPECTATORS`）；`seats6.test.js` **10/10**、核心回归 **87/87**、自研甄选 **9/9**、真实 WS 建房 6 座全通（`maxSeats:6`、第 7 个被 `ROOM_FULL`、`removeBot seat:5` 通过而 `seat:6` 被 `BAD_MSG` 拒、`room.start` 成功）。**与我们自研的 monitor / 定向甄选改动零重叠**。
+- **结论**：**值得移植**（小、加性、默认关闭、自带测试、4 人行为逐字节不变）。**移植时机必须在无对局时**（改 server/ 代码要重启进程）。**待用户拍板是否落实**。
+- **无需移植的部分**：字体（我们已有）、`cheats` 作弊层（作者已在包内自行删除，只剩占位文件）、Docker/CI 改动（与 6 人无关）。
+
 ### 一键开服/关服（2026-10-06 定稿，完全脱离 DSH）
 
 - **开服**：双击 `start-online.bat`（脚本内已固化 `$env:SP_BOND_BOOST='2'`，盟约加成默认开）。所有打印地址以 frp-way.com:17913 为主力。
