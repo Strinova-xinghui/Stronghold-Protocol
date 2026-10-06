@@ -72,7 +72,7 @@ if (-not $Tunnel) {
     Write-Host "本机游玩: http://localhost:$chosen"
     Write-Host '关服: 关闭弹出的服务器窗口（可最小化，别关）。'
     # 固定网址自动进剪贴板：Ctrl+V 直接发朋友，不用手动选中复制
-    $invite = '浏览器(电脑/iOS/安卓): https://frp-end.com:15810' + "`r`n" +
+    $invite = '浏览器(电脑/iOS/安卓): https://frp-way.com:17913' + "`r`n" +
               '安卓APK: http://frp-cup.com:30756（延迟较高）' + "`r`n" +
               '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
     Set-Clipboard -Value $invite
@@ -109,10 +109,10 @@ if ($url) {
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
     Write-Host "  $url" -ForegroundColor Cyan
-    # 樱花 frp 固定网址（frpc 由官方守护进程服务管理，开机自启，地址永久不变）
+    # 樱花 frp 固定网址（frpc 由官方守护进程服务管理，开机自启，地址不变）
     $frpc = Get-Process frpc -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($frpc) {
-        Write-Host "  [樱花frp 在线] 固定网址发给朋友（浏览器: https://frp-end.com:15810 · APK: http://frp-cup.com:30756）" -ForegroundColor Cyan
+        Write-Host "  [樱花frp 在线] 固定网址发给朋友（浏览器: https://frp-way.com:17913 · APK: http://frp-cup.com:30756）" -ForegroundColor Cyan
     } else {
         Write-Host "  [樱花frp 未运行] 固定网址暂不可用——请检查 natfrp 守护进程服务是否在跑" -ForegroundColor Yellow
     }
