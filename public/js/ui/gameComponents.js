@@ -238,6 +238,13 @@ export function RichTip({ text, children, placement = 'top' }) {
 }
 
 /**
+ * Seat colours (`.pavatar { --seat-hue }`), one per co-op seat: 4 by default, and 6 distinct hues so a room run with
+ * SP_MAX_SEATS=6 never shows two players the same colour (avatars, team rows and the draft's who-picked markers all
+ * read the player's `seat`).
+ */
+const SEAT_HUES = Object.freeze([162, 196, 38, 280, 220, 320]);
+
+/**
  * Seat-coloured player avatar: band icon when a band is picked, else glyph/robot.
  * @param {{ player: any, size?: 'sm'|'md', self?: boolean, class?: string }} props
  */
@@ -246,7 +253,7 @@ export function PlayerAvatar({ player, size = 'md', self = false, class: cls }) 
   const glyph = [...(player?.name || '').trim()][0] || '?';
   const dead = player?.alive === false || player?.status === 'dead';
   const left = player?.status === 'left';
-  const hue = [162, 196, 38, 280][((player?.seat | 0) % 4 + 4) % 4];
+  const hue = SEAT_HUES[((player?.seat | 0) % SEAT_HUES.length + SEAT_HUES.length) % SEAT_HUES.length];
   return html`<span class=${cx('pavatar', `pavatar--${size}`, self && 'is-self', dead && 'is-dead', left && 'is-left', player?.isBot && 'is-bot',
       player?.connected === false && !player?.isBot && 'is-offline', cls)} style=${`--seat-hue:${hue}`}>
     <span class="pavatar__img">

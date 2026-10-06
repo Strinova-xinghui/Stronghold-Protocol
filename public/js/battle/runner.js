@@ -64,7 +64,7 @@
 
 import { net as appNet } from '../net.js';
 import { store as appStore } from '../store.js';
-import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
+import { unitStatsEntry, fxForm, RESULT_LIMITS } from '../../../shared/protocol.js';
 import { spectateEffects } from './observe.js';
 
 const TICK = 1 / 30;
@@ -442,13 +442,13 @@ export function createBattleRunner(deps) {
       msg.bossDmg = pool && Number.isFinite(pool.cum) ? pool.cum : 0;
       if (pool && pool.byPlayer) {
         const by = {};
-        for (const pid of Object.keys(pool.byPlayer).slice(0, 4)) by[pid] = pool.byPlayer[pid];
+        for (const pid of Object.keys(pool.byPlayer).slice(0, RESULT_LIMITS.players)) by[pid] = pool.byPlayer[pid];
         msg.by = by;
       }
     } else {
       msg.leaks = Math.min(1e6, p.leaks);
       // 联防: the leakers' enemies still standing (shared/protocol.js b.progress `left`, ≤ 4 players)
-      if (p.left) msg.left = Object.fromEntries(Object.entries(p.left).slice(0, 4));
+      if (p.left) msg.left = Object.fromEntries(Object.entries(p.left).slice(0, RESULT_LIMITS.players));
     }
     try { net.send('b.progress', msg); } catch { /* offline */ }
   }

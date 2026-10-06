@@ -20,6 +20,7 @@ import { StubMatch as Match } from '../server/match/StubMatch.js';
 import { Match as RealMatch } from '../server/match/Match.js';
 import { TestClient } from './helpers/wsClient.js';
 import { ERR, MAX_SEATS, MAX_SPECTATORS, PHASE, EMOTES } from '../shared/constants.js';
+import { RESULT_LIMITS, setSeatLimit } from '../shared/protocol.js';
 
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{4}$`);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -610,6 +611,7 @@ describe('websocket lobby', () => {
     const late = await pool.player('Late');
     await expectError(late, { t: 'room.join', code: st.code }, ERR.ROOM_FULL);
     await expectError(host, { t: 'room.addBot' }, ERR.ROOM_FULL);
+    assert.equal(st.maxSeats, MAX_SEATS, 'the room reports the capacity the server was started with');
 
     const solo = await pool.player('Solo');
     const soloState = await createRoom(solo, 'solo', 'FUNNY');
@@ -1520,6 +1522,63 @@ class ReplayMatch extends Match {
     this.onEndFn({ victory: true });
   }
 }
+
+// ---------------------------------------------------------------------------------------------------
+// 6-seat co-op (SP_MAX_SEATS=6): the room holds six doctors, and the match they start is scaled for six
+// ---------------------------------------------------------------------------------------------------
+
+describe('6-seat co-op room', () => {
+  let srv;
+  let pool;
+  const cap = captureLog();
+
+  before(async () => {
+    // the server boot option the SP_MAX_SEATS environment variable feeds (server/index.js)
+    srv = await startServer({ port: 0, host: '127.0.0.1', log: cap.log, MatchClass: RealMatch, seedFn: () => 77777, maxSeats: 6 });
+    pool = clientPool(() => `ws://127.0.0.1:${srv.port}/ws`);
+  });
+  afterEach(async () => { await pool.closeAll(); });
+  after(async () => {
+    await srv?.close();
+    setSeatLimit(MAX_SEATS); // the seat bounds are module state: put them back for whatever runs next
+    assert.deepEqual(cap.errors, [], 'no server errors logged');
+  });
+
+  test('six doctors fill the room, a seventh is refused, and the match starts with six seats', async () => {
+    const host = await pool.player('Host');
+    const st = await createRoom(host, 'coop', 'HARD');
+    assert.equal(st.maxSeats, 6, 'the room reports six seats');
+    assert.equal(st.seats.length, 6, 'six seat slots, not four');
+    assert.deepEqual(st.seats.slice(1), [null, null, null, null, null]);
+
+    const guests = [];
+    for (let i = 1; i <= 5; i++) {
+      const g = await pool.player(`G${i}`);
+      const view = await joinRoom(g, st.code);
+      assert.equal(seatOf(view, g.id).seat, i, `guest ${i} takes seat ${i}`);
+      guests.push(g);
+    }
+    const full = await host.waitFor('room.state', (s) => s.seats.every(Boolean));
+    assert.equal(full.seats.filter((s) => s && !s.isBot).length, 6);
+
+    const late = await pool.player('Late');
+    await expectError(late, { t: 'room.join', code: st.code }, ERR.ROOM_FULL);
+    await expectError(host, { t: 'room.addBot' }, ERR.ROOM_FULL);
+
+    // the host never toggles ready: starting the match is the host's ready (server rule), so only the guests do
+    for (const g of guests) {
+      await expectOk(g, { t: 'room.ready', ready: true });
+      await host.waitFor('room.state', (s) => seatOf(s, g.id)?.ready === true);
+    }
+    await expectOk(host, { t: 'room.start' });
+
+    const match = srv.lobby.getRoom(st.code).match;
+    assert.ok(match, 'the match started');
+    assert.equal(match.seatCount, 6, 'and it knows it has six seats');
+    assert.equal(match.players.size, 6);
+    assert.equal(RESULT_LIMITS.players, 6, 'the seat bounds were raised server-side');
+  });
+});
 
 describe('match result replay', () => {
   let srv;

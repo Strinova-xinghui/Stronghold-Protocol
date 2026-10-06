@@ -41,14 +41,14 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 3.8rem));
-  grid-template-rows: minmax(0, 6rem);
+  grid-template-columns: repeat(auto-fit, minmax(0, 3.8rem));
+  grid-auto-rows: minmax(0, 1fr);
   justify-content: center;
   align-content: center;
   gap: .3rem;
   padding: .3rem .6rem .24rem;
 }
-.seats--solo { grid-template-columns: 3.8rem minmax(0, 6.4rem); }
+.seats--solo { grid-template-columns: 3.8rem minmax(0, 6.4rem); grid-auto-rows: auto; }
 
 .seat {
   --bk-c: var(--line-3);

@@ -309,6 +309,11 @@ export class Match {
       this.players.set(s.playerId, new PlayerState(this, s));
     }
     if (!this.players.size) throw new TypeError('Match: seats required');
+    /**
+     * Seats this match started with (humans + AI). >4 scales the 牌库 copies and the shared leader HP pool
+     * (server/match/scaling.js); at ≤4 every factor is 1 and the match is the original one.
+     */
+    this.seatCount = this.players.size;
     this.order = [...this.players.values()].sort((a, b) => a.seat - b.seat);
     /**
      * Spectator seats (opts.spectators / addSpectator): playerId → a stand-in every watch path treats like an eliminated
@@ -331,11 +336,11 @@ export class Match {
     this.factions = setup.factions;
     this.bossId = setup.bossId;
     this.hiddenBossId = setup.hiddenBossId;
-    const bans = drawDisabledBonds(this.gd, this.rngSetup);
+    const bans = drawDisabledBonds(this.gd, this.rngSetup, { players: this.seatCount });
     this.disabledBonds = bans.drawn;
     this.staticInactiveBonds = bans.staticOff;
     this.bannedChess = bans.banned;
-    this.pool = new SharedPool(this.gd, { banned: bans.banned });
+    this.pool = new SharedPool(this.gd, { banned: bans.banned, players: this.seatCount });
 
     // house rule (SP_BOND_BOOST env, default off): shop rolls weight the player's most-activated bond's chess ×mult.
     // Only the draw is re-weighted — pool copies, bans, merges, every invariant stay untouched. 1 / 0 / unset = off.
@@ -3005,7 +3010,7 @@ export class Match {
     // the pool's own per-player tally, one pool per boss round. stats.bossDamage (the result's 领袖伤害) adds up both
     // rounds, so it would credit the Final Assault's damage to the hidden leader ("隐藏boss还没打就出了50%播报").
     const hitSteps = new Map();
-    const pool = new SharedBossPool(bossPoolHp(this.gd, bossId, alive.length), {
+    const pool = new SharedBossPool(bossPoolHp(this.gd, bossId, alive.length, this.seatCount), {
       onHit: (pid, dmg) => {
         const ps = this.players.get(pid);
         if (!ps) return;

@@ -42,7 +42,7 @@ import { WebSocketServer } from 'ws';
 import { Network, SessionRegistry, NET_DEFAULTS } from './net.js';
 import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
-import { PROTOCOL_VERSION, APP_VERSION, PHASE, PHASE_NAMES } from '../shared/constants.js';
+import { PROTOCOL_VERSION, APP_VERSION, PHASE, PHASE_NAMES, MAX_SEATS_LIMIT } from '../shared/constants.js';
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
 
 /**
@@ -810,6 +810,16 @@ export async function startServer(opts = {}) {
   const lobbyOptions = {};
   for (const k of ['lobbyGraceMs', 'maxRooms', 'maxRoomsPerAddr', 'maxMatchesPerAddr', 'resyncMinGapMs', 'soloReconnectWindowMs']) {
     if (opts[k] != null) lobbyOptions[k] = opts[k];
+  }
+  // Co-op seats (SP_MAX_SEATS=6): the seat-derived protocol bounds (setSeatLimit) and the client's seat grid
+  // (room.state.maxSeats) follow this same value, so ≤4 stays exactly the original game.
+  if (opts.maxSeats != null) lobbyOptions.maxSeats = opts.maxSeats;
+  else if (process.env.SP_MAX_SEATS != null && process.env.SP_MAX_SEATS !== '') {
+    const n = Number(process.env.SP_MAX_SEATS);
+    if (!Number.isInteger(n) || n < 2 || n > MAX_SEATS_LIMIT) {
+      throw new RangeError(`invalid SP_MAX_SEATS ${process.env.SP_MAX_SEATS} (an integer 2..${MAX_SEATS_LIMIT}; leave unset for 4)`);
+    }
+    lobbyOptions.maxSeats = n;
   }
   const lobby = new Lobby({ registry, log, MatchClass: opts.MatchClass, getData: () => data, seedFn: opts.seedFn, options: lobbyOptions });
   const network = new Network({ registry, handler: lobby, log, options: netOptions });

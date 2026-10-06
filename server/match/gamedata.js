@@ -13,6 +13,7 @@
 
 import { getConfig, getMode } from '../data.js';
 import { isShopItem } from '../sim/simdata.js';
+import { poolCopyMulFor, bossPoolShareFor, coopBansFor } from './scaling.js';
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -119,13 +120,13 @@ export class GameData {
    * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
    * @returns {number}
    */
-  bossPoolHp(bossId, aliveCount) {
+  bossPoolHp(bossId, aliveCount, players = 0) {
     const boss = this.boss(bossId);
     const diff = this.difficulty;
     let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
     if (base == null && boss && boss.bloodPoint) base = Object.values(boss.bloodPoint).find((v) => Number.isFinite(v)) ?? null;
     if (base == null) base = 500000;
-    return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount)));
+    return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount) * bossPoolShareFor(players)));
   }
 
   /**
@@ -252,14 +253,20 @@ export class GameData {
     };
   }
 
-  /** Copies of a base chess in the shared pool. */
-  poolCopies(baseId) {
+  /**
+   * Copies of a base chess in the shared pool. `players` (>4 only, server/match/scaling.js poolCopyMulFor) scales the
+   * per-tier value for a bigger room; per-chess overrides are content rules and are never scaled.
+   * @param {string} baseId
+   * @param {number} [players] seated players (≤4 ⇒ the original value)
+   */
+  poolCopies(baseId, players = 0) {
     const ov = this.economy.poolCopiesOverrides;
     if (ov && typeof ov === 'object' && Number.isInteger(ov[baseId]) && ov[baseId] >= 0) return ov[baseId];
     const tier = this.tierOf(baseId);
     const pc = this.economy.poolCopies;
     const v = pc && typeof pc === 'object' ? pc[tier] : undefined;
-    return Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
+    const base = Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
+    return Math.round(base * poolCopyMulFor(players));
   }
 
   /** Copies needed to merge (0 = never merges: golden chess). */
@@ -421,7 +428,9 @@ export class GameData {
       difficulties: Array.isArray(h.difficulties) ? h.difficulties : DEFAULTS.hiddenCore.difficulties,
     };
   }
-  bans(difficulty) {
+  bans(difficulty, players = 0) {
+    const six = coopBansFor(players);
+    if (six) return six;
     const b = this.config.bans && this.config.bans[difficulty];
     const d = DEFAULTS.bans[difficulty] || { core: 0, addon: 0 };
     if (!b || typeof b !== 'object') return { ...d };

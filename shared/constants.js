@@ -5,7 +5,23 @@ export const PROTOCOL_VERSION = 1;
  * (test/version.test.js); PROTOCOL_VERSION above is the separate wire-format number. */
 export const APP_VERSION = '0.1.6-pre-skin';
 
+/**
+ * Co-op seats in one 同盟 room — 4 by default (the official mode's team size, and what every rule below assumes).
+ * A server started with the environment variable `SP_MAX_SEATS=6` raises it at boot (server/index.js reads it and
+ * server/lobby.js calls `setMaxSeats`; the client pads its seat grid to whatever `room.state.maxSeats` reports, so it
+ * follows the server rather than this constant). ≤4 players is byte-for-byte the original behaviour: the pool copies
+ * (gamedata.poolCopies) and the shared leader pool (gamedata.bossPoolShare) only scale above 4 players.
+ */
 export const MAX_SEATS = 4;
+/** Largest seat count `SP_MAX_SEATS` may select (a 3-pair Final Assault is the widest field layout supported). */
+export const MAX_SEATS_LIMIT = 6;
+/** The seat count the running server accepts; the server raises it to `SP_MAX_SEATS` at boot, tests keep 4. */
+export function setMaxSeats(n) {
+  if (!Number.isInteger(n) || n < 1 || n > MAX_SEATS_LIMIT) throw new RangeError(`maxSeats must be an integer 1..${MAX_SEATS_LIMIT}`);
+  setMaxSeats.value = n;
+  return n;
+}
+setMaxSeats.value = MAX_SEATS;
 /**
  * Spectator seats of a co-op room (community report #26, owner's decision 2026-10-04) — a remake feature: the official
  * room has 1–4 players and no spectator seat (there only eliminated players and 联防 bystanders watch, research 09 §3.1).

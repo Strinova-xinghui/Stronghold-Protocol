@@ -29,7 +29,7 @@ import { difficultyInfo } from './lobby.js';
  * @returns {(null | {seat:number, playerId:any, name:string, isBot:boolean, ready:boolean, connected:boolean})[]}
  */
 export function normalizeSeats(room) {
-  const cap = room?.mode === 'solo' ? 1 : MAX_SEATS;
+  const cap = room?.mode === 'solo' ? 1 : seatCapacity(room);
   const src = Array.isArray(room?.seats) ? room.seats : [];
   const out = [];
   for (let i = 0; i < cap; i++) {
@@ -37,6 +37,13 @@ export function normalizeSeats(room) {
     out.push(s && typeof s === 'object' ? { ...s, seat: Number.isInteger(s.seat) ? s.seat : i } : null);
   }
   return out;
+}
+
+/** Co-op capacity of a room.state frame: the server's `maxSeats`, else the seat array it sent, else MAX_SEATS. */
+export function seatCapacity(room) {
+  if (Number.isInteger(room?.maxSeats) && room.maxSeats > 0) return room.maxSeats;
+  if (Array.isArray(room?.seats) && room.seats.length > 0) return room.seats.length;
+  return MAX_SEATS;
 }
 
 /**

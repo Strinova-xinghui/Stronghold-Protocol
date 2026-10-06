@@ -1,7 +1,7 @@
 // Normative message catalogue (DESIGN §8). Used by server (validation) and client (building requests).
 // Every client→server message is `{ t, rid?, ...fields }`. Unknown `t` or invalid fields ⇒ ERR.BAD_MSG.
 
-import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, MAX_SEATS, EMOTES, GEO } from './constants.js';
+import { DIFFICULTIES, NAME_MAX_LEN, ROOM_CODE_LEN, EMOTES, GEO } from './constants.js';
 
 // ---- tiny validators -------------------------------------------------------
 const isInt = (v, lo = -Infinity, hi = Infinity) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -26,7 +26,19 @@ const isList = (v, max, item) => Array.isArray(v) && v.length <= max && v.every(
 // ---- client-side combat (DESIGN §14): b.progress / b.result payloads -------------------------------------------
 
 /** Size limits of a b.result payload (the whole frame also obeys the 64 KB inbound limit). */
-export const RESULT_LIMITS = Object.freeze({ players: 4, leaked: 400, unitsEnd: 64, unitStats: 160, layerGains: 40, mods: 16, unspawned: 400 });
+/**
+ * Size limits of a b.result payload (the whole frame also obeys the 64 KB inbound limit). `players` follows the
+ * room's seat capacity (4, or 6 on a server started with SP_MAX_SEATS=6): it bounds the per-player map of a client
+ * battle result. `setSeatLimit` is called by server/lobby.js at boot and by the browser when `room.state` carries the
+ * server's `maxSeats`; without either call both bounds stay at 4.
+ */
+export const RESULT_LIMITS = { players: 4, leaked: 400, unitsEnd: 64, unitStats: 160, layerGains: 40, mods: 16, unspawned: 400 };
+/** Raise the seat-derived protocol bounds (`room.removeBot` seat index, b.result per-player map) to `n` seats. */
+export function setSeatLimit(n) {
+  if (!Number.isInteger(n) || n < 1) throw new RangeError(`seat limit must be a positive integer`);
+  RESULT_LIMITS.players = n;
+  return n;
+}
 const BIG = 1e13;
 const isStat = (v) => v === undefined || isNum(v, 0, BIG);
 const isModVal = (v) => v === null || isNum(v, -BIG, BIG) || isStr(v, 64) || isBool(v);
@@ -259,7 +271,7 @@ export const C2S = {
   'room.ready': { ready: isBool },
   'room.setDifficulty': { difficulty: (v) => DIFFICULTIES.includes(v) },
   'room.addBot': {},
-  'room.removeBot': { seat: (v) => isInt(v, 0, MAX_SEATS - 1) },
+  'room.removeBot': { seat: (v) => isInt(v, 0, RESULT_LIMITS.players - 1) },
   // the host removes another human before the match (server/lobby.js kick; community report #17); playerId = the one the
   // host confirmed — a seat that changed hands meanwhile is refused
   'room.kick': { seat: (v) => isInt(v, 0, MAX_SEATS - 1), playerId: isId },

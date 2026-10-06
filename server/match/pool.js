@@ -22,8 +22,8 @@
  * @param {Function} rng seeded rng (createRng)
  * @returns {{ drawn: string[], staticOff: string[], banned: string[] }}
  */
-export function drawDisabledBonds(gd, rng) {
-  const { core: nCore, addon: nAddon } = gd.bans(gd.difficulty);
+export function drawDisabledBonds(gd, rng, { players = 0 } = {}) {
+  const { core: nCore, addon: nAddon } = gd.bans(gd.difficulty, players);
   const staticOff = [...gd.modeInactiveBonds].filter((b) => gd.bond(b)).sort();
   const eligible = gd.bondIds.filter((b) => {
     const bond = gd.bond(b);
@@ -53,14 +53,14 @@ export class SharedPool {
    * @param {import('./gamedata.js').GameData} gd
    * @param {{ banned?: Iterable<string> }} [opts]
    */
-  constructor(gd, { banned = [] } = {}) {
+  constructor(gd, { banned = [], players = 0 } = {}) {
     this.gd = gd;
     const ban = new Set(banned);
     /** @type {Map<string, { cap: number, left: number, tier: number }>} */
     this.entries = new Map();
     for (const id of gd.visibleChess) {
       if (ban.has(id)) continue;
-      const cap = gd.poolCopies(id);
+      const cap = gd.poolCopies(id, players);
       if (cap <= 0) continue;
       this.entries.set(id, { cap, left: cap, tier: gd.tierOf(id) });
     }

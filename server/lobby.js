@@ -78,8 +78,8 @@
 //     a player seat (the seat is kept and given back on resume).
 
 import { randomBytes, randomInt } from 'node:crypto';
-import { ERR, MAX_SEATS, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout } from '../shared/protocol.js';
+import { ERR, MAX_SEATS, MAX_SEATS_LIMIT, MAX_SPECTATORS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
+import { checkLoadout, setSeatLimit } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
@@ -95,6 +95,7 @@ export const LOBBY_DEFAULTS = Object.freeze({
   maxMatchesPerAddr: 8,   // matches started from one client network that may run at once (0 = unlimited)
   resyncMinGapMs: 1000,   // heavy resyncs (match state / result replay) per session at most this often on repeated hellos
   soloReconnectWindowMs: null, // a dropped solo run stays resumable this long (null = data singleReconnectTime, 24 h)
+  maxSeats: MAX_SEATS,    // co-op seats per room (4 by default; server/index.js raises it from SP_MAX_SEATS, ≤ MAX_SEATS_LIMIT)
 });
 
 /** Official `singleReconnectTime` (s) when the data lacks it (constData, research 01 §1). */
@@ -137,14 +138,16 @@ function freezeSkins(skins, getChess) {
 /** One room: 4 seat slots, host, difficulty, optional running match. */
 export class Room {
   /** @param {string} code @param {'solo'|'coop'} mode @param {string} difficulty @param {number} now */
-  constructor(code, mode, difficulty, now) {
+  constructor(code, mode, difficulty, now, maxSeats = MAX_SEATS) {
     this.code = code;
     this.mode = mode;
     this.difficulty = difficulty;
     /** @type {string | null} */
     this.hostId = null;
     /** @type {(Seat | null)[]} */
-    this.seats = new Array(MAX_SEATS).fill(null);
+    /** co-op capacity of this room (solo rooms are capped at 1 by the lobby, not here) */
+    this.maxSeats = maxSeats;
+    this.seats = new Array(maxSeats).fill(null);
     /** @type {{ playerId: string, name: string, connected: boolean }[]} spectator seats, ≤ MAX_SPECTATORS (header) */
     this.spectators = [];
     /** @type {any} running Match instance */
@@ -191,6 +194,9 @@ export class Room {
       mode: this.mode,
       difficulty: this.difficulty,
       inMatch: !!this.match,
+      // the room's co-op capacity (4, or 6 with SP_MAX_SEATS): the client pads its seat grid to this and raises its
+      // local protocol bounds (public/js/net.js) so room.removeBot accepts a seat index ≥ 4
+      maxSeats: this.maxSeats,
       seats: this.seats.map((s) => (s
         ? { seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left }
         : null)),
@@ -220,6 +226,12 @@ export class Lobby {
     this.now = now;
     this.seedFn = seedFn || (() => randomInt(2 ** 32));
     this.opts = { ...LOBBY_DEFAULTS, ...options };
+    // The seat capacity is a boot-time server setting (SP_MAX_SEATS), so it is clamped once here: every room, the
+    // client's seat grid (room.state.maxSeats) and the protocol bounds (room.removeBot, b.result) read this same value.
+    if (!Number.isInteger(this.opts.maxSeats) || this.opts.maxSeats < 1 || this.opts.maxSeats > MAX_SEATS_LIMIT) {
+      throw new RangeError(`maxSeats must be an integer 1..${MAX_SEATS_LIMIT}`);
+    }
+    setSeatLimit(this.opts.maxSeats);
     /** @type {Map<string, Room>} */
     this.rooms = new Map();
     /** @type {Map<string, NodeJS.Timeout>} lobby grace timers by playerId */
@@ -244,7 +256,7 @@ export class Lobby {
       for (const s of r.seats) if (s && !s.left) (s.isBot ? bots++ : humans++);
       spectators += r.spectators.length;
     }
-    return { rooms: this.rooms.size, matches, humans, bots, spectators };
+    return { rooms: this.rooms.size, matches, humans, bots, spectators, maxSeats: this.opts.maxSeats };
   }
 
   // ---------------------------------------------------------------------------------------------------
@@ -371,7 +383,7 @@ export class Lobby {
     const code = this.genCode();
     if (!code) return fail(ERR.INTERNAL, 'no room code available');
     if (cur) this.removeMember(cur, session.playerId);
-    const room = new Room(code, mode, difficulty, this.now());
+    const room = new Room(code, mode, difficulty, this.now(), this.opts.maxSeats);
     room.ownerKey = key;
     room.seats[0] = this.humanSeat(0, session);
     room.hostId = session.playerId;
