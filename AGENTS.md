@@ -35,6 +35,20 @@
 
 ## 3.5 自研追加功能（2026-10-06 定稿，提交 b7e26b0 / 8d554a3）
 
+### monitor 实时监看（2026-10-06，提交 00ff41d）
+
+- **能力**：在 `/monitor` 面板点玩家行上的「监看」按钮，即可**无席位限制**地看到该玩家的**完整 m.private**——装备、整备区手牌、临时区、商店 5 格与刷新、资金/生命/盟约层数。原生观战（`room.spectate`）看不到这些，且只有 2 个席位；本功能两者都突破。
+- **协议**：`m.monitor { code, targetPlayerId? }`（targetPlayerId 缺省/null = 取消）。监看者只需一个普通 WS 连接 + hello，**不必入房、不占座位、不进 spectators、不计入 humans/观战统计、不改 session.roomCode**。
+- **实现（4 处，约 60 行）**：
+  1. `shared/protocol.js`：新增 `'m.monitor'` 消息定义。
+  2. `server/lobby.js`：`monitor(session, msg)` 处理（校验房间/目标）+ `sendToPlayer` 放行带 `session.monitorRoom` 标记的会话（**顺序关键：必须先打标记再调 addMonitorWatcher**，否则立即补发会被拦）。
+  3. `server/match/Match.js`：`this.monitorWatchers: Map<watcherId, targetPlayerId>` + `addMonitorWatcher/removeMonitorWatcher/monitorWatcherCount`；`_sendPrivate` 末尾把同一份 view 追加发给监看者（带 `_monitor: true`）；`sendTo` 放行 monitorWatchers 中的 id（它们没有 PlayerState）。
+  4. `server/index.js`：monitorSnapshot 的 players 补 `playerId` 字段（**否则按钮渲染不出**）+ MONITOR_HTML 加监看面板（WS 连接、privateView 渲染器、事件委托）。
+- **语义（重要）**：监看是「同一份数据的独立视图」，**不是屏幕镜像**——被看者的 UI 状态（打开哪个干员详情、滚动位置、相机）从不经过服务器，双方零干扰、互不可见。
+- **验证**：`node tools/verify-monitor-watch.mjs <port>`（14/14：订阅、_monitor 标记、playerId 一致、shop/hand/board 字段、不占席位、不计 humans、取消、非法目标 BAD_TARGET、不存在房间 ROOM_NOT_FOUND）+ `node tools/verify-monitor-ui.mjs <port>`（7/7：无头浏览器点按钮→面板渲染→WS 已连接→无 JS 错误）。
+- **安全提醒**：无鉴权，拿到房间码的人即可窥看所有人手牌/商店。纯合作 PVE 影响有限；若将来开 PVP 或公开房间，需加 monitor 口令或限本机来源。
+- **已知边界**：监看者视角是「数据面板」；要看**实时战场画面**用卡片上的「客户端」链接（`/?room=CODE`，走原生观战，会占 1 个观战席）。
+
 以下均为本项目本地追加，上游无此代码；更新代码时注意 rebase 保护。
 
 ### /monitor 服务器监控面板
