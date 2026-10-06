@@ -26,7 +26,7 @@ ws.on('open', async () => {
     console.log('[1] hello OK, playerId =', hello.playerId);
 
     const t2 = timeout(8000, 'room.create');
-    const room = await send('room.create', { mode: 'coop', difficulty: '标准' });
+    const room = await send('room.create', { mode: 'coop', difficulty: 'NORMAL' });
     clearTimeout(t2);
     if (room.error) throw new Error('create refused: ' + JSON.stringify(room.error));
     console.log('[2] room created:', room.state?.code || room.code || '(see monitor)');
