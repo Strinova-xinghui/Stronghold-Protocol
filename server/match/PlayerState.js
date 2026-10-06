@@ -78,6 +78,7 @@ import { offsetTile } from '../sim/dir.js';
 import { computeBonds, bondList, bondSnapshot, activatedLayers, bondsWithGains, offBondCounts } from './bondsMeta.js';
 import { itemKey } from './gamedata.js';
 import { bountyText } from './choices.js';
+import { getCustomRules } from './customRules.js';
 
 const HAND_SIZE = GEO.HAND_SIZE;
 const TEMP_SIZE = GEO.TEMP_SIZE;
@@ -682,9 +683,25 @@ export class PlayerState {
     if (!list) {
       list = [];
       const fresh = (id) => !list.includes(id);
+      // 自研「定向甄选」（config/custom-rules.json，热更）：按候选位置套用主/副盟约筛选，未列出的位置纯随机。
+      // 只换筛选条件，抽卡仍走 pool.roll（份数加权），不碰池子、保底与任何其它路径。
+      const plan = this._rewardOfferPlan(ro.count);
       for (let i = 0; i < ro.count; i++) {
+        const rule = plan ? plan[i] : null;
         let id = null;
-        for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh });
+        if (rule && rule.mode === 'weight') {
+          // 加权模式：不限定，只把该盟约的候选权重提高（柔和）
+          const boost = new Map([[rule.bond, rule.mult]]);
+          for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh, bondBoost: boost });
+        } else if (rule) {
+          // 筛选模式（默认）：该位置必须是该盟约的干员
+          const filter = (x) => fresh(x) && this._chessHasBond(x, rule.bond);
+          for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter });
+        } else {
+          for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh });
+        }
+        // 定向没抽到（该盟约在本等级无可用干员/池子空）→ 退回纯随机，保证 offer 张数不缩水
+        if (!id && rule) for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh });
         if (id) list.push(id);
       }
     }
@@ -693,6 +710,56 @@ export class PlayerState {
     this.offers.push(offer);
     this.dirty();
     return offer;
+  }
+
+  /** 某干员（base 或 golden id）是否带盟约 `bond`。 */
+  _chessHasBond(id, bond) {
+    const c = this.gd.chess(id);
+    return !!(c && Array.isArray(c.bonds) && c.bonds.includes(bond));
+  }
+
+  /**
+   * 自研「定向甄选」：解析 config/custom-rules.json 的位置映射，返回 `[{ bond } | null, …]`（长度 = count）。
+   * 规则关闭 / 未配置 → null（调用方走原版纯随机）。热更：每次调用都重新读文件（mtime 缓存）。
+   */
+  _rewardOfferPlan(count) {
+    let rules = null;
+    try { rules = getCustomRules({ log: this.m.log }); } catch { return null; }
+    const slots = rules && rules.rewardOffer ? rules.rewardOffer.slots : null;
+    if (!slots || !slots.length) return null;
+    const plan = new Array(count).fill(null);
+    for (const rule of slots) {
+      if (rule.slot < 0 || rule.slot >= count) continue;
+      const bond = rule.kind === 'mainCount' ? this._topBondByCount(rule) : this._topBondByLayers(rule);
+      if (bond) plan[rule.slot] = { bond, mult: rule.mult, mode: rule.mode };
+    }
+    return plan.some(Boolean) ? plan : null;
+  }
+
+  /** 激活人数最多的盟约（默认要求 count ≥ 3 = 所有核心盟约的激活阈值）。 */
+  _topBondByCount(rule) {
+    let best = null, bestCount = 0;
+    for (const [id, b] of Object.entries(this.bonds)) {
+      if (!b || !b.active) continue;
+      if (b.count < rule.minCount) continue;
+      if (b.count > bestCount) { best = id; bestCount = b.count; }
+    }
+    return best;
+  }
+
+  /** 层数最多的盟约（排除 rule.exclude：独行 + 经济类；要求已激活且层数 ≥ minLayers）。 */
+  _topBondByLayers(rule) {
+    const ex = new Set(rule.exclude || []);
+    let best = null, bestLayers = -1;
+    for (const [id, b] of Object.entries(this.bonds)) {
+      if (!b || !b.active) continue;
+      if (ex.has(id)) continue;
+      if (b.count < rule.minCount) continue;
+      const layers = (this.layers && this.layers[id]) || 0;
+      if (layers < rule.minLayers) continue;
+      if (layers > bestLayers) { best = id; bestLayers = layers; }
+    }
+    return best;
   }
 
   /**
@@ -877,7 +944,20 @@ export class PlayerState {
   }
 
   _rollItemSlot() {
-    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level);
+    // 自研「装备甄选」（config/custom-rules.json，热更）：从 minRound 起，提高「与主盟约同阵营、可参与变形
+    // 同构体转职」的装备出率（数据驱动：giveBondId === 目标盟约）。只改抽中的分布，池子/其它路径不变。
+    let boost = null;
+    let onTierMiss = 'fallback';
+    let mode = 'weight';
+    try {
+      const rules = getCustomRules({ log: this.m.log });
+      const io = rules && rules.itemOffer;
+      if (io && this.m.round >= io.minRound) {
+        const bond = io.targetBond === 'mainCount' ? this._topBondByCount({ minCount: io.minCount }) : io.targetBond;
+        if (bond && this.gd.bond(bond)) { boost = new Map([[bond, io.mult]]); onTierMiss = io.onTierMiss; mode = io.mode; }
+      }
+    } catch { /* 配置异常按原版 */ }
+    const id = this.m.pool.rollItem(this.m.rngShop, this.shop.level, { bondBoost: boost, onTierMiss, mode });
     return id ? { kind: 'item', id, basePrice: this.gd.itemPrice(id), frozen: false, sold: false } : null;
   }
 

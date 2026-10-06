@@ -1,0 +1,35 @@
+{
+  "_说明": "自研「定向甄选」热更配置。改完本文件立即生效（无需重启服务器）。enabled=false 或删除本文件 = 原版行为。",
+  "_热更边界": "本文件只控制规则「参数」；规则逻辑在 server/ 代码里，改动逻辑仍需重启。",
+  "rewardOffer": {
+    "_说明": "干员三选一定向（晋升奖励/免费挑选）。slots 按候选位置映射：slot 0 = 第一张，slot 1 = 第二张…未列出的位置保持纯随机。",
+    "_kind": "mainCount = 激活人数最多的主盟约（核心盟约激活阈值 3）；maxLayers = 层数最多的副盟约。",
+    "_mode": "filter（默认，该位置必须是该盟约干员）| weight（不限定，只提高该盟约权重 ×mult）",
+    "enabled": true,
+    "slots": [
+      { "slot": 0, "kind": "mainCount", "minCount": 3, "mult": 2 },
+      {
+        "slot": 1,
+        "kind": "maxLayers",
+        "minCount": 2,
+        "mult": 2,
+        "exclude": ["soloShip", "visiShip", "miraShip", "investShip"]
+      }
+    ]
+  },
+  "itemOffer": {
+    "_说明": "装备甄选：提高「与目标盟约同阵营、可参与变形同构体转职」的装备出率（数据判定 giveBondId === 目标盟约）。只作用于商店装备槽。",
+    "_覆盖": "14 个阵营各有 1 件可出的转职装备：坚守盾牌T1、维式重锤T1、萨尔贡浓茶T2、不屈弹射器T2、炎国短刀T3、阿戈尔重刃T3、奥术法阵T3、精准狙击镜T3、叙拉古正装T3、迅捷作战粮T3、突袭手雷T3、卡西米尔竞技旗T4、拉特兰桥夹T4、谢拉格不融冰T5",
+    "_minRound": "从第几回合起生效（含）。0 = 全程生效。",
+    "_targetBond": "mainCount（默认，当前激活人数最多的盟约）或固定盟约 id（如 yanShip）",
+    "_onTierMiss": "当前 tier 层没有该阵营装备时：fallback（默认，退到最近的含该装备的层，保证命中）| random（保持层级，退回随机）",
+    "_mode": "filter（默认，必须是该阵营装备）| weight（只提高其权重，不限定）",
+    "enabled": true,
+    "minRound": 6,
+    "mult": 2,
+    "mode": "weight",
+    "targetBond": "mainCount",
+    "minCount": 3,
+    "onTierMiss": "fallback"
+  }
+}

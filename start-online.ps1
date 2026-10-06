@@ -43,8 +43,9 @@ if ($alreadyRunning) {
     Write-Host "[ok] 游戏服务器已在端口 $chosen 运行，跳过启动" -ForegroundColor Yellow
 } else {
     $env:PORT = $chosen
-    # 盟约定向加成（唯一游戏规则改动）：×2 = 主盟约干员抽卡权重翻倍；改这里或删掉此行 = 原版
-    $env:SP_BOND_BOOST = '2'
+    # 旧的「全格盟约加成」已停用（朋友反馈太高），改由「定向甄选」按 config/custom-rules.json 生效。
+    # 想恢复：取消下面这行注释（×2 = 所有商店格的盟约权重翻倍）。
+    # $env:SP_BOND_BOOST = '2'
     # 双栈监听：'::' 同时接受 IPv4 映射连接（127.0.0.1/局域网/frp 全部照常），并额外开放 IPv6 直连
     $env:HOST = '::'
     Start-Process -FilePath "node" -ArgumentList "server/index.js" -WorkingDirectory $root -WindowStyle Minimized
@@ -57,7 +58,7 @@ if ($alreadyRunning) {
         Write-Host "服务器启动失败（端口 $chosen）。排查: 1) netsh interface ipv4 show excludedportrange protocol=tcp 2) 手动运行 npm start 看报错" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen（盟约加成 ×2 开启，监控 /monitor）" -ForegroundColor Green
+    Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen（定向甄选按 config/custom-rules.json，监控 /monitor）" -ForegroundColor Green
 }
 
 # 3. Cloudflare 隧道：默认跳过（樱花 frp 已提供两条固定网址）。需要兜底隧道时加 -Tunnel 参数

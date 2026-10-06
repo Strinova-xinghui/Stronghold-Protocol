@@ -153,8 +153,18 @@ export class SharedPool {
   /**
    * Item roll for the shop's item slot: tier by the chess tier shares at this level, uniform item within the tier,
    * falling back to lower tiers when a tier has no item. Returns an item id or null.
+   *
+   * 自研「装备甄选」（opts.bondBoost / opts.onTierMiss）：把 `giveBondId === 目标盟约` 的装备（= 能与变形同构体
+   * 配合转职的那一类，数据驱动判定，不硬编码清单）权重提高到 `left × mult`。`onTierMiss='fallback'` 时，当前 tier
+   * 层没有该阵营装备就退到最近的有该装备的层（保证命中，代价是可能给出低阶装备）；'random' 则保持层级退回随机。
+   * 只改抽中的概率分布，不碰任何其它路径。
+   * @param {Function} rng
+   * @param {number} maxTier
+   * @param {{ bondBoost?: Map<string, number> | null, onTierMiss?: 'fallback' | 'random' }} [opts]
    */
-  rollItem(rng, maxTier) {
+  rollItem(rng, maxTier, opts = {}) {
+    const boost = opts.bondBoost;
+    const gd = boost && boost.size ? this.gd : null;
     const shares = this.tierShares(maxTier);
     const tiers = Object.keys(shares).map(Number).sort((a, b) => a - b);
     let tier = null;
@@ -165,13 +175,62 @@ export class SharedPool {
     } else {
       tier = 1 + Math.floor(rng() * Math.max(1, maxTier));
     }
+    const pickFrom = (list) => {
+      if (!gd) return list[Math.floor(rng() * list.length)];
+      // 目标阵营装备（giveBondId 命中 boost）
+      const isTarget = (id) => {
+        const rec = gd.item(id);
+        const b = rec && typeof rec.giveBondId === 'string' ? rec.giveBondId : null;
+        return !!(b && boost.has(b));
+      };
+      if (opts.mode === 'filter') {
+        const only = list.filter(isTarget);
+        if (only.length) return only[Math.floor(rng() * only.length)];
+        // 该层没有目标装备：走加权（weight 语义）作为兜底
+      }
+      // 加权：命中目标盟约的装备权重 × mult
+      let total = 0;
+      const weights = [];
+      for (const id of list) {
+        let w = 1;
+        if (isTarget(id)) {
+          const rec = gd.item(id);
+          const m = boost.get(rec.giveBondId);
+          if (m && m > 1) w = m;
+        }
+        weights.push(w); total += w;
+      }
+      let r = rng() * total;
+      for (let i = 0; i < list.length; i++) { r -= weights[i]; if (r < 0) return list[i]; }
+      return list[list.length - 1];
+    };
+    // 有目标盟约时：优先找「含目标装备」的层（按 onTierMiss 决定是否降级/升阶搜索）
+    if (gd) {
+      const hasTarget = (t) => {
+        const list = this.gd.shopItemsByTier[t];
+        return !!(list && list.length && list.some((id) => {
+          const rec = gd.item(id);
+          return rec && typeof rec.giveBondId === 'string' && boost.has(rec.giveBondId);
+        }));
+      };
+      if (!hasTarget(tier)) {
+        if (opts.onTierMiss === 'fallback') {
+          // 从当前层向下、再向上找最近的有目标装备的层
+          let found = null;
+          for (let t = tier; t >= 1 && found == null; t--) if (hasTarget(t)) found = t;
+          if (found == null) for (let t = tier + 1; t <= 6 && found == null; t++) if (hasTarget(t)) found = t;
+          if (found != null) tier = found;
+        }
+        // 'random'：保持 tier，走下面的普通路径（甄选落空但不改层级）
+      }
+    }
     for (let t = tier; t >= 1; t--) {
       const list = this.gd.shopItemsByTier[t];
-      if (list && list.length) return list[Math.floor(rng() * list.length)];
+      if (list && list.length) return pickFrom(list);
     }
     for (let t = tier + 1; t <= 6; t++) {
       const list = this.gd.shopItemsByTier[t];
-      if (list && list.length) return list[Math.floor(rng() * list.length)];
+      if (list && list.length) return pickFrom(list);
     }
     return null;
   }
