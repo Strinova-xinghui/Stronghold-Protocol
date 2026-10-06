@@ -43,6 +43,8 @@ if ($alreadyRunning) {
     Write-Host "[ok] 游戏服务器已在端口 $chosen 运行，跳过启动" -ForegroundColor Yellow
 } else {
     $env:PORT = $chosen
+    # 盟约定向加成（唯一游戏规则改动）：×2 = 主盟约干员抽卡权重翻倍；改这里或删掉此行 = 原版
+    $env:SP_BOND_BOOST = '2'
     Start-Process -FilePath "node" -ArgumentList "server/index.js" -WorkingDirectory $root -WindowStyle Minimized
     $ok = $false
     for ($i = 0; $i -lt 10; $i++) {
@@ -53,7 +55,7 @@ if ($alreadyRunning) {
         Write-Host "服务器启动失败（端口 $chosen）。排查: 1) netsh interface ipv4 show excludedportrange protocol=tcp 2) 手动运行 npm start 看报错" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen" -ForegroundColor Green
+    Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen（盟约加成 ×2 开启，监控 /monitor）" -ForegroundColor Green
 }
 
 # 3. Cloudflare 隧道：默认跳过（樱花 frp 已提供两条固定网址）。需要兜底隧道时加 -Tunnel 参数
@@ -61,7 +63,7 @@ if (-not $Tunnel) {
     Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
-    Write-Host '  [樱花frp 在线] 固定网址（浏览器: https://frp-end.com:15810 · APK: http://frp-cup.com:30756）' -ForegroundColor Cyan
+    Write-Host '  [樱花frp 在线] 固定网址（浏览器: https://frp-way.com:17913 · APK: http://frp-cup.com:30756）' -ForegroundColor Cyan
     $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
         Select-Object -First 1
