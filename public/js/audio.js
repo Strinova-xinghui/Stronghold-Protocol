@@ -306,6 +306,26 @@ export function resultSpeaker(pp, random = Math.random) {
   return pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))].id;
 }
 
+/**
+ * Resolve an operator's `charId` from whatever a caller holds (a piece, a battle unit, a chess id, a def object).
+ * A pure id resolver — no audio state, no voice playback (fork v0.1.6 merged it for its voice system; game.js calls it
+ * for its voice-gated paths, so it must stay exported even without the bilingual voice feature).
+ * @param {any} x
+ * @param {any} [gd] game data (with `chess` / `getChess`), optional when `x` is already a `char_…` id
+ * @returns {string|null}
+ */
+export function voiceKey(x, gd = null) {
+  if (!x) return null;
+  if (typeof x === 'string') {
+    if (x.startsWith('char_')) return x;
+    const getFn = gd?.getChess || gd?.chess || (typeof gd === 'function' ? gd : null);
+    const rec = getFn ? getFn(x) : null;
+    return rec?.charId || null;
+  }
+  if (x.piece) return voiceKey(x.piece, gd);
+  return x.charId || voiceKey(x.id || x.chessId || x.defId || x.def || x.spine, gd) || null;
+}
+
 /** Concurrency + cooldown gate for battle SFX. Pure (time is passed in). */
 /** Gestures that may unlock audio: iOS Safari only accepts touchend / click / keydown; pointerdown covers the rest. */
 const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];

@@ -109,7 +109,7 @@ import { battleRunner } from '../battle/runner.js';
 import { isClientCombat, observeTarget, teammateProgress, cameraLayers, layerCamera, sidesOf, resumedWatch } from '../battle/observe.js';
 import { screenStrip, playerBonds, playerLayer, detailBondOwner, toggleBond, popupView } from '../ui/watchBonds.js';
 import { data, localAsset, getMode } from '../data.js';
-import { audio, resultSpeaker, resultVoiceSlot } from '../audio.js';
+import { audio, voiceKey, resultSpeaker, resultVoiceSlot } from '../audio.js';
 import { useDocClass, FullscreenButton } from '../ui/device.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
