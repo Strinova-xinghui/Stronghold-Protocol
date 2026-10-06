@@ -104,16 +104,35 @@ export class SharedPool {
 
   /**
    * Copy-weighted roll: one copy uniformly among remaining copies of eligible chess. Returns a base id or null.
+   * `bondBoost`: optional Map<bondId, multiplier> — a chess carrying a boosted bond rolls with weight left × mult
+   * (custom house rule, upstream-neutral: only re-weights the draw, never the pool's copies or accounting).
    * @param {Function} rng
-   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean }} [opts]
+   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean,
+   *           bondBoost?: Map<string, number> | null, gd?: object }} [opts]
    */
   roll(rng, opts = {}) {
     const el = this._eligible(opts);
+    const boost = opts.bondBoost;
+    const gd = boost && boost.size ? (opts.gd || this.gd) : null;
     let total = 0;
-    for (const [, n] of el) total += n;
+    const weights = [];
+    for (let i = 0; i < el.length; i++) {
+      const [id, n] = el[i];
+      let w = n;
+      if (gd) {
+        const c = gd.chess(id);
+        const bonds = c && Array.isArray(c.bonds) ? c.bonds : null;
+        if (bonds) for (const b of bonds) {
+          const mult = boost.get(b);
+          if (mult && mult > 1) { w = n * mult; break; }
+        }
+      }
+      weights.push(w);
+      total += w;
+    }
     if (total <= 0) return null;
     let r = rng() * total;
-    for (const [id, n] of el) { r -= n; if (r < 0) return id; }
+    for (let i = 0; i < el.length; i++) { r -= weights[i]; if (r < 0) return el[i][0]; }
     return el[el.length - 1][0];
   }
 

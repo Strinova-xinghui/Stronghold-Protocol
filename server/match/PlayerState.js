@@ -836,7 +836,19 @@ export class PlayerState {
   }
 
   _rollChessSlot() {
-    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level });
+    // house rule (SP_BOND_BOOST, default from the match's option): the player's most-activated ACTIVE bond gets a
+    // shop weight multiplier — only re-weights the draw; the pool's copies and every other path stay upstream-neutral.
+    const mult = this.m.bondBoostMult;
+    let boost = null;
+    if (mult && mult > 1) {
+      let best = null, bestCount = 0;
+      for (const [id, b] of Object.entries(this.bonds)) {
+        if (!b.active) continue;
+        if (b.count > bestCount) { best = id; bestCount = b.count; }
+      }
+      if (best) boost = new Map([[best, mult]]);
+    }
+    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, bondBoost: boost });
     return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
   }
 

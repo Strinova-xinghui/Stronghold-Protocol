@@ -334,6 +334,11 @@ export class Match {
     this.bannedChess = bans.banned;
     this.pool = new SharedPool(this.gd, { banned: bans.banned });
 
+    // house rule (SP_BOND_BOOST env, default off): shop rolls weight the player's most-activated bond's chess ×mult.
+    // Only the draw is re-weighted — pool copies, bans, merges, every invariant stay untouched. 1 / 0 / unset = off.
+    const rawBoost = Number(process.env.SP_BOND_BOOST);
+    this.bondBoostMult = Number.isFinite(rawBoost) && rawBoost > 1 ? rawBoost : null;
+
     this.phase = PHASE.LOBBY;
     this.round = 0;
     this.deadline = 0;
