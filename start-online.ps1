@@ -45,6 +45,8 @@ if ($alreadyRunning) {
     $env:PORT = $chosen
     # 盟约定向加成（唯一游戏规则改动）：×2 = 主盟约干员抽卡权重翻倍；改这里或删掉此行 = 原版
     $env:SP_BOND_BOOST = '2'
+    # 双栈监听：'::' 同时接受 IPv4 映射连接（127.0.0.1/局域网/frp 全部照常），并额外开放 IPv6 直连
+    $env:HOST = '::'
     Start-Process -FilePath "node" -ArgumentList "server/index.js" -WorkingDirectory $root -WindowStyle Minimized
     $ok = $false
     for ($i = 0; $i -lt 10; $i++) {
@@ -70,6 +72,15 @@ if (-not $Tunnel) {
     if ($rad) {
         Write-Host "  http://$($rad.IPAddress):$chosen   <- Radmin VPN 组网（低延迟，朋友装 Radmin 后用这个）" -ForegroundColor Cyan
     }
+    # IPv6 直连（队友调研 docs/ipv6-feasibility.md）：只取稳定地址，排除 Random（隐私/临时地址会轮换）
+    $v6 = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notmatch '^(fe80|::1)' -and $_.SuffixOrigin -ne 'Random' -and $_.AddressState -eq 'Preferred' } |
+        Select-Object -First 1
+    $v6Url = $null
+    if ($v6) {
+        $v6Url = "http://[$($v6.IPAddress)]:$chosen"
+        Write-Host "  $v6Url   <- IPv6 直连（低延迟；需光猫已关闭 IPv6 防火墙，见 docs/ipv6-feasibility.md）" -ForegroundColor Cyan
+    }
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
     Write-Host '关服: 关闭弹出的服务器窗口（可最小化，别关）。'
@@ -77,6 +88,7 @@ if (-not $Tunnel) {
     $invite = '浏览器(电脑/iOS/安卓): https://frp-way.com:17913' + "`r`n" +
               '安卓APK: http://frp-cup.com:30756（延迟较高）' + "`r`n" +
               '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
+    if ($v6Url) { $invite += "`r`n" + "IPv6直连(手机流量): $v6Url" }
     Set-Clipboard -Value $invite
     Write-Host '[固定网址已自动复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process "http://localhost:$chosen"
@@ -118,6 +130,11 @@ if ($url) {
     } else {
         Write-Host "  [樱花frp 未运行] 固定网址暂不可用——请检查 natfrp 守护进程服务是否在跑" -ForegroundColor Yellow
     }
+    # IPv6 直连（只取稳定地址，排除隐私/临时地址）
+    $v6b = Get-NetIPAddress -AddressFamily IPv6 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -notmatch '^(fe80|::1)' -and $_.SuffixOrigin -ne 'Random' -and $_.AddressState -eq 'Preferred' } |
+        Select-Object -First 1
+    if ($v6b) { Write-Host "  http://[$($v6b.IPAddress)]:$chosen   <- IPv6 直连（手机流量，需光猫放行）" -ForegroundColor Cyan }
     # Radmin VPN 网卡地址（26.x）：低延迟方案，朋友装 Radmin VPN 进同一网络后访问
     $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
