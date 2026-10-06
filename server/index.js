@@ -42,14 +42,157 @@ import { WebSocketServer } from 'ws';
 import { Network, SessionRegistry, NET_DEFAULTS } from './net.js';
 import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
-import { PROTOCOL_VERSION, APP_VERSION } from '../shared/constants.js';
+import { PROTOCOL_VERSION, APP_VERSION, PHASE, PHASE_NAMES } from '../shared/constants.js';
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
+
+/**
+ * Snapshot of every room for the /monitor API (read-only, no game-state mutation).
+ * Rooms in lobby: seats with ready/connected; running matches: phase, round, LP, shop levels…
+ * PHASE_NAMES (shared/constants.js) is client-shared code, safe to import here (plain object).
+ */
+function monitorSnapshot(lobby) {
+  const rooms = [];
+  for (const r of lobby.rooms.values()) {
+    const room = {
+      code: r.code, mode: r.mode, difficulty: r.difficulty, inMatch: !!r.match,
+      host: null, seats: [], spectators: r.spectators.map((s) => ({ name: s.name, connected: s.connected })),
+      match: null,
+    };
+    for (const s of r.seats) {
+      if (!s) { room.seats.push(null); continue; }
+      if (s.playerId === r.hostId) room.host = s.name;
+      room.seats.push({ name: s.name, isBot: s.isBot, ready: s.ready, connected: s.connected && !s.left, left: !!s.left });
+    }
+    if (r.match && !r.match.disposed && !r.match.ended) {
+      const m = r.match;
+      const players = (m.order || []).map((ps) => ({
+        name: ps.name, isBot: ps.isBot, connected: ps.isBot || (ps.connected && !ps.left),
+        alive: ps.alive, lp: Math.max(0, Math.round(ps.lp) || 0), shopLevel: ps.shop ? ps.shop.level : null,
+        boardCount: ps.deployCount ?? null, ready: !!(ps.infoReady ?? ps.ready),
+      }));
+      room.match = {
+        phase: m.phase, phaseName: PHASE_NAMES[m.phase] || m.phase,
+        round: m.round, lastRound: m.gd ? m.gd.lastRound : null,
+        teamLp: m.teamLp == null ? null : Math.max(0, Math.round(m.teamLp)),
+        paused: !!m.paused,
+        players,
+      };
+    }
+    rooms.push(room);
+  }
+  return { time: new Date().toISOString(), stats: lobby.stats(), rooms };
+}
 
 /** Repository root. */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** Inbound WebSocket frame limit (DESIGN §8). */
 export const WS_MAX_PAYLOAD = 64 * 1024;
+
+/** /monitor dashboard: self-contained HTML, polls /monitor?json every 5 s. No game assets, no build step. */
+const MONITOR_HTML = `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>卫戍协议 · 服务器监控</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: #10151c; color: #d8e0ea; font: 14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #7ecbff; }
+  .sub { color: #7a8698; font-size: 12px; margin-bottom: 16px; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .stat { background: #182130; border: 1px solid #26344a; border-radius: 8px; padding: 10px 16px; min-width: 90px; }
+  .stat b { display: block; font-size: 22px; color: #fff; }
+  .stat span { font-size: 12px; color: #7a8698; }
+  .room { background: #182130; border: 1px solid #26344a; border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .room-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .code { font-size: 20px; font-weight: 700; letter-spacing: 2px; color: #ffd479; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #223047; color: #9db4d0; }
+  .tag.match { background: #1d3a2a; color: #7fe0a2; }
+  .tag.paused { background: #4a3a1d; color: #ffce7a; }
+  .phase { font-size: 13px; color: #7ecbff; }
+  .round { font-size: 13px; color: #9db4d0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #223047; }
+  th { color: #7a8698; font-weight: 500; font-size: 12px; }
+  .on { color: #7fe0a2; } .off { color: #e07a7a; } .bot { color: #b48ce0; } .dead { color: #e07a7a; }
+  .lp { font-variant-numeric: tabular-nums; color: #ffd479; }
+  .spec { margin-top: 8px; font-size: 12px; color: #7a8698; }
+  .empty { color: #7a8698; text-align: center; padding: 40px 0; }
+</style>
+</head>
+<body>
+<h1>卫戍协议 · 服务器监控</h1>
+<div class="sub" id="updated">加载中…</div>
+<div class="stats" id="stats"></div>
+<div id="rooms"></div>
+<script>
+const PHASE_NAMES = __PHASE_NAMES__;
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function seatRow(s, matchLive) {
+  if (!s) return '<tr><td colspan="5" style="color:#3a4658">— 空位 —</td></tr>';
+  const conn = s.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
+  const tag = s.isBot ? ' <span class="bot">AI</span>' : '';
+  const ready = matchLive ? '' : (s.ready ? ' · 已准备' : '');
+  return '<tr><td>' + esc(s.name) + tag + ready + '</td><td>' + conn + '</td></tr>';
+}
+function render(d) {
+  const st = d.stats;
+  document.getElementById('updated').textContent = '更新于 ' + new Date(d.time).toLocaleTimeString('zh-CN') + ' · 每 5 秒自动刷新';
+  document.getElementById('stats').innerHTML =
+    '<div class="stat"><b>' + st.rooms + '</b><span>房间</span></div>' +
+    '<div class="stat"><b>' + st.matches + '</b><span>进行中对局</span></div>' +
+    '<div class="stat"><b>' + st.humans + '</b><span>在线玩家</span></div>' +
+    '<div class="stat"><b>' + st.bots + '</b><span>AI</span></div>' +
+    '<div class="stat"><b>' + st.spectators + '</b><span>观战</span></div>' +
+    '<div class="stat"><b>' + st.sockets + '</b><span>WS 连接</span></div>';
+  const el = document.getElementById('rooms');
+  if (!d.rooms.length) { el.innerHTML = '<div class="empty">当前没有房间 —— 等待第一位博士登录</div>'; return; }
+  el.innerHTML = d.rooms.map((r) => {
+    let h = '<div class="room"><div class="room-head">' +
+      '<span class="code">' + esc(r.code) + '</span>' +
+      '<span class="tag">' + (r.mode === 'coop' ? '同盟模拟' : '独立模拟') + ' · ' + esc(r.difficulty) + '</span>' +
+      (r.inMatch ? '<span class="tag match">对局中</span>' : '<span class="tag">大厅</span>') +
+      (r.host ? '<span style="color:#7a8698;font-size:12px">房主: ' + esc(r.host) + '</span>' : '');
+    if (r.match) {
+      const m = r.match;
+      h += '<span class="phase">' + esc(m.phaseName) + '</span>' +
+           '<span class="round">回合 ' + m.round + '/' + (m.lastRound ?? '?') + '</span>' +
+           (m.paused ? '<span class="tag paused">已暂停</span>' : '') +
+           (m.teamLp != null ? '<span class="lp">团队生命 ' + m.teamLp + '</span>' : '');
+    }
+    h += '</div><table><tr><th>玩家</th><th>状态</th></tr>';
+    if (r.match) {
+      for (const p of r.match.players) {
+        const conn = p.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
+        const tag = p.isBot ? ' <span class="bot">AI</span>' : '';
+        const alive = p.alive ? '' : ' <span class="dead">淘汰</span>';
+        h += '<tr><td>' + esc(p.name) + tag + alive + '</td><td>' + conn +
+             '</td><td class="lp">LP ' + p.lp + '</td><td>商店 Lv' + (p.shopLevel ?? '?') + '</td><td>场上 ' + (p.boardCount ?? '?') + '</td></tr>';
+      }
+    } else {
+      for (const s of r.seats) h += seatRow(s, false);
+    }
+    h += '</table>';
+    if (r.spectators.length) h += '<div class="spec">观战: ' + r.spectators.map((s) => esc(s.name) + (s.connected ? '' : '(离线)')).join('、') + '</div>';
+    return h + '</div>';
+  }).join('');
+}
+async function tick() {
+  try {
+    const r = await fetch('/monitor?json', { cache: 'no-store' });
+    render(await r.json());
+  } catch (e) {
+    document.getElementById('updated').textContent = '刷新失败: ' + e.message;
+  }
+}
+render(__INITIAL__);
+setInterval(tick, 5000);
+</script>
+</body>
+</html>`;
 
 /** Browser stand-in of server/data.js, served at /data.js (see the header). */
 export const DATA_SHIM_JS = `// Generated by server/index.js — browser stand-in for server/data.js (DESIGN §14 client-side combat).
@@ -668,6 +811,18 @@ export async function startServer(opts = {}) {
         build: buildTag(),
         sockets: network.connectionCount, sessions: registry.size, ...lobby.stats(),
       });
+      return;
+    }
+    if (parts.rawPath === '/monitor') {
+      if (parts.query === 'json' || parts.query.startsWith('json&') || new URLSearchParams(parts.query).has('json')) {
+        sendJson(req, res, 200, monitorSnapshot(lobby)); return;
+      }
+      const snap = JSON.stringify(monitorSnapshot(lobby)).replace(/</g, '\\u003c');
+      const html = MONITOR_HTML
+        .replace('__INITIAL__', snap)
+        .replace('__PHASE_NAMES__', JSON.stringify(PHASE_NAMES));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(html);
       return;
     }
     await serveStatic(req, res, parts.rawPath, parts.query);
