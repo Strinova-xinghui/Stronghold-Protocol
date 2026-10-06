@@ -319,6 +319,7 @@ export class Lobby {
       case 'room.skins': return this.skins(session, msg);
       case 'room.spectate': return this.spectate(session, msg);
       case 'room.removeSpectator': return this.removeSpectator(session, msg);
+      case 'm.monitor': return this.monitor(session, msg);
       default:
         if (typeof msg.t === 'string' && msg.t.startsWith('g.')) return this.routeGame(session, msg);
         return fail(ERR.BAD_MSG, `unhandled type ${String(msg.t).slice(0, 32)}`);
@@ -452,9 +453,32 @@ export class Lobby {
     return OK;
   }
 
+  /**
+   * m.monitor { code, targetPlayerId? }（自研，2026-10-06）：monitor 监看者订阅某玩家的完整 m.private。
+   * 与 spectate 的关键区别：**不占观战席位、不进 seats/spectators、不改 roomCode、不计入任何统计**，
+   * 也不影响被看玩家——只是在 Match._sendPrivate 的收件人里多加一个 id。
+   * targetPlayerId 缺省/null = 取消监看。房间必须存在且正在对局。
+   */
+  monitor(session, { code, targetPlayerId }) {
+    const norm = String(code).trim().toUpperCase();
+    const room = norm.length === ROOM_CODE_LEN ? this.rooms.get(norm) : undefined;
+    if (!room) return fail(ERR.ROOM_NOT_FOUND);
+    if (!room.match) return fail(ERR.WRONG_PHASE, 'no running match');
+    // 监看者自身的 id：session.playerId（一个普通连接即可，不必入房）
+    if (targetPlayerId == null) {
+      this.callMatch(room, 'removeMonitorWatcher', session.playerId);
+      session.monitorRoom = null;
+      return OK;
+    }
+    // 先打标记再注册：addMonitorWatcher 会立即补发一份 privateView，投递路径需要 monitorRoom 已就位
+    session.monitorRoom = room.code;
+    const ok = this.callMatch(room, 'addMonitorWatcher', session.playerId, targetPlayerId);
+    if (ok !== true) { session.monitorRoom = null; return fail(ERR.BAD_TARGET, 'no such player in this match'); }
+    return OK;
+  }
+
   /** room.removeSpectator (host, any time): the spectator gets room.closed {kicked} and its seat is freed. */
-  removeSpectator(session, { playerId }) {
-    const room = this.roomOf(session);
+  removeSpectator(session, { playerId }) {    const room = this.roomOf(session);
     if (!room) return fail(ERR.NOT_IN_ROOM);
     if (room.hostId !== session.playerId) return fail(ERR.NOT_HOST);
     if (!room.spectatorOf(playerId)) return fail(ERR.BAD_TARGET, 'not a spectator of this room');
@@ -1061,9 +1085,14 @@ export class Lobby {
   sendToPlayer(room, playerId, msg) {
     if (room.disposed) return false;
     const seat = room.seatOf(playerId) || room.spectatorOf(playerId);
-    if (!seat || seat.isBot || seat.left) return false;
-    const session = this.registry.byId(playerId);
-    if (!session || session.roomCode !== room.code) return false;
-    return sendSession(session, msg);
+    if (seat && !seat.isBot && !seat.left) {
+      const session = this.registry.byId(playerId);
+      if (!session || session.roomCode !== room.code) return false;
+      return sendSession(session, msg);
+    }
+    // monitor 监看者（自研）: 不是座位也不是观战席，只是一个带 monitorRoom 标记的普通连接
+    const mon = this.registry.byId(playerId);
+    if (mon && mon.monitorRoom === room.code) return sendSession(mon, msg);
+    return false;
   }
 }

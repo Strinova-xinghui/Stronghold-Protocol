@@ -381,6 +381,12 @@ export class Match {
     this.runner = null;
     /** playerId → fieldId */
     this.watchers = new Map();
+    /**
+     * monitor 监看者（自研）: watcherId → 被监看的 playerId。完全独立于 spectators 座位，
+     * 不占观战名额、不计入 humans/观战统计、不参与房间生命周期；只在 _sendPrivate 里追加一个收件人。
+     * @type {Map<string, string>}
+     */
+    this.monitorWatchers = new Map();
     this.lastResults = new Map();
     this.unitePlan = null;
     /** server-run 联防: the leakers' counts last published (_uniteTick) */
@@ -536,6 +542,44 @@ export class Match {
   /** The spectator left (room.leave / g.leave, removed by the host, reconnect window expired). */
   removeSpectator(playerId) {
     if (this.spectators.delete(playerId)) this.watchers.delete(playerId);
+  }
+
+  // ---------------------------------------------------------------------------------------------------
+  // monitor 监看者（自研，2026-10-06）：无席位限制地窥看某玩家的完整 privateView（装备/整备区/商店）
+
+  /**
+   * 注册/切换一个 monitor 监看者：watcherId 将收到 targetPlayerId 的完整 m.private 数据流。
+   * 不占观战席位、不入 seats/spectators、不计入任何统计，对被看者零影响。
+   * @param {string} watcherId 监看者 id（由 /monitor 侧生成，带前缀区分）
+   * @param {string} targetPlayerId 被监看的玩家 id
+   * @returns {boolean} 目标是否有效
+   */
+  addMonitorWatcher(watcherId, targetPlayerId) {
+    if (this.disposed || this.ended) { this.log?.warn?.(`[monitor] rejected: disposed=${this.disposed} ended=${this.ended}`); return false; }
+    const ps = this.players.get(targetPlayerId);
+    if (!ps) { this.log?.warn?.(`[monitor] no such player ${targetPlayerId}; have=${[...this.players.keys()].join(',')}`); return false; }
+    this.monitorWatchers.set(watcherId, targetPlayerId);
+    // 立即补发一份当前状态（不必等下一次 dirty）
+    try {
+      const view = ps.privateView();
+      const sent = this.sendTo(watcherId, { ...view, playerId: ps.playerId, _monitor: true });
+      this.log?.info?.(`[monitor] ${watcherId} watching ${targetPlayerId}, initial send=${sent}`);
+    } catch (e) { this.reportError('monitorWatcher resend', e); }
+    return true;
+  }
+
+  /** 监看者离开（断开/换目标/对局结束）。 */
+  removeMonitorWatcher(watcherId) {
+    return this.monitorWatchers.delete(watcherId);
+  }
+
+  /** 当前监看某玩家的监看者数量（诊断用）。 */
+  monitorWatcherCount(targetPlayerId = null) {
+    if (!this.monitorWatchers || !this.monitorWatchers.size) return 0;
+    if (targetPlayerId == null) return this.monitorWatchers.size;
+    let n = 0;
+    for (const t of this.monitorWatchers.values()) if (t === targetPlayerId) n++;
+    return n;
   }
 
   /** The stand-in of a spectator seat, created once (null for a player's id or a bad id). */
@@ -764,7 +808,10 @@ export class Match {
   sendTo(playerId, msg) {
     if (this.disposed) return false;
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
-    if (!ps || ps.isBot || ps.left) return false;
+    // monitor 监看者（自研）: 不是玩家也不是观战席位，只是一个额外的收件人（不需要 PlayerState）
+    const isMonitor = !ps && this.monitorWatchers && this.monitorWatchers.has(playerId);
+    if (!ps && !isMonitor) return false;
+    if (ps && (ps.isBot || ps.left)) return false;
     try { return !!this.sendFn(playerId, msg); } catch (e) { this.reportError('send', e); return false; }
   }
 
@@ -825,6 +872,13 @@ export class Match {
     if (!force && json === ps._lastPriv) return;
     ps._lastPriv = json;
     this.sendTo(ps.playerId, view);
+    // monitor 监看者（自研）: 把同一份 privateView 也发给正在监看这名玩家的人。
+    // 独立于观战席位（spectators），不影响玩家、不计入房间统计；收件人拿到的数据与被看者逐字节相同。
+    if (this.monitorWatchers && this.monitorWatchers.size) {
+      for (const [watcherId, targetId] of this.monitorWatchers) {
+        if (targetId === ps.playerId) this.sendTo(watcherId, { ...view, playerId: ps.playerId, _monitor: true });
+      }
+    }
   }
 
   _maybeSendPublic(force) {

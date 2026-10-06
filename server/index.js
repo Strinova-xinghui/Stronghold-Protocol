@@ -66,6 +66,7 @@ function monitorSnapshot(lobby) {
     if (r.match && !r.match.disposed && !r.match.ended) {
       const m = r.match;
       const players = (m.order || []).map((ps) => ({
+        playerId: ps.playerId,
         name: ps.name, isBot: ps.isBot, connected: ps.isBot || (ps.connected && !ps.left),
         alive: ps.alive, lp: Math.max(0, Math.round(ps.lp) || 0), shopLevel: ps.shop ? ps.shop.level : null,
         boardCount: ps.deployCount ?? null, ready: !!(ps.infoReady ?? ps.ready),
@@ -121,6 +122,27 @@ const MONITOR_HTML = `<!doctype html>
   .lp { font-variant-numeric: tabular-nums; color: #ffd479; }
   .spec { margin-top: 8px; font-size: 12px; color: #7a8698; }
   .empty { color: #7a8698; text-align: center; padding: 40px 0; }
+  /* 监看（自研） */
+  .mon-btn { background: #223047; color: #9db4d0; border: 1px solid #2f4057; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+  .mon-btn:hover { background: #2b3d59; color: #fff; }
+  .mon-link { margin-left: 6px; color: #7ecbff; font-size: 12px; text-decoration: none; }
+  .mon-link:hover { text-decoration: underline; }
+  .watch { position: fixed; right: 16px; top: 16px; width: 420px; max-height: 88vh; overflow: auto; background: #131a25; border: 1px solid #2f4057; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.5); z-index: 20; }
+  .watch.hidden { display: none; }
+  .watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #223047; position: sticky; top: 0; background: #131a25; }
+  .watch-head b { color: #ffd479; flex: 1; }
+  .watch-head button { background: #223047; color: #9db4d0; border: none; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .watch-body { padding: 12px 14px; }
+  .ws-on { color: #7fe0a2; font-size: 12px; } .ws-off { color: #e07a7a; font-size: 12px; }
+  .kv { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; margin-bottom: 10px; }
+  .kv span { color: #7a8698; } .kv b { color: #fff; margin-left: 4px; }
+  .sec { margin-bottom: 10px; } .sec h4 { margin: 0 0 5px; font-size: 12px; color: #7a8698; font-weight: 500; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { font-size: 12px; padding: 2px 7px; border-radius: 5px; background: #1d2735; color: #c6d4e6; }
+  .chip.empty { color: #3a4658; background: transparent; } .chip.shop { background: #2a3550; color: #ffd479; }
+  .chip.bond { background: #223047; color: #9db4d0; } .chip.bond.on { background: #1d3a2a; color: #7fe0a2; }
+  .muted { color: #3a4658; font-size: 12px; }
+  .ts { color: #3a4658; font-size: 11px; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -128,6 +150,14 @@ const MONITOR_HTML = `<!doctype html>
 <div class="sub" id="updated">加载中…</div>
 <div class="stats" id="stats"></div>
 <div id="rooms"></div>
+<div id="watch" class="watch hidden">
+  <div class="watch-head">
+    <b id="watch-title">监看</b>
+    <span id="watch-status" class="ws-off">未连接</span>
+    <button id="watch-close">关闭</button>
+  </div>
+  <div id="watch-body" class="watch-body"><div class="empty">选择一名玩家后开始接收数据…</div></div>
+</div>
 <script>
 const PHASE_NAMES = __PHASE_NAMES__;
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
@@ -163,14 +193,21 @@ function render(d) {
            (m.paused ? '<span class="tag paused">已暂停</span>' : '') +
            (m.teamLp != null ? '<span class="lp">团队生命 ' + m.teamLp + '</span>' : '');
     }
-    h += '</div><table><tr><th>玩家</th><th>状态</th></tr>';
+    h += '</div><table><tr><th>玩家</th><th>状态</th><th colspan="2">操作</th></tr>';
     if (r.match) {
       for (const p of r.match.players) {
         const conn = p.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
         const tag = p.isBot ? ' <span class="bot">AI</span>' : '';
         const alive = p.alive ? '' : ' <span class="dead">淘汰</span>';
+        // 监看（自研）: 非 bot 的真人玩家才可被监看；按钮打开数据面板 + 完整客户端入口
+        const watchable = !p.isBot && p.playerId;
+        const btns = watchable
+          ? '<button class="mon-btn" data-code="' + esc(r.code) + '" data-pid="' + esc(p.playerId) + '" data-name="' + esc(p.name) + '">监看</button>' +
+            '<a class="mon-link" href="/?room=' + esc(r.code) + '" target="_blank" rel="noopener">客户端</a>'
+          : '';
         h += '<tr><td>' + esc(p.name) + tag + alive + '</td><td>' + conn +
-             '</td><td class="lp">LP ' + p.lp + '</td><td>商店 Lv' + (p.shopLevel ?? '?') + '</td><td>场上 ' + (p.boardCount ?? '?') + '</td></tr>';
+             '</td><td class="lp">LP ' + p.lp + '</td><td>商店 Lv' + (p.shopLevel ?? '?') + '</td><td>场上 ' + (p.boardCount ?? '?') + '</td>' +
+             '<td>' + btns + '</td></tr>';
       }
     } else {
       for (const s of r.seats) h += seatRow(s, false);
@@ -190,6 +227,86 @@ async function tick() {
 }
 render(__INITIAL__);
 setInterval(tick, 5000);
+
+// ---- 监看（自研）: 通过 m.monitor 订阅某玩家的完整 m.private（装备/整备区/商店），独立于观战席位 ----
+let monWs = null, monRid = 0, monTarget = null;
+const monPending = new Map();
+function monSetStatus(text, cls) {
+  const el = document.getElementById('watch-status');
+  el.textContent = text;
+  el.className = cls;
+}
+function monConnect() {
+  if (monWs && monWs.readyState <= 1) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    monWs = new WebSocket(proto + '//' + location.host + '/ws');
+    monWs.onopen = () => { monSetStatus('已连接', 'ws-on'); resolve(); };
+    monWs.onerror = () => { monSetStatus('连接失败', 'ws-off'); reject(new Error('ws error')); };
+    monWs.onclose = () => { monSetStatus('已断开', 'ws-off'); monWs = null; };
+    monWs.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.rid && monPending.has(m.rid)) { monPending.get(m.rid)(m); monPending.delete(m.rid); return; }
+      if (m.t === 'm.private' && m._monitor) monRenderPrivate(m);
+    };
+  });
+}
+function monRequest(msg) {
+  return new Promise((resolve) => {
+    const rid = ++monRid;
+    monPending.set(rid, resolve);
+    monWs.send(JSON.stringify({ ...msg, rid }));
+    setTimeout(() => { if (monPending.has(rid)) { monPending.delete(rid); resolve({ t: 'error', code: 'TIMEOUT' }); } }, 4000);
+  });
+}
+async function monWatch(code, playerId, name) {
+  document.getElementById('watch').classList.remove('hidden');
+  document.getElementById('watch-title').textContent = '监看: ' + name;
+  document.getElementById('watch-body').innerHTML = '<div class="empty">正在订阅…</div>';
+  try {
+    await monConnect();
+    if (!monTarget) { await monRequest({ t: 'hello', name: '监控台' }); }
+    if (monTarget && monTarget.playerId !== playerId) await monRequest({ t: 'm.monitor', code: monTarget.code, targetPlayerId: null });
+    const r = await monRequest({ t: 'm.monitor', code, targetPlayerId: playerId });
+    if (r.t === 'error') { document.getElementById('watch-body').innerHTML = '<div class="empty">订阅失败: ' + esc(r.code) + '</div>'; return; }
+    monTarget = { code, playerId, name };
+  } catch (e) {
+    document.getElementById('watch-body').innerHTML = '<div class="empty">连接失败: ' + esc(e.message) + '</div>';
+  }
+}
+function monClose() {
+  if (monTarget && monWs && monWs.readyState === 1) monRequest({ t: 'm.monitor', code: monTarget.code, targetPlayerId: null });
+  monTarget = null;
+  document.getElementById('watch').classList.add('hidden');
+}
+// privateView 渲染：手牌/整备区、棋盘（含装备）、商店、资金/生命/盟约
+function monRenderPrivate(v) {
+  const chips = (arr) => arr.map((p) => p
+    ? '<span class="chip" title="' + esc(p.id) + '">' + esc((p.id || '').replace(/^chess_/, '')) + (p.items && p.items.length ? ' <b>+' + p.items.length + '</b>' : '') + '</span>'
+    : '<span class="chip empty">·</span>').join('');
+  const shopSlots = (v.shop && v.shop.slots || []).map((s) => s
+    ? '<span class="chip shop">' + esc((s.id || '').replace(/^(chess|item)_/, '')) + ' <b>' + s.price + '</b></span>'
+    : '<span class="chip empty">·</span>').join('');
+  const bonds = (v.bonds || []).filter((b) => b.active || b.layers).slice(0, 12)
+    .map((b) => '<span class="chip bond' + (b.active ? ' on' : '') + '">' + esc(b.bondId) + ' ' + b.count + (b.layers ? '/' + b.layers : '') + '</span>').join('');
+  const hand = (v.hand || []).filter(Boolean);
+  const temp = (v.temp || []).filter(Boolean);
+  document.getElementById('watch-body').innerHTML =
+    '<div class="kv"><span>资金</span><b>' + v.funds + '</b><span>生命</span><b>' + v.lp + '</b>' +
+    '<span>商店Lv</span><b>' + (v.shop ? v.shop.level : '?') + '</b><span>场上</span><b>' + (v.deployCount ?? '?') + '/' + (v.deployCap ?? '?') + '</b></div>' +
+    '<div class="sec"><h4>商店' + (v.shop && v.shop.rewardOffer ? '（有奖励选卡）' : '') + '</h4><div class="chips">' + (shopSlots || '<span class="muted">空</span>') + '</div></div>' +
+    '<div class="sec"><h4>棋盘 ' + (v.board || []).length + ' 个（含装备）</h4><div class="chips">' + (chips(v.board) || '<span class="muted">空</span>') + '</div></div>' +
+    '<div class="sec"><h4>整备区 ' + hand.length + '</h4><div class="chips">' + (chips(v.hand) || '<span class="muted">空</span>') + '</div></div>' +
+    (temp.length ? '<div class="sec"><h4>临时区 ' + temp.length + '</h4><div class="chips">' + chips(v.temp) + '</div></div>' : '') +
+    '<div class="sec"><h4>盟约</h4><div class="chips">' + (bonds || '<span class="muted">无</span>') + '</div></div>' +
+    '<div class="ts">最后更新 ' + new Date().toLocaleTimeString('zh-CN') + '</div>';
+}
+// 事件委托：卡片上的「监看」按钮
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.mon-btn');
+  if (btn) { monWatch(btn.dataset.code, btn.dataset.pid, btn.dataset.name); return; }
+  if (ev.target.closest('#watch-close')) monClose();
+});
 </script>
 </body>
 </html>`;

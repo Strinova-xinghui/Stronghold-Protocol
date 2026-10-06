@@ -285,6 +285,9 @@ export const C2S = {
   // room.closed { reason: 'kicked' }). room.leave / g.leave leave a spectator seat like a player seat.
   'room.spectate': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v) },
   'room.removeSpectator': { playerId: isId },
+  // monitor 监看（自研，2026-10-06）: 无席位限制地窥看某玩家的完整 m.private（装备/整备区/商店）。
+  // 独立于房间座位与观战席；targetPlayerId 为 null/缺省 = 取消监看。仅在 /monitor 页面使用。
+  'm.monitor': { code: (v) => isStr(v, ROOM_CODE_LEN + 2) && /^[A-Za-z0-9]+$/.test(v), targetPlayerId: (v) => v == null || isId(v), $optional: ['targetPlayerId'] },
 
   // match
   'g.infoReady': {},
