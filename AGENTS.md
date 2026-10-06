@@ -91,6 +91,7 @@
 - **自研文件清单（同步后必须逐个验证仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`scripts/register-wake.*`、`scripts/uninstall-task.*`、`scripts/wake-start.ps1`、`tools/test-monitor.mjs`、`tools/test-bond-boost-math.mjs`；`server/index.js`（monitor）、`server/match/pool.js`+`PlayerState.js`+`Match.js`（bondBoost）中的自研代码。
 - **冲突判断**：先从 API 查上游 commit 动了哪些文件；上游没动的文件，自研版本直接 `git show <commit>:<path> > <path>` 恢复即零冲突。本轮上游 4 个 commit（d582925/f6f5ed5/f6794a2/19a8908）均未触碰 server/，恢复无冲突。
 - **验证三件套**：`node --check` 逐文件语法 → `node --test test/match/pool.test.js`（10/10）+ `node tools/test-bond-boost-math.mjs`（PASS）→ 临时端口起服打 `/monitor?json`。
+- **合并/同步后必跑：`node tools/check-missing-imports.mjs`**（扫描「被调用但未导入且未定义」的符号）。**血案（2026-10-06 `voiceKey is not defined`）**：合并 fork 0.1.6 时，`game.js` 取了 fork 的代码（调用 `voiceKey` 3 处：选中/部署/卖人路径），但同一文件我改回了我方 import、`audio.js` 也退回我方版本（不导出该符号）→ 运行时 ReferenceError，表现为「卖不了人」等操作失败。**教训：解决冲突要按「符号依赖」判断，不能按「文件」判断**——取了一侧的代码，就必须补齐它依赖的导入/导出；合并后立刻跑扫描器 + 用无头浏览器走一遍真实操作路径。
 - **目录变更注意**：上游同步曾把 `public/vendor/` 清空（不进 git，靠 postinstall 重建），症状 = 游戏页加载到一半报「游戏脚本加载失败」；修复 = `node tools/vendor.mjs`，无需回退代码。
 
 ### 一键开服/关服（2026-10-06 定稿，完全脱离 DSH）
