@@ -198,8 +198,9 @@ function render(d) {
         const conn = p.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
         const tag = p.isBot ? ' <span class="bot">AI</span>' : '';
         const alive = p.alive ? '' : ' <span class="dead">淘汰</span>';
-        // 观战入口（自研）: 「观战」= 影子客户端（全功能视角，不占席位、不影响玩家）；「数据」= 侧栏数据面板
-        const watchable = !p.isBot && p.playerId;
+        // 观战入口（自研）: 「观战」= 影子客户端（全功能视角，不占席位、不影响玩家）；「数据」= 侧栏数据面板。
+        // 任何座位都可看（含 AI）——方便观察 bot 的商店/装备/摆阵来调甄选数值。
+        const watchable = !!p.playerId;
         const btns = watchable
           ? '<a class="mon-btn" href="/?shadow=' + esc(r.code) + '&as=' + esc(p.playerId) + '" target="_blank" rel="noopener">观战</a>' +
             '<button class="mon-btn ghost" data-code="' + esc(r.code) + '" data-pid="' + esc(p.playerId) + '" data-name="' + esc(p.name) + '">数据</button>'

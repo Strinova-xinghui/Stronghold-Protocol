@@ -580,6 +580,13 @@ export class Match {
     return this.monitorWatchers.delete(watcherId);
   }
 
+  /** 该玩家（含 AI 座位）是否正被任何监看者看着（自研）。 */
+  _isWatched(playerId) {
+    if (!this.monitorWatchers || !this.monitorWatchers.size) return false;
+    for (const t of this.monitorWatchers.values()) if (t === playerId) return true;
+    return false;
+  }
+
   /** 当前监看某玩家的监看者数量（诊断用）。 */
   monitorWatcherCount(targetPlayerId = null) {
     if (!this.monitorWatchers || !this.monitorWatchers.size) return 0;
@@ -814,22 +821,19 @@ export class Match {
 
   sendTo(playerId, msg) {
     if (this.disposed) return false;
+    // 统一镜像（自研）：发给任何玩家/AI 的帧都原样转发给监看者（影子观战支持 AI 座位）。
+    // 放在最前：bot 不走 _sendPrivate、_resync 的 public 也走这里；镜像用 sendFn 直发，不经 sendTo，天然不递归。
+    if (this.monitorWatchers && this.monitorWatchers.size) {
+      for (const [watcherId, targetId] of this.monitorWatchers) {
+        if (targetId === playerId) { try { this.sendFn(watcherId, { ...msg, _monitor: true }); } catch { /* ignore */ } }
+      }
+    }
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
     // monitor 影子监看者（自研）: 不是玩家也不是观战席位，只是一个额外的收件人（不需要 PlayerState）
     const isMonitor = !ps && this.monitorWatchers && this.monitorWatchers.has(playerId);
     if (!ps && !isMonitor) return false;
-    if (ps && (ps.isBot || ps.left)) return false;
-    try {
-      const ok = !!this.sendFn(playerId, msg);
-      // 统一镜像（自研）：把发给被看玩家的每一帧（private / 战场 / 结果 / ticker…）原样转发给监看他的人，
-      // 使影子客户端拿到与被看者完全相同的帧序列。监看者自己不在 players 里，天然不会递归。
-      if (ok && ps && !ps.spectator && this.monitorWatchers && this.monitorWatchers.size) {
-        for (const [watcherId, targetId] of this.monitorWatchers) {
-          if (targetId === playerId) this.sendFn(watcherId, { ...msg, _monitor: true });
-        }
-      }
-      return ok;
-    } catch (e) { this.reportError('send', e); return false; }
+    if (ps && ps.left) return false;
+    try { return !!this.sendFn(playerId, msg); } catch (e) { this.reportError('send', e); return false; }
   }
 
   broadcast(msg) {
@@ -876,6 +880,8 @@ export class Match {
       this._privDirty.clear();
       for (const ps of list) {
         if (!(ps.isBot || ps.left || !ps.connected)) this._sendPrivate(ps, false);
+        // AI 座位被影子监看（自研）: bot 平时不发 private，被监看时也要持续推送，否则观战画面静止
+        else if (ps.isBot && this._isWatched(ps.playerId)) this._sendPrivate(ps, false);
         this._notifyPrepScouts(ps);
       }
     }
