@@ -58,6 +58,8 @@
 - **接线**：`main.js` 引入并调用 `installShadow`（命中则 `net.setName('观战·影')` **触发 hello** —— 不 setName 就不会握手，这是踩过的坑）；`store.js` 的 `selectRoute` 在 `s.me.shadow` 时直返 `'game'`（影子无 session.entered，否则卡在标题页）。
 - **验证**：`node tools/verify-shadow.mjs <port>`（7/7：订阅成功、_monitor private、shop/hand/board 字段、m.public 到达、**无头浏览器渲染出真实对局界面**（如「选择策略/决策顺序/玩家A 决策中」）、无 JS 错误）+ 核心回归 pool 10/10、bonds 7/7、seats6 10/10。
 - **两个入口并存**（monitor 玩家行两个按钮）：「观战」= 影子客户端（全功能画面）；「数据」= 侧栏数据面板（轻量文字，不加载客户端）。
+- **AI 座位也可看（2026-10-07，提交 0023cef）**：任何座位（含 bot）都有观战/数据按钮——用户反馈"永远只能看一号位"，根因是按钮过滤 `!p.isBot` + 服务端 bot 不走 _sendPrivate/被 sendTo 拒发。实现：① 镜像移到 `sendTo` **入口**（bot 的 _resync public 等帧也走这里；镜像用 sendFn 直发不经 sendTo，天然不递归）；② `flush` 里 bot 被监看时（`_isWatched`）也持续推 private（否则画面静止）；③ 放开 `!p.isBot` 过滤。验证：真实 WS 监看 AI（订阅 OK、hand=10、切换第二个 AI OK）+ 无头浏览器以 AI 视角渲染完整对局界面（0 JS 错误）。
+- **monitor 面板 WS 连接数**：monitorSnapshot 需带 `network.connectionCount`（早期只传 lobby.stats() 导致面板显示 undefined）。
 - **安全**：同样无鉴权，且能力更强（可看战场细节）。纯合作 PVE 可接受；开 PVP 前必须加口令或限本机。
 
 以下均为本项目本地追加，上游无此代码；更新代码时注意 rebase 保护。
@@ -198,6 +200,24 @@
 - **改座位模式必须重启**（Node 进程内不可热改）：先 `stop-online.bat` 再开；两套启动器（4 人 / 6 人）共用同一个 24500。
 - **无需移植的部分**：字体（我们已有）、`cheats` 作弊层（作者已在包内自行删除，只剩占位文件）、Docker/CI 改动（与 6 人无关）。
 - **并发协作提醒**：本次移植期间**有另一个会话在同一仓库并行提交**（monitor 实时监看 `00ff41d`、影子观战 `649e726`），双方都改了 `server/index.js` / `server/match/Match.js` / `shared/protocol.js`。实测两者**逻辑上互不干扰**（函数级并存，17 个 6 人钩子点 + 3 个 monitor 符号全在）。**教训：在同一仓库并发提交时，先 `git log` 看有没有别人的新提交，提交前只 `git add` 自己改的文件，绝不 `git add -A`。**
+
+#### 「6 人服玩 4 人」会有影响吗？—— 实测：不会，且这是硬保证（2026-10-07）
+
+- **机制（一句话）**：所有缩放的唯一输入是 `Match.seatCount = players.size`（**实际入座人数**），房间容量 `Lobby.maxSeats` **从不进入对局引擎**——它只决定座位格子数与协议上界。所以 6 座房里坐 4 人 → `seatCount = 4` → 每个系数恒为 1。
+- **逐项实测等价**（`test/match/seats6-compat.test.js`，2/2；同一 seed 分别起 `maxSeats:4` 与 `maxSeats:6` 的服务器各开一局 4 人 coop/HARD 对比）：
+  | 项目 | 4 人服 | 6 人服玩 4 人 |
+  | --- | --- | --- |
+  | 房间座位格数 | 4 | 6（另 2 格空着） |
+  | `match.seatCount` | 4 | **4** |
+  | 禁用盟约（`disabledBonds`） | 3 core + 4 addon | **完全相同** |
+  | 被 ban 干员（`bannedChess`） | — | **完全相同** |
+  | 共享牌库总份数 | — | **逐干员相同**（并与手工按 ×1 构建的池一致） |
+  | 领袖血池 | 官方值 | **官方值**（`bossPoolHp(..., players=0)`） |
+  | 最终攻势战场数 | 2 | **2** |
+- **已知差异（仅 UI/协议，不影响玩法）**：座位板显示 6 格（2 格空）；大厅显示「1–6 名博士」；`room.removeBot` / `room.kick` 的座位上界放宽到 5；玩家头像色板有 6 色（**前 4 色与原值逐字节相同**，所以 4 人局配色不变）。
+- **⚠️ 血案（2026-10-07，必读）：三方包改 `RESULT_LIMITS` 时删掉了 `shared/protocol.js` 的 `MAX_SEATS` 导入，却漏改 `room.kick` 的 seat 上界**，导致 **所有服务器（4 人服也一样）房主踢人抛 `ReferenceError: MAX_SEATS is not defined`** → 被 `net.js` 的 catch 兜成 `INTERNAL`，表现为「踢不动人」。修复 = `kick` 上界改用 `RESULT_LIMITS.players - 1`（提交 `9a69db1`）。
+  - **为什么差点漏掉**：我第一轮只单跑了 `test/lobby.test.js`，**真实覆盖在 `test/lobby-kick.test.js`**（名字不含 lobby 主文件），于是把 5 个失败误判成「并行抖动」。**教训：全量测试的失败清单必须逐条按文件单跑复核，不能凭文件名猜覆盖面。**
+  - **防复发**：新增符号审计测试（同文件第 2 个 case）——对 16 个移植文件扫描 `MAX_SEATS` / `setSeatLimit` / `poolCopyMulFor` 等 10 个符号，要求「用到就必须 import 或 define」，已反向验证能抓住该 bug。
 
 ### 一键开服/关服（2026-10-06 定稿，完全脱离 DSH）
 
