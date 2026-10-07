@@ -13,19 +13,6 @@
         "minCount": 3,
         "mult": 2.6,
         "mode": "weight"
-      },
-      {
-        "slot": 1,
-        "kind": "maxLayers",
-        "minCount": 2,
-        "mult": 2.6,
-        "exclude": [
-          "soloShip",
-          "visiShip",
-          "miraShip",
-          "investShip"
-        ],
-        "mode": "weight"
       }
     ]
   },
