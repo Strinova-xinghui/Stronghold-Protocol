@@ -564,9 +564,12 @@ export class Match {
       const view = ps.privateView();
       const sent = this.sendTo(watcherId, { ...view, playerId: ps.playerId, _monitor: true });
       this.sendTo(watcherId, this.publicView());
-      // 战场帧：影子监看者需要与被看者相同的战场（含 b.start 规格）才能渲染战斗画面
+      // 战场帧：影子监看者需要与被看者相同的战场（含 b.start 规格）才能渲染战斗画面。
+      // 固定战场（用户反馈 2026-10-07）：优先取被看者**自己的**战场——被看者正在前往查看队友时
+      // this.watchers 里记的是别人的 field，影子不该从别人的战场开局（被淘汰者无自己的战场才退回 watch 的）。
       if (this.clientCombat) {
-        const fid = this.watchers.get(ps.playerId) || (this.fields.find((x) => x.players.includes(ps.playerId)) || {}).fieldId;
+        const own = this.fields.find((x) => x.players.includes(ps.playerId));
+        const fid = (own || {}).fieldId || this.watchers.get(ps.playerId);
         const f = fid ? this.fields.find((x) => x.fieldId === fid) : null;
         if (f) this.sendTo(watcherId, this._startMsg(f, ps.playerId, { watch: true }));
       }
@@ -578,6 +581,35 @@ export class Match {
   /** 监看者离开（断开/换目标/对局结束）。 */
   removeMonitorWatcher(watcherId) {
     return this.monitorWatchers.delete(watcherId);
+  }
+
+  /**
+   * Whether a frame about to be mirrored to a shadow watcher is an excursion of the被看者 into ANOTHER player's
+   * field (固定战场, user feedback 2026-10-07): the被看者 taps 前往查看 (g.watch) and the server sends them the
+   * scouted board (m.field `n:<pid>`) or the watched battle (b.start + its b.ev / b.snap ticks) — frames of a field
+   * the被看者 is not a player of. The shadow stays pinned on the被看者's own battlefield, so those are not mirrored.
+   * A field in `this.fields` decides by its players list (the被看者's own battle / boss field mirrors as usual); with
+   * no fields yet (休整期) every m.field is a scouted prep board — `n:<targetId>` itself never goes to the被看者
+   * (their own board is the m.private), so anything else is an excursion. An eliminated被看者 has no own field —
+   * the auto-observed field IS their whole view, so nothing is skipped.
+   * @param {{ t?: string, fieldId?: string, spec?: { fieldId?: string } }} msg the frame on its way to the shadow
+   * @param {string} targetId被看者
+   * @returns {boolean} true = skip this frame for this watcher
+   */
+  _monitorPinnedSkip(msg, targetId) {
+    const t = msg && typeof msg.t === 'string' ? msg.t : null;
+    if (t !== 'm.field' && t !== 'b.start' && t !== 'b.ev' && t !== 'b.snap') return false;
+    const ps = this.players.get(targetId);
+    if (!ps || !ps.alive) return false;
+    const fid = typeof msg.fieldId === 'string' && msg.fieldId ? msg.fieldId
+      : (msg.spec && typeof msg.spec.fieldId === 'string' && msg.spec.fieldId ? msg.spec.fieldId : null);
+    if (typeof fid !== 'string' || !fid) return false;
+    const fields = Array.isArray(this.fields) ? this.fields : [];
+    if (fields.length) {
+      const f = fields.find((x) => x && x.fieldId === fid);
+      return !f || !Array.isArray(f.players) || !f.players.includes(targetId);
+    }
+    return fid !== `n:${targetId}`;
   }
 
   /** 该玩家（含 AI 座位）是否正被任何监看者看着（自研）。 */
@@ -825,7 +857,13 @@ export class Match {
     // 放在最前：bot 不走 _sendPrivate、_resync 的 public 也走这里；镜像用 sendFn 直发，不经 sendTo，天然不递归。
     if (this.monitorWatchers && this.monitorWatchers.size) {
       for (const [watcherId, targetId] of this.monitorWatchers) {
-        if (targetId === playerId) { try { this.sendFn(watcherId, { ...msg, _monitor: true }); } catch { /* ignore */ } }
+        if (targetId === playerId) {
+          // 固定战场（用户反馈 2026-10-07）：被看者「前往查看」队友的棋盘/战场（g.watch）时，服务器发给他的
+          // m.field / b.start / b.ev / b.snap 是**别人的战场**的帧——影子固定在被看者自己的战场，这些帧不镜像。
+          // 被看者被淘汰（无自己的战场）时，自动观战的 field 就是他的全部视角，照常镜像。
+          if (this._monitorPinnedSkip(msg, targetId)) continue;
+          try { this.sendFn(watcherId, { ...msg, _monitor: true }); } catch { /* ignore */ }
+        }
       }
     }
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
