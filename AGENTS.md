@@ -138,6 +138,12 @@
 - **踩坑（测试侧，复用价值）**：① resource timing 默认 250 条 buffer 在游戏页必然溢出——先 `performance.setResourceTimingBufferSize(10000)` + `clearResourceTimings()`，否则语音请求根本不进 entries；② audio 走 `mediaUrl` 的**去扩展名**形式（`/assets/audio/X` → `/media/X`，`assets/audio` 整段剥掉），断言实际请求要看 `/media/voice/...`；③ `JSON.stringify(localStorage)` 对 Storage 对象返回 `{}`（属性不可枚举），要 `localStorage.getItem('sp.pref.settings')`；④ 测试切语言必须走真实 UI 路径 `updateSettings`——直接调 `audio.setVoiceLang` 绕过 store，store 不会同步（store→audio 单向，与 setVolumes 同构）。
 - **已知边界**：en/kr 语音未下载（四国只落地中日）；将来补齐 = 下载素材 + settings 单选加一项 + `setVoiceLang` 放行一项，机制已通用。切换不重播当前句（gentle 切换）。
 
+### 版本基点与公开 fork（2026-10-07）
+
+- **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。
+- **公开 fork**：<https://github.com/Strinova-xinghui/Stronghold-Protocol>（`gh repo fork` 建的真 fork，公开，继承 GPL）——master 已推送到 `41ef8fb`（`9f93096..41ef8fb` fast-forward，上游历史在其祖先链上）。本地 remote 名 **`mine`**。
+- **推送通道**：见全局 `~/.dsh/AGENTS.md`「GitHub 推送通道」——Clash Verge GUI 激活代理（服务常驻≠端口有监听）→ `$env:HTTPS_PROXY=http://127.0.0.1:7897` → git push 走 gh credential helper（Strinova-xinghui，repo 权限）。SSH 密钥路线已试并销毁（gh ssh-key add 需 admin:public_key scope，token 没有）。
+
 ### IPv6 直连（队友调研，报告 docs/ipv6-feasibility.md）
 
 - 判定**高可行性**：本机已获移动全局 IPv6（2409:8a55::/64），出口 ping 10-15ms；服务器代码 `HOST='::'` 即双栈；Windows 防火墙已有放行。
