@@ -695,14 +695,14 @@ function MatchScreen() {
     setReadyBusy(false);
   }, []);
 
-  // 休整期等待投票（自研 2026-10-07）：已就绪时按「等待」，全员（活人 −1）同意后暂停倒计时
+  // 休整期等待投票（自研 v2）：与准备完全独立——不就绪也能等待，等待不影响任何操作
   const [waitBusy, setWaitBusy] = useState(false);
   const toggleWait = useCallback(async (on) => {
-    if (phase !== PHASE.PREP || !priv?.ready) return;
+    if (phase !== PHASE.PREP) return;
     setWaitBusy(true);
     await actions.prepWait(on);
     setWaitBusy(false);
-  }, [phase, priv?.ready]);
+  }, [phase]);
   // the prep ended (timer) while the question was open: drop it — the funds are gone either way
   useEffect(() => { if (phase !== PHASE.PREP && askingReady.current) closeAllDialogs(); }, [phase]);
 
