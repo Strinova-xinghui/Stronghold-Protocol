@@ -32,10 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null });
+
+const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -83,7 +85,25 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer ? out : OFF;
+  // ---- 休整期负债规则（prepDebt，自研 2026-10-07）：lp ≤ 0 不淘汰进入负债，全队总和 < 0 才清算；
+  //      敌人波次强度按团队负债量化（与准备/等待完全独立）。详见 AGENTS.md「休整期负债规则」。
+  const pd = raw.prepDebt && typeof raw.prepDebt === 'object' ? raw.prepDebt : null;
+  if (pd && pd.enabled) {
+    out.prepDebt = Object.freeze({
+      enabled: true,   // 进入产物即启用（使用方统一检查 rule.enabled；enabled:false 在上方已被拦下）
+      // 超额压力斜率：团队压力每超出免赔额一份 Ā，敌人 HP ×(1 + k)。默认 0.3（一份超额 = +30%，即 cap）
+      k: Math.max(0, numOr(pd.k, 0.3)),
+      // 盈余斜率：团队盈余（歌利亚等高血策略撑起来的存款）每一份 Ā，敌人 HP ×(1 − k2)。默认 0.15
+      k2: Math.max(0, numOr(pd.k2, 0.15)),
+      // 免赔额度倍数：团队压力 ≤ graceMul × Ā 时不惩罚（团队缓冲，「3 个帮 1 个」的数学形态）。默认 1
+      graceMul: Math.max(0, numOr(pd.graceMul, 1)),
+      // 倍率钳制 [floor, cap]
+      cap: Math.max(1, numOr(pd.cap, 1.3)),
+      floor: Math.min(1, numOr(pd.floor, 0.85)),
+    });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt ? out : OFF;
 }
 
 /**
@@ -91,6 +111,9 @@ function normalize(raw) {
  * @param {{ log?: object }} [opts]
  */
 export function getCustomRules({ log = null } = {}) {
+  // golden 安全网等「官方基线」场景：SP_OFFICIAL_RULES=1 强制全部规则关闭（worker 线程继承环境变量），
+  // 使 golden 结果与 config/custom-rules.json 的用户配置完全解耦。
+  if (process.env.SP_OFFICIAL_RULES === '1') return OFF;
   let stat = null;
   try { stat = fs.statSync(CONFIG_PATH); } catch { stat = null; }
   if (!stat) {

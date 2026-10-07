@@ -219,6 +219,16 @@
 .readybtn:disabled .readybtn__box { border-color: var(--line-2); }
 .readybtn.is-busy { opacity: .7; }
 
+/* 休整期负债规则（自研 2026-10-07）: negative LP reads red; the enemy-strength pill sits beside the countdown. */
+.lp__val--debt { color: #ff6a55 !important; text-shadow: 0 0 .12rem rgba(255, 60, 40, .6); }
+.debtpill {
+  display: inline-flex; align-items: center; gap: .05rem; height: .34rem; padding: 0 .1rem;
+  background: rgba(43, 30, 6, .88); border: 1px solid rgba(255, 168, 50, .7); color: #ffd9a0;
+  font-family: var(--font-num); font-size: .13rem; font-weight: 700; white-space: nowrap;
+}
+.debtpill.is-hard { border-color: rgba(255, 90, 71, .8); color: #ffdcd6; background: rgba(40, 6, 6, .88); }
+.debtpill b { font-size: .15rem; }
+
 /* 休整期等待投票（自研 2026-10-07）: the 等待 toggle sits beside 准备就绪; amber look (a held clock reads as a
    warning, not a confirm), the held state reuses the pausebtn's pulsing mint so it matches the solo pause button. */
 .readywrap__pair { display: flex; align-items: stretch; gap: .08rem; }

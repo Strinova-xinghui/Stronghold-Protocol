@@ -1,6 +1,10 @@
 {
-  "rewardOffer": {
-    "enabled": false,
-    "slots": []
+  "prepDebt": {
+    "enabled": true,
+    "k": 0.3,
+    "k2": 0.15,
+    "graceMul": 1,
+    "cap": 1.3,
+    "floor": 0.85
   }
 }

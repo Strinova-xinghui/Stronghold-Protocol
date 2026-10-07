@@ -381,6 +381,9 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         ${frozenSecs != null
           ? html`<${Countdown} seconds=${frozenSecs} total=${total ?? undefined} size="md" label="PAUSED" />`
           : html`<${Countdown} deadline=${pub?.deadline} total=${total ?? undefined} size="md" />`}
+        ${pub?.debt ? html`<span class=${cx('debtpill', (pub.debt.mul || 1) > 1 && 'is-hard')}
+            title=${`全队生命值总和 ${pub.debt.lpSum}（基准 ${pub.debt.avgHp}/人）——负债加深则敌人更强，盈余则更弱`}>
+          敌方 ×<b class="num">${(pub.debt.mul || 1).toFixed(2)}</b></span>` : null}
         ${pause && (pause.show || pause.paused) ? html`<${PauseButton} paused=${!!pause.paused} busy=${pause.busy} onToggle=${pause.onToggle} />` : null}
       </div>
       <${OvertimeWarning} ot=${ot} />

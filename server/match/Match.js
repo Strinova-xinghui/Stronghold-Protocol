@@ -153,6 +153,7 @@ import {
 import { buildBattleSpec, createBattleFromSpec, resultDigest, compactResult as compactForVerify, battleProgress, uniteLeft } from '../sim/spec.js';
 import { CreditPool } from './finalAssault.js';
 import { buildResult } from './results.js';
+import { getCustomRules } from './customRules.js';
 import { botPrepBeginSteps, botPrepEndSteps, botPickBand, botPickCard } from './bot.js';
 
 const BOT_REHEARSAL_DEFAULT = 3;
@@ -246,6 +247,17 @@ export class Match {
     this.onEndFn = opts.onEnd;
     this.data = opts.data && typeof opts.data === 'object' ? opts.data : {};
     this.gd = new GameData(this.data, this.modeId);
+    this._debtRuleGetter = () => { try { return getCustomRules({ log: this.log }).prepDebt || null; } catch { return null; } };
+    // 休整期负债规则（自研 2026-10-07）：Ā = 全策略平均初始血量（排除最高的歌利亚 45）向上取整，选策略时锁定
+    this._debtAvgHp = (() => {
+      try {
+        const bands = Object.values(this.gd.raw?.bands || {}).filter((b) => Number.isFinite(b?.totalHp) && b.totalHp > 0);
+        if (bands.length < 2) return 0;
+        const top = Math.max(...bands.map((b) => b.totalHp));
+        const rest = bands.filter((b) => b.totalHp !== top);
+        return rest.length ? Math.ceil(rest.reduce((s, b) => s + b.totalHp, 0) / rest.length) : 0;
+      } catch { return 0; }
+    })();
     if (!this.difficulty) this.difficulty = this.gd.difficulty;
     this.isSolo = this.mode === 'solo' || this.gd.isSolo;
     this.ownsScheduler = !opts.scheduler;
@@ -1078,6 +1090,16 @@ export class Match {
     // 休整期等待投票（自研 v2）：held = 倒计时已暂停（全员等待）；waiters = 等待中的玩家 id。老客户端多余字段无副作用。
     if (this.phase === PHASE.PREP && this._prepWaiters?.size) {
       v.prepWait = { held: !!this._prepWaitHeldApplied, waiters: [...this._prepWaiters], all: this.prepWaitHeld };
+    }
+    // 休整期负债规则（自研）：lpSum = 全队血量总和（可负）；mul = 敌人波次强度倍率；avgHp = 量化基准。
+    // 开启时任何阶段都广播（负血/倍率横跨整局），客户端顶栏显示「敌方强度 ×mul」。
+    if (this._debtRule?.enabled) {
+      const aliveDebt = this.alivePlayers();
+      v.debt = {
+        lpSum: aliveDebt.reduce((s, p) => s + p.lp, 0),
+        mul: this._debtEnemyMul(),
+        avgHp: this._debtAvgHp,
+      };
     }
     return v;
   }
@@ -1987,6 +2009,38 @@ export class Match {
     });
   }
 
+  // ---- 休整期负债规则（自研 2026-10-07） ------------------------------------------------------------
+
+  /**
+   * 当前生效的负债规则（custom-rules.json prepDebt，mtime 热更）。未开启 ⇒ null（原版：lp ≤ 0 立即淘汰）。
+   */
+  get _debtRule() {
+    try { return getCustomRules({ log: this.log }).prepDebt || null; } catch { return null; }
+  }
+
+  /**
+   * 敌人波次强度倍率（自研负债惩罚，作用于普通/联防波次的敌人 HP，**不作用于领袖/Boss**）：
+   * 团队压力 P = 活人数 × Ā − Σ(活人 LP)（Ā = 排除歌利亚的全策略平均初始血量，向上取整）——
+   * 高血量策略与满血状态产生盈余（P < 0），低血策略与负债产生压力（P > 0）。
+   * 第一份 graceMul × Ā 的压力免罚（团队缓冲，「3 个帮 1 个」）；超出部分线性放大敌人 HP：
+   * 每份 Ā 的超额压力 ⇒ ×(1 + k)，封顶 cap；盈余对称减弱，下限 floor。
+   * 等待投票/准备状态与倍率无关——纯看全队血量总和（用户需求：等待与准备完全独立）。
+   * @returns {number} ≥ 1 的增强或 < 1 的减弱乘数（原版规则恒 1）
+   */
+  _debtEnemyMul() {
+    const rule = this._debtRule;
+    if (!rule || !(this._debtAvgHp > 0)) return 1;
+    const alive = this.alivePlayers();
+    if (!alive.length) return 1;
+    const sum = alive.reduce((s, p) => s + p.lp, 0);
+    const pressure = alive.length * this._debtAvgHp - sum;
+    const grace = this._debtAvgHp * (Number.isFinite(rule.graceMul) && rule.graceMul > 0 ? rule.graceMul : 1);
+    let mul = 1;
+    if (pressure > grace) mul = 1 + rule.k * (pressure - grace) / this._debtAvgHp;
+    else if (pressure < 0) mul = 1 + rule.k2 * pressure / this._debtAvgHp;
+    return Math.min(rule.cap, Math.max(rule.floor, mul));
+  }
+
   // ---- 休整期等待投票（自研，2026-10-07） ------------------------------------------------------------
 
   /**
@@ -2095,12 +2149,16 @@ export class Match {
   /**
    * Spawn list of a field after the onBattleStart handlers (which may edit `ev.spawns`): malformed entries are dropped
    * and a kill bounty is copied into `mods.bountyCoins`, so a leaked bounty enemy keeps paying its killer in 联防.
+   * `applyDebtMul`（自研负债规则）: multiply every enemy's HP by the team-debt strength factor（普通/联防波次传 true；
+   * 领袖/Boss 战不传——负债倍率不作用于 Boss）。
    */
-  _sanitizeSpawns(list, ownerPlayerId = null) {
+  _sanitizeSpawns(list, ownerPlayerId = null, applyDebtMul = false) {
+    const debtMul = applyDebtMul ? this._debtEnemyMul() : 1;
     const out = [];
     for (const s of Array.isArray(list) ? list : []) {
       if (!s || typeof s !== 'object' || typeof s.enemyKey !== 'string' || !this.gd.enemy(s.enemyKey)) continue;
       const spec = { ...s, mods: s.mods && typeof s.mods === 'object' ? { ...s.mods } : {} };
+      if (debtMul !== 1) spec.mods.hpMul = (Number.isFinite(spec.mods.hpMul) && spec.mods.hpMul > 0 ? spec.mods.hpMul : 1) * debtMul;
       if (ownerPlayerId && spec.ownerPlayerId == null) spec.ownerPlayerId = ownerPlayerId;
       const coins = spec.bounty && typeof spec.bounty === 'object' ? Math.trunc(Number(spec.bounty.coins) || 0) : 0;
       if (coins > 0 && spec.mods.bountyId == null && spec.mods.bountyCoins == null) spec.mods.bountyCoins = coins;
@@ -2128,7 +2186,7 @@ export class Match {
       rect: { ...GEO.NORMAL_RECT },
       timeLimit: wave.timeLimit,
       players: [ev.input && typeof ev.input === 'object' ? ev.input : input],
-      spawns: this._sanitizeSpawns(Array.isArray(ev.spawns) ? ev.spawns : spawns, ps.playerId),
+      spawns: this._sanitizeSpawns(Array.isArray(ev.spawns) ? ev.spawns : spawns, ps.playerId, true),
       routes: wave.routes,
       sharedBoss: null,
       flags: { layerGainsEnabled: true, ...this.gd.dp },
@@ -2256,7 +2314,7 @@ export class Match {
       rect: { ...GEO.UNITE_RECT },
       timeLimit: limit,
       players,
-      spawns: this._sanitizeSpawns(wave.spawns),
+      spawns: this._sanitizeSpawns(wave.spawns, null, true),
       routes: wave.routes,
       sharedBoss: null,
       flags: { layerGainsEnabled: false, ...this.gd.dp },
@@ -3142,11 +3200,26 @@ export class Match {
       ps.recompute();
     }
     for (const ps of alive) {
+      if (this._debtRule?.enabled) break;   // 负债规则：lp ≤ 0 不在此淘汰，改由下方团队清算
       if (ps.lp <= 0) {
         ps.lp = 0;
         ps.eliminate(this.round);
         this.toast(ps, 'error', '你的目标生命值耗尽，已被淘汰');
         this.tickerText(`${ps.name}博士的目标生命值已耗尽`, FLOW_TICKER_PRIORITY);
+      }
+    }
+    if (this._debtRule?.enabled) {
+      // 负债清算（自研 2026-10-07）：lp ≤ 0 进入负债继续作战；全队血量总和 < 0 时，从负债最深者开始逐个
+      // 淘汰（每淘汰一人移除其负数 LP，总和回升），直到总和 ≥ 0——「队友兜不住你了才死，死后队友压力减轻」。
+      let guard = alive.length + 1;
+      while (this.alivePlayers().reduce((s, p) => s + p.lp, 0) < 0 && guard-- > 0) {
+        const debtors = this.alivePlayers().filter((p) => p.lp < 0).sort((a, b) => a.lp - b.lp);
+        const ps = debtors[0];
+        if (!ps) break;
+        ps.lp = 0;
+        ps.eliminate(this.round);
+        this.toast(ps, 'error', '全队生命值总和告负，你的负债被清算');
+        this.tickerText(`${ps.name}博士的负债被清算`, FLOW_TICKER_PRIORITY);
       }
     }
     this.fields = [];

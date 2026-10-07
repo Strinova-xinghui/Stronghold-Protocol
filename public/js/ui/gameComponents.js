@@ -193,12 +193,14 @@ export function GIcon({ name, class: cls, title }) {
  */
 export function LpTower({ value, size = 'md', class: cls, tone, pending = 0, note = null, tip = null }) {
   const ok = Number.isFinite(value);
-  const p = ok && Number(pending) > 0 ? Math.min(value, Math.trunc(Number(pending))) : 0;
-  return html`<span class=${cx('lp', `lp--${size}`, tone && `lp--${tone}`, p > 0 && 'is-pending', cls)} title=${tip || '目标生命值'}
-      data-pending=${p > 0 ? p : null}>
+  const debt = ok && value < 0;   // 休整期负债规则（自研）：LP 可为负（负债状态），负数红字显示
+  const pend = ok && !debt && Number(pending) > 0 ? Math.min(value, Math.trunc(Number(pending))) : 0;
+  const shown = !ok ? '--' : debt ? value : Math.max(0, value - pend);
+  return html`<span class=${cx('lp', `lp--${size}`, tone && `lp--${tone}`, pend > 0 && 'is-pending', cls)} title=${tip || '目标生命值'}
+      data-pending=${pend > 0 ? pend : null} data-debt=${debt ? 'true' : null}>
     <${Sprite} k="hudPanel/icon_hp" class="lp__icon" fallback=${html`<${Icon} name="rook" class="lp__icon" />`} />
-    <b class="num lp__val">${ok ? Math.max(0, value - p) : '--'}</b>
-    ${p > 0 ? html`<span key=${p} class="lp__pend num" aria-label=${`结算时扣除 ${p}`}>−${p}</span>` : null}
+    <b class="num lp__val${debt ? ' lp__val--debt' : ''}">${shown}</b>
+    ${pend > 0 ? html`<span key=${pend} class="lp__pend num" aria-label=${`结算时扣除 ${pend}`}>−${pend}</span>` : null}
     ${note ? html`<span class="lp__note">${note}</span>` : null}
   </span>`;
 }

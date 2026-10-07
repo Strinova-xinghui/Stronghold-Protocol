@@ -51,6 +51,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { availableParallelism } from 'node:os';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+// golden = 官方基线回归（自研 2026-10-07）：强制关闭全部自研规则（custom-rules.json 的 prepDebt 等对对局结果
+// 有实际影响的规则），使 golden 语料与用户配置完全解耦——worker_threads 继承本进程的环境变量。
+process.env.SP_OFFICIAL_RULES = '1';
 import { getData } from '../server/data.js';
 import { DataSource } from '../server/sim/simdata.js';
 import { buildBattleSpec, createBattleFromSpec } from '../server/sim/spec.js';

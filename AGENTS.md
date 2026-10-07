@@ -148,8 +148,19 @@
 - **m.public.prepWait**：`{ held, waiters[], all }`（v2 去掉了 v1 的 target 字段）。hold 时 deadline 已是 0，客户端倒计时自然消失——Countdown 组件零改动（deadline=0 =「无倒计时」的既有 solo 语义）。
 - **客户端**：`actions.prepWait(on)`；`ReadyToggle`（hud.js）**始终渲染等待按钮**（`const waitBtn = html` 不再受 ready 门禁），与准备按钮并排（`readywrap__pair`，amber 色调，hold 时 mint 脉冲）；提示条改「倒计时已暂停 · 全员等待中 · N/total 人仍可操作」。
 - **验证**：`node tools/verify-prep-wait.mjs <port>`（**v2 20/20**：未就绪可等待/单人等待不 hold/全员等待 deadline=0/hold 期间 g.refresh 成功/取消恢复/ALREADY/B 就绪后 hold 仍成立/全员就绪 endPrep）+ `verify-prep-wait-ui.mjs`（10/10：未就绪也渲染等待按钮/三态/提示条）+ pool/seats6 20/20 + shadow-pin 15/15（monitor-watch 13/14 = 多轮验证的已知房间残留）。
-- **测试踩坑（复用价值）**：① 服务器不 serve `.cache/`——组件渲染 fixture 必须放 `public/` 下；② CDP `waitForFunction` 谓词**不能是 async**（超时）；③ 游戏页永不 networkidle2——组件级验证用 fixture 直渲（public/ 下静态 html + 同步写 window.__X + title 标记）；④ 重写测试前删旧文件后 write 工具会报 file no longer exists——先建占位文件再 read+edit，或 pwsh here-string 直接写；⑤ UI fixture 每次跑验证前必须在（清理后忘重建 → 假失败一批）。
 - **已知边界**：hold 无上限（需求本身）；全员卡死 = 任何一人取消等待即恢复；`_waitTargetId` 已无调用方（保留备用，如需恢复 v1「等最后一人」语义改回 hold 条件即可）。`update-restart` 后线上生效。
+
+
+### 休整期负债规则（prepDebt，2026-10-07 自研追加，朋友需求）
+
+- **需求**：lp ≤ 0 不淘汰进入**负债**（负血继续作战），全队血量总和 < 0 才回到原逻辑让负债者死；同时敌人为负债提供倍率加成（**只作用于普通/联防波次敌人 HP，不作用于领袖/Boss**）。动机：电表倒转等长操作玩法 + 高血量策略（歌利亚 45）有价值。
+- **量化设计（用户朋友原案 + 免赔额度修正）**：Ā = 全策略平均初始血量**排除最高的歌利亚（45）后向上取整 = 26**（Match 构造时从 bands 数据自动计算）；团队压力 P = 活人数 × Ā − Σ(活人 LP)（高血策略/满血 = 盈余 P<0，低血策略/负债 = 压力 P>0——**选低血策略本身就是自带负债**，朋友的明确意图）。**免赔额度**：第一份 graceMul × Ā 的压力免费（团队缓冲 = 「3 个帮 1 个」的数学形态，同时解决「四人各扣 10 血容易触发」的敏感度问题）；超额部分线性：每份 Ā ⇒ 敌人 HP ×(1+k)，k=0.3，封顶 cap=1.3；盈余对称减弱 k₂=0.15，下限 floor=0.85。全部热参数走 custom-rules.json。
+- **淘汰/清算（Match.settle 内，原 lp≤0 即淘汰处改造）**：负债规则开启时跳过原判定；结算后 Σ(活人 LP) < 0 ⇒ **从最深负债者逐个淘汰**（每淘汰一人移除其负 LP 总和回升）直至总和 ≥ 0；全灭 → afterSettle finish(eliminated)。淘汰文案「全队生命值总和告负，你的负债被清算」。**踩坑**：原代码 `ps.lp = 0` 在淘汰时归零——负债者存活期间 lp 保留负值，LpTower 客户端改为负数红字显示（`lp__val--debt`，gameComponents.js 原 `Math.max(0,...)` clamp 移除）。
+- **倍率注入点（关键选择）**：`Match._sanitizeSpawns(list, ownerPlayerId, applyDebtMul)`——普通波次（_normalOpts）与联防波次传 true（**联防敌人更强 = 「增加队友压力一起负重前行」原话的直接实现**），领袖/Boss 战（L3249）不传。注入方式 = spawns[].mods.hpMul ×倍率（spawnEnemy 原生支持 mods 乘数，与波次自带 hpMul（如 0.8）正确叠乘）。**不动 sim 内核 → golden 语料安全**。
+- **m.public.debt**：`{ lpSum, mul, avgHp }`（规则开启时任何阶段广播）；HUD 顶栏 `debtpill`「敌方 ×1.16」>1 时红色警示。
+- **golden 解耦（重要）**：prepDebt.enabled 会改变 golden 语料的对局结果（AI 淘汰行为偏离官方）→ `customRules.js getCustomRules` 加 **`SP_OFFICIAL_RULES=1` 强制全关**，`golden.mjs` 入口设置该 env（worker 继承）——golden 语料与用户配置永久解耦。已验证 golden 全绿（46+22+16）。
+- **验证**：`node --test tools/prep-debt.test.mjs`（**12/12**：倍率曲线 5 + 清算逻辑 3 + 波次注入同 seed 基线对比 1 + settle 结算接线 3）；E2E 的「真实漏怪扣血」路径不可行（client combat 由 authority 浏览器模拟，TestClient 不模拟 → 服务器 takeover 的替身战斗不产生漏怪扣血）——settle 接线单测替代。回归：甄选 4/4、物品 5/5（**必须单跑**——三个测试文件并发会互写 custom-rules.json）、prep-wait v2 20/20、shadow-pin 15/15。
+- **已知边界**：负债无个人上限（总和 < 0 才清算，高血队友兜底 = 设计）；hold 倒计时 + 负债叠加 = 无限时长的整活局（设计意图）；最终攻势个人 LP 冻结（只扣 teamLp），血池倍率按进入时负债锁定；普通波次倍率在每场战斗 spec 生成时锁定（回合内不变）。
 
 ### 版本基点与公开 fork（2026-10-07）
 
