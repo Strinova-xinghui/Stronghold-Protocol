@@ -1,8 +1,9 @@
 ﻿# 卫戍协议：盟约 —— 一键公网开服脚本（Cloudflare 临时隧道）
-# 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 3000]
+# 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 3000] [-MaxSeats 6] [-Tunnel]
 # 前提：已 npm install && node tools/setup.mjs --no-local；Clash 若开 TUN 需给 cloudflared.exe 加直连规则
 # 注意：本文件必须保存为 UTF-8 带 BOM，否则 Windows PowerShell 5.1 会解析失败（中文变乱码）
-param([int]$Port = 24500, [switch]$Tunnel)
+# -MaxSeats 6 = 开 6 人房间（非官方可选改动，默认不填 = 官方 4 人）。6 人改动只在 >4 人时生效。
+param([int]$Port = 24500, [int]$MaxSeats = 0, [switch]$Tunnel)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -39,13 +40,26 @@ if (-not $chosen) {
 }
 
 # 2. 服务器：没在跑才启动
+# 座位模式（SP_MAX_SEATS）：0 = 不设置 = 官方 4 人；2–6 = 该人数。启动时才生效，改模式必须重启进程。
+$seatMode = if ($MaxSeats -ge 2) { $MaxSeats } else { 4 }
 if ($alreadyRunning) {
-    Write-Host "[ok] 游戏服务器已在端口 $chosen 运行，跳过启动" -ForegroundColor Yellow
+    # 已在跑：读出它当前的座位模式，与请求的模式不一致时明确告知（改模式要重启，不能热改）
+    $stat = curl.exe -s -m 2 "http://127.0.0.1:$chosen/healthz" 2>$null
+    $curSeats = 4
+    if ("$stat" -match '"maxSeats"\s*:\s*(\d+)') { $curSeats = [int]$Matches[1] }
+    if ($curSeats -ne $seatMode) {
+        Write-Host "[!] 已在运行的服务器是 $curSeats 人模式，你要的是 $seatMode 人模式——座位模式启动时固定，必须重启才生效。" -ForegroundColor Yellow
+        Write-Host '    先双击 stop-online.bat 关服，再用本脚本重开。' -ForegroundColor Yellow
+    } else {
+        Write-Host "[ok] 游戏服务器已在端口 $chosen 运行（$curSeats 人模式），跳过启动" -ForegroundColor Yellow
+    }
 } else {
     $env:PORT = $chosen
     # 旧的「全格盟约加成」已停用（朋友反馈太高），改由「定向甄选」按 config/custom-rules.json 生效。
     # 想恢复：取消下面这行注释（×2 = 所有商店格的盟约权重翻倍）。
     # $env:SP_BOND_BOOST = '2'
+    # 座位模式：不设置 = 官方 4 人；SP_MAX_SEATS=6 → 6 人房间（-MaxSeats 6）。非法值服务器会直接报错退出。
+    if ($MaxSeats -ge 2) { $env:SP_MAX_SEATS = "$MaxSeats" } else { Remove-Item Env:\SP_MAX_SEATS -ErrorAction SilentlyContinue }
     # 双栈监听：'::' 同时接受 IPv4 映射连接（127.0.0.1/局域网/frp 全部照常），并额外开放 IPv6 直连
     $env:HOST = '::'
     Start-Process -FilePath "node" -ArgumentList "server/index.js" -WorkingDirectory $root -WindowStyle Minimized
@@ -58,7 +72,7 @@ if ($alreadyRunning) {
         Write-Host "服务器启动失败（端口 $chosen）。排查: 1) netsh interface ipv4 show excludedportrange protocol=tcp 2) 手动运行 npm start 看报错" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[ok] 服务器已启动（后台最小化窗口），本机地址 http://localhost:$chosen（定向甄选按 config/custom-rules.json，监控 /monitor）" -ForegroundColor Green
+    Write-Host "[ok] 服务器已启动（后台最小化窗口，$seatMode 人模式），本机地址 http://localhost:$chosen（定向甄选按 config/custom-rules.json，监控 /monitor）" -ForegroundColor Green
 }
 
 # 3. Cloudflare 隧道：默认跳过（樱花 frp 已提供两条固定网址）。需要兜底隧道时加 -Tunnel 参数
@@ -66,6 +80,7 @@ if (-not $Tunnel) {
     Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
+    if ($seatMode -gt 4) { Write-Host "  [$seatMode 人模式] 房间有 $seatMode 个座位（非官方可选改动；素材/数据与 4 人版通用）" -ForegroundColor Magenta }
     Write-Host '  [樱花frp 在线] 固定网址（浏览器: https://frp-way.com:17913 · APK: http://frp-cup.com:30756）' -ForegroundColor Cyan
     $rad = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object { $_.InterfaceAlias -match 'Radmin' -and $_.IPAddress -like '26.*' } |
@@ -89,6 +104,7 @@ if (-not $Tunnel) {
     $invite = '浏览器(电脑/iOS/安卓): https://frp-way.com:17913' + "`r`n" +
               '安卓APK: http://frp-cup.com:30756（延迟较高）' + "`r`n" +
               '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
+    if ($seatMode -gt 4) { $invite += "`r`n" + "本房是 $seatMode 人模式（最多 $seatMode 名博士）" }
     if ($v6Url) { $invite += "`r`n" + "IPv6直连(手机流量): $v6Url" }
     Set-Clipboard -Value $invite
     Write-Host '[固定网址已自动复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green

@@ -163,11 +163,20 @@
 - 本次实战记录：6 人联机改动在副本里 **46/46 锚点全中**、`seats6.test.js` 10/10、核心回归 87/87、自研甄选 9/9、真实 WS 建房 6 座全通；线上 4 人局全程 `uptime` 未中断。
 - **⚠️ 删除副本的致命细节**：副本里 `node_modules` / `public/vendor` 是指向主仓库的 **junction**，`Remove-Item -Recurse -Force` **会跟进删除主仓库的依赖**！`git worktree remove --force` 也会残留 junction 目录。正确做法：先 `Get-Item <副本>\node_modules -Force` 确认 Target，再用 **`cmd /c rmdir /s /q <副本>`**（rmdir 不跟进 junction），最后复查主仓库 `node_modules` 文件数正常。
 
-### 第三方「6 人联机」包调研（2026-10-06 定稿，结论：可移植，待用户决定是否落实）
+### 6 人联机（2026-10-07 已落实，提交 17bc472）——移植自第三方包 + 一键开服
 
-- **来源**：`D:\Download\Stronghold-Protocol-v0.1.2(gai (2).zip`（306 MB，13,312 条目）。基于**上游 v0.1.2** 的第三方改版，自带 `docs/6人版与原版的差别.md`。**无 `.git`**，是纯源码快照。
-- **核心机制**：**不用改代码，只加一个启动开关 `SP_MAX_SEATS=6`**（默认不设 = 官方 4 人，逐字节等同原版）。`/healthz` 新增 `maxSeats` 字段自证。
-- **改动集（相对 59e5ff0/111e918 基线，共 16 个既有文件 + 2 个新文件，全部是加性小改）**：
+> **状态：已实装并线上验证通过**（`/healthz` 报 `maxSeats`、真实 WS 建房 6 座全通）。默认仍是官方 4 人。
+
+- **怎么开 6 人房**：双击 **`start-6p-online.bat`**（内部调 `start-online.ps1 -MaxSeats 6`，端口/隧道/剪贴板逻辑与 4 人版完全一致）；或命令行 `$env:SP_MAX_SEATS='6'; npm start`。4 人版仍是 `start-online.bat`（不带该变量）。
+- **座位模式启动时固定、不能热改**：已在跑 4 人服时再点 6 人启动器，脚本会**明确提示「必须重启才生效」**并让你先 `stop-online.bat`（不会静默混用）。
+- **自证**：`GET /healthz` 与 `/monitor?json` 都有 `maxSeats` 字段（4 或 6）。
+- **4 人及以下行为不变**：两条缩放系数在 ≤4 人时恒为 1、盟约 ban 用模式自身值 —— 所以**6 人模式的房间里玩 4 人局 = 官方原版**，只是座位板显示 6 格。怕影响 4 人体验的顾虑可以放下。
+
+#### 来源与改动集（第三方包 `D:\Download\Stronghold-Protocol-v0.1.2(gai (2).zip`）
+
+- **来源**：306 MB / 13,312 条目的纯源码快照，基于**上游 v0.1.2**，自带 `docs/6人版与原版的差别.md`，**无 `.git`**。
+- **核心机制**：**不动代码逻辑，只加启动开关 `SP_MAX_SEATS=6`**（不设 = 官方 4 人）。
+- **改动集（16 个既有文件 + 2 个新文件，全是加性小改）**：
   - 新文件 `server/match/scaling.js`（67 行，三个纯函数 + 常量）、`test/match/seats6.test.js`（188 行，10 个测试）。
   - `shared/constants.js`：`MAX_SEATS_LIMIT = 6` + `setMaxSeats()`（模块级可变值，默认 4）。
   - `shared/protocol.js`：`RESULT_LIMITS` 由 `Object.freeze` 改为**可变对象** + `setSeatLimit()`；`room.removeBot` 的 seat 上界由 `MAX_SEATS-1` 改为 `RESULT_LIMITS.players-1`。
@@ -177,14 +186,15 @@
   - `server/match/gamedata.js`：`poolCopies(id, players)`、`bans(difficulty, players)`、`bossPoolHp(id, alive, players)` 三个签名加可选参数（默认 0 ⇒ 原版值）。
   - `server/match/pool.js`：`drawDisabledBonds(gd, rng, {players})`、`SharedPool(gd, {banned, players})`。
   - `server/match/finalAssault.js` / `audit.js`：`bossPoolHp` 透传 `players` / `m.seatCount`。
-  - 客户端 4 处：`screens/room.js` 新增 `seatCapacity()`（从 `room.state.maxSeats` 读容量，`normalizeSeats` 用它）、`net.js` 收到 `room.state` 时 `setSeatLimit`、`battle/runner.js` 两处 `slice(0,4)` 改 `RESULT_LIMITS.players`、`ui/gameComponents.js` 座位色 `[162,196,38,280]` → 6 色 `SEAT_HUES`、`css/screens/room.css` 座位网格 `repeat(4,…)` → `repeat(auto-fit,…)`。
+  - 客户端 4 处：`screens/room.js` 新增 `seatCapacity()`（从 `room.state.maxSeats` 读容量，`normalizeSeats` 用它）、`net.js` 收到 `room.state` 时 `setSeatLimit`、`battle/runner.js` 两处 `slice(0,4)` 改 `RESULT_LIMITS.players`、`ui/gameComponents.js` 座位色 `[162,196,38,280]` → 6 色 `SEAT_HUES`（**前 4 色与原值完全相同**，4 人房配色不变）、`css/screens/room.css` 座位网格 `repeat(4,…)` → `repeat(auto-fit,…)`。
 - **两条数值规则（只在 >4 人时生效，≤4 时每个系数恒为 1）**：
   1. **共享干员池按人数放大**：`× 人数/4`（5 人 ×1.25、6 人 ×1.5）。按干员单独设定的份数（如缪尔赛思固定 4）属内容设定，**不放大**。
   2. **领袖血条按战场数放大**：6 人分 **3 个战场**（`b1/b2/b3`，每队 2 人一张图），`× 1.5`；**全队仍共用同一条血条与同一个 LP**。淘汰不会让血条缩水。
   3. 附带：**>4 人时主/副盟约各少 ban 一个**（绝境 4 人 `core3+addon4` → 6 人 `core2+addon3`）。
-- **移植可行性（已实证，非推测）**：在 git worktree 副本里把整套改动打到我们 **v0.1.6-pre-skin** 上 → **46/46 锚点全中**（唯一需调整的是 `shared/constants.js`，因为上游 0.1.3+ 在 `MAX_SEATS` 与 `ROOM_CODE_LEN` 之间插入了 `MAX_SPECTATORS`）；`seats6.test.js` **10/10**、核心回归 **87/87**、自研甄选 **9/9**、真实 WS 建房 6 座全通（`maxSeats:6`、第 7 个被 `ROOM_FULL`、`removeBot seat:5` 通过而 `seat:6` 被 `BAD_MSG` 拒、`room.start` 成功）。**与我们自研的 monitor / 定向甄选改动零重叠**。
-- **结论**：**值得移植**（小、加性、默认关闭、自带测试、4 人行为逐字节不变）。**移植时机必须在无对局时**（改 server/ 代码要重启进程）。**待用户拍板是否落实**。
+- **移植实证（2026-10-07）**：在 git worktree 副本里打到 **v0.1.6-pre-skin** → **46/46 锚点全中**（唯一要挪的是 `shared/constants.js`，因上游 0.1.3+ 在 `MAX_SEATS` 与 `ROOM_CODE_LEN` 之间插入了 `MAX_SPECTATORS`）；`seats6.test.js` **10/10**、`test/lobby.test.js` **67/67**（含新增的 6 人房间套件）、自研甄选 **9/9**、真实 WS 建房 6 座全通（`maxSeats:6`、第 7 个被 `ROOM_FULL`、`removeBot seat:5` 通过而 `seat:6` 被 `BAD_MSG` 拒、`room.start` 成功）。线上服切换后同样全通。**与我们自研的 monitor / 定向甄选改动零重叠**。
+- **改座位模式必须重启**（Node 进程内不可热改）：先 `stop-online.bat` 再开；两套启动器（4 人 / 6 人）共用同一个 24500。
 - **无需移植的部分**：字体（我们已有）、`cheats` 作弊层（作者已在包内自行删除，只剩占位文件）、Docker/CI 改动（与 6 人无关）。
+- **并发协作提醒**：本次移植期间**有另一个会话在同一仓库并行提交**（monitor 实时监看 `00ff41d`、影子观战 `649e726`），双方都改了 `server/index.js` / `server/match/Match.js` / `shared/protocol.js`。实测两者**逻辑上互不干扰**（函数级并存，17 个 6 人钩子点 + 3 个 monitor 符号全在）。**教训：在同一仓库并发提交时，先 `git log` 看有没有别人的新提交，提交前只 `git add` 自己改的文件，绝不 `git add -A`。**
 
 ### 一键开服/关服（2026-10-06 定稿，完全脱离 DSH）
 

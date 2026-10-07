@@ -159,7 +159,7 @@ npm start          # 启动服务器：http://localhost:3000
 
 ### 6 人同盟模拟（可选）
 
-默认仍是官方的 **4 人**：4 人及以下的一切规则与数值都和原版完全一致。想让 6 名博士一起玩，用 `SP_MAX_SEATS=6` 启动服务器：
+默认仍是官方的 **4 人**：4 人及以下的一切规则与数值都和原版完全一致。想让 6 名博士一起玩，**双击项目根目录的 `start-6p-online.bat`**（一键开服，端口 / 隧道 / 地址与 4 人版完全相同），或手动设置 `SP_MAX_SEATS=6` 启动服务器：
 
 ```bash
 SP_MAX_SEATS=6 npm start                        # macOS / Linux
@@ -167,7 +167,7 @@ $env:SP_MAX_SEATS=6; npm start                  # PowerShell
 set "SP_MAX_SEATS=6" && npm start               # cmd
 ```
 
-不带 `SP_MAX_SEATS` 就是原版 4 人；该变量只接受 **2–6**，填别的值服务器会直接报错退出。想确认当前是哪一版，看 `GET /healthz` 里的 `maxSeats` 字段。
+不带 `SP_MAX_SEATS` 就是原版 4 人（4 人版用 `start-online.bat`）；该变量只接受 **2–6**，填别的值服务器会直接报错退出。想确认当前是哪一版，看 `GET /healthz` 里的 `maxSeats` 字段。座位数在**启动时固定**，已经在跑 4 人服时再点 6 人启动器不会热切换——脚本会提示你先关服重开（`stop-online.bat`）。
 
 6 人是本项目的**非官方可选改动**（官方只有 4 人），房间有 6 个座位，且**只在超过 4 人时**生效两条数值规则：
 
