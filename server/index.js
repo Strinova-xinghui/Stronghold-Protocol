@@ -50,7 +50,7 @@ import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
  * Rooms in lobby: seats with ready/connected; running matches: phase, round, LP, shop levels…
  * PHASE_NAMES (shared/constants.js) is client-shared code, safe to import here (plain object).
  */
-function monitorSnapshot(lobby) {
+function monitorSnapshot(lobby, sockets = 0) {
   const rooms = [];
   for (const r of lobby.rooms.values()) {
     const room = {
@@ -81,7 +81,7 @@ function monitorSnapshot(lobby) {
     }
     rooms.push(room);
   }
-  return { time: new Date().toISOString(), stats: lobby.stats(), rooms };
+  return { time: new Date().toISOString(), stats: { ...lobby.stats(), sockets }, rooms };
 }
 
 /** Repository root. */
@@ -977,9 +977,9 @@ export async function startServer(opts = {}) {
     }
     if (parts.rawPath === '/monitor') {
       if (parts.query === 'json' || parts.query.startsWith('json&') || new URLSearchParams(parts.query).has('json')) {
-        sendJson(req, res, 200, monitorSnapshot(lobby)); return;
+        sendJson(req, res, 200, monitorSnapshot(lobby, network.connectionCount)); return;
       }
-      const snap = JSON.stringify(monitorSnapshot(lobby)).replace(/</g, '\\u003c');
+      const snap = JSON.stringify(monitorSnapshot(lobby, network.connectionCount)).replace(/</g, '\\u003c');
       const html = MONITOR_HTML
         .replace('__INITIAL__', snap)
         .replace('__PHASE_NAMES__', JSON.stringify(PHASE_NAMES));
