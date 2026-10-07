@@ -1,7 +1,8 @@
 ﻿# 卫戍协议 —— 安全换装重启：只在没有进行中对局时才重启服务器（matches == 0）
-# 用法: 双击 update-restart.bat，或 powershell -File update-restart.ps1 [-Port 24500]
+# 用法: 双击 update-restart.bat，或 powershell -File update-restart.ps1 [-Port 24500] [-MaxSeats 6]
 # 对局进行中(matches>0)时什么都不做，绝不坑到在线玩家；大厅/挂机状态会被断开(可重连)。
-param([int]$Port = 24500)
+# 座位模式：默认自动继承正在跑的服务器 maxSeats（换代时 6 座不会悄悄退回 4 座）；没在跑则默认 6。
+param([int]$Port = 24500, [int]$MaxSeats = 0)
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 $root = 'E:\卫戍协议'
@@ -12,12 +13,18 @@ function Test-GameAlive([int]$p) {
         return ($LASTEXITCODE -eq 0 -and "$out" -match '"app"')
     } catch { return $false }
 }
+# 起服命令串：带 PORT 与 SP_MAX_SEATS（与 start-online.ps1 同语义：1–6 生效，其余不设=官方默认 4）
+function ServerCmd([int]$port, [int]$seats) {
+    $seatEnv = if ($seats -ge 1 -and $seats -le 6) { "`$env:SP_MAX_SEATS='$seats'; " } else { '' }
+    "`$env:PORT=$port; $seatEnv" + 'node server/index.js'
+}
 
 # 1. 没有服务器在跑 → 直接起新的
 if (-not (Test-GameAlive $Port)) {
-    Write-Host '[i] 当前没有服务器在运行，直接启动。' -ForegroundColor Yellow
+    if ($MaxSeats -le 0) { $MaxSeats = 6 }
+    Write-Host "[i] 当前没有服务器在运行，直接启动（$MaxSeats 座）。" -ForegroundColor Yellow
     Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-        "`$env:PORT=$Port; node server/index.js" -WorkingDirectory $root -WindowStyle Minimized
+        (ServerCmd $Port $MaxSeats) -WorkingDirectory $root -WindowStyle Minimized
     for ($i = 0; $i -lt 10; $i++) {
         Start-Sleep -Seconds 1
         if (Test-GameAlive $Port) { Write-Host "[ok] 服务器已启动: http://localhost:$Port（监控: /monitor）" -ForegroundColor Green; exit 0 }
@@ -28,7 +35,9 @@ if (-not (Test-GameAlive $Port)) {
 
 # 2. 有服务器 → 查对局状态
 $health = curl.exe -s -m 5 "http://127.0.0.1:$Port/healthz" | ConvertFrom-Json
-Write-Host ("当前: 房间 {0} · 进行中对局 {1} · 在线玩家 {2} · WS连接 {3}" -f $health.rooms, $health.matches, $health.humans, $health.sockets)
+Write-Host ("当前: 房间 {0} · 进行中对局 {1} · 在线玩家 {2} · WS连接 {3} · 座位 {4}" -f $health.rooms, $health.matches, $health.humans, $health.sockets, $health.maxSeats)
+# 未显式指定 -MaxSeats 时继承当前服务器的座位模式（老服务器 maxSeats 缺省 = 4）
+if ($MaxSeats -le 0) { $MaxSeats = if ($health.maxSeats) { [int]$health.maxSeats } else { 4 } }
 
 if ($health.matches -gt 0) {
     Write-Host ('[!] 有 {0} 场对局正在进行（{1} 位玩家）——本次换装取消。' -f $health.matches, $health.humans) -ForegroundColor Red
@@ -48,11 +57,11 @@ if ($c) {
     Start-Sleep -Seconds 2
 }
 Start-Process powershell -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-    "`$env:PORT=$Port; node server/index.js" -WorkingDirectory $root -WindowStyle Minimized
+    (ServerCmd $Port $MaxSeats) -WorkingDirectory $root -WindowStyle Minimized
 for ($i = 0; $i -lt 12; $i++) {
     Start-Sleep -Seconds 1
     if (Test-GameAlive $Port) {
-        Write-Host "[ok] 新代码已上线: http://localhost:$Port  ·  监控: http://localhost:$Port/monitor" -ForegroundColor Green
+        Write-Host "[ok] 新代码已上线（$MaxSeats 座）: http://localhost:$Port  ·  监控: http://localhost:$Port/monitor" -ForegroundColor Green
         exit 0
     }
 }
