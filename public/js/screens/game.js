@@ -694,6 +694,15 @@ function MatchScreen() {
     await actions.ready(r);
     setReadyBusy(false);
   }, []);
+
+  // 休整期等待投票（自研 2026-10-07）：已就绪时按「等待」，全员（活人 −1）同意后暂停倒计时
+  const [waitBusy, setWaitBusy] = useState(false);
+  const toggleWait = useCallback(async (on) => {
+    if (phase !== PHASE.PREP || !priv?.ready) return;
+    setWaitBusy(true);
+    await actions.prepWait(on);
+    setWaitBusy(false);
+  }, [phase, priv?.ready]);
   // the prep ended (timer) while the question was open: drop it — the funds are gone either way
   useEffect(() => { if (phase !== PHASE.PREP && askingReady.current) closeAllDialogs(); }, [phase]);
 
@@ -1314,6 +1323,7 @@ function MatchScreen() {
       <${TopBar} pub=${pub} priv=${priv} conn=${conn} hud=${hud} total=${total} drawer=${drawer}
         onExit=${() => setExitOpen(true)} onDrawer=${(t) => setDrawer((d) => (d ? null : t))} onReady=${toggleReady}
         readyBusy=${readyBusy} readyCount=${readyCount} playerCount=${solo ? 1 : aliveCount}
+        onWait=${toggleWait} waitBusy=${waitBusy}
         pen=${pen} penAvail=${penAvail} onPen=${togglePen} config=${gd.config} frozenAt=${frozenAt}
         pause=${canPause || paused ? { show: canPause, paused, busy: pauseBusy, onToggle: () => togglePause(!paused) } : null}
         live=${liveLpNow} spectator=${spectator} />

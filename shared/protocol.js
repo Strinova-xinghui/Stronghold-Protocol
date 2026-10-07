@@ -312,6 +312,9 @@ export const C2S = {
   'g.reward': { idx: (v) => isInt(v, 0, 5) },
   'g.choice': { idx: (v) => isInt(v, 0, 5) },
   'g.ready': { ready: isBool },
+  // 休整期等待投票（自研，2026-10-07）：已就绪的玩家请求暂停本回合倒计时，等最后一名未就绪的活人无限时操作
+  // （电表倒转等长操作）；全员等待或有人取消等待/取消准备即恢复。服务端 prepWait()；m.public.prepWait 携带状态。
+  'g.prepWait': { on: isBool },
   'g.emote': { id: (v) => EMOTES.includes(v) },
   'g.watch': { fieldId: (v) => isStr(v, 32) },
   'g.autoplay': { on: isBool },

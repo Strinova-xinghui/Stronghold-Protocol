@@ -66,6 +66,8 @@ export const actions = {
   reward: (idx) => act('g.reward', { idx }),
   choice: (idx) => act('g.choice', { idx }),
   ready: (ready) => act('g.ready', { ready }, { sfx: ready ? 'ready' : 'back' }),
+  // 休整期等待投票（自研）：已就绪时按「等待」暂停本回合倒计时，等最后一名未就绪的活人
+  prepWait: (on) => act('g.prepWait', { on }, { sfx: on ? 'confirm' : 'back' }),
   emote: (id) => act('g.emote', { id }, { quiet: true }),
   watch: (fieldId) => act('g.watch', { fieldId }, { sfx: 'tab' }),
   autoplay: (on) => act('g.autoplay', { on }),

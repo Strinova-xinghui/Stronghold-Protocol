@@ -206,12 +206,24 @@ export function tempReadyReason(priv) {
 /**
  * Ready toggle (PREP only). Disabled while the temp row holds pieces — the reason shows under it (not only on hover):
  * "临时整备区 N 个单位待处理" (user playtest #3 item 3).
- * @param {{ priv:any, onToggle:(ready:boolean)=>void, busy?:boolean, readyCount?:number, total?:number }} props
+ * Beside it the 等待 toggle (自研 2026-10-07): only while ready; every ready player activating it (活人 −1） holds the
+ * prep clock so the last unready player can take unlimited time (电表倒转). `pw` = m.public.prepWait.
+ * @param {{ priv:any, onToggle:(ready:boolean)=>void, busy?:boolean, readyCount?:number, total?:number,
+ *   pw?: { held?: boolean, waiters?: string[], target?: string|null }|null, onWait?:(on:boolean)=>void,
+ *   waitBusy?:boolean }} props
  */
-export function ReadyToggle({ priv, onToggle, busy, readyCount, total }) {
+export function ReadyToggle({ priv, onToggle, busy, readyCount, total, pw = null, onWait = () => {}, waitBusy = false }) {
   const ready = !!priv?.ready;
   const temp = tempInfo(priv);
   const reason = !ready ? tempReadyReason(priv) || shopBlockReason('ready', { priv, editable: true }) : null;
+  const waiting = Array.isArray(pw?.waiters) && pw.waiters.includes(priv?.playerId);
+  const held = !!pw?.held;
+  const waitBtn = ready ? html`<button type="button" class=${cx('waitbtn', 'tapx', waiting && 'is-on', held && 'is-held', waitBusy && 'is-busy')}
+      aria-pressed=${waiting ? 'true' : 'false'} title=${held ? '倒计时已暂停：等待最后一名玩家操作' : '发起等待：全员同意后暂停本回合倒计时'}
+      onClick=${() => onWait(!waiting)}>
+    <span class="waitbtn__box">${held ? html`<${Icon} name="pause" />` : waiting ? html`<${Icon} name="check" />` : html`<${Icon} name="clock" />`}</span>
+    <span class="waitbtn__label">${held ? '等待中' : waiting ? '等待中…' : '等待'}</span>
+  </button>` : null;
   const btn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy')} disabled=${!!reason || busy}
       aria-pressed=${ready ? 'true' : 'false'} aria-describedby=${!ready && temp.count ? 'readywrap-why' : undefined} onClick=${() => onToggle(!ready)}>
     <span class="readybtn__box">${ready ? html`<${Icon} name="check" />` : null}</span>
@@ -219,7 +231,9 @@ export function ReadyToggle({ priv, onToggle, busy, readyCount, total }) {
     <kbd class="readybtn__key">Space</kbd>
   </button>`;
   return html`<div class="readywrap">
-    ${reason ? html`<${Tooltip} text=${reason} placement="bottom">${btn}<//>` : btn}
+    ${ready ? html`<div class="readywrap__pair">${btn}${waitBtn}</div>` : html`<${Tooltip} text=${reason} placement="bottom">${btn}<//>`}
+    ${ready && held && pw?.target ? html`<span class="readywrap__wait" role="status" data-testid="prep-wait-held">
+      <${Icon} name="clock" /><span>已暂停 · 等待 <b class="num">${(pw.waiters || []).length}</b> 人同意中</span></span>` : null}
     ${!ready && temp.count ? html`<span class="readywrap__why" id="readywrap-why" role="status" data-testid="ready-why">
       <${Icon} name="warn" /><span>临时整备区 <b class="num">${temp.count}</b> 个单位待处理</span></span>` : null}
     ${Number.isFinite(total) && total > 1 ? html`<span class="readywrap__count">已就绪 <b class="num">${readyCount}</b>/<span class="num">${total}</span></span>` : null}
@@ -307,7 +321,7 @@ export function PauseButton({ paused, busy = false, onToggle }) {
  *   live: the own battle's pending LP loss (liveLp): the tower shows lp − pending in red with a −N tick, 联防中 during 联防;
  *     `left` (a leaker in 联防): its enemies still standing — the capsule's ×N tag
  */
-export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pen = false, penAvail = false, onPen = () => {},
+export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, onReady, readyBusy, readyCount, playerCount, pw = null, onWait = () => {}, waitBusy = false, pen = false, penAvail = false, onPen = () => {},
   config = null, frozenAt = null, pause = null, live = null, spectator = false }) {
   const phase = pub?.phase;
   const boss = isBossPhase(phase);
@@ -365,7 +379,8 @@ export function TopBar({ pub, priv, conn, hud, total, drawer, onExit, onDrawer, 
         ${pause && (pause.show || pause.paused) ? html`<${PauseButton} paused=${!!pause.paused} busy=${pause.busy} onToggle=${pause.onToggle} />` : null}
       </div>
       <${OvertimeWarning} ot=${ot} />
-      ${showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount} />` : null}
+      ${showReady ? html`<${ReadyToggle} priv=${priv} onToggle=${onReady} busy=${readyBusy} readyCount=${readyCount} total=${playerCount}
+        pw=${pw || pub?.prepWait || null} onWait=${onWait} waitBusy=${waitBusy} />` : null}
     </div>
   </header>`;
 }

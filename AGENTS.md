@@ -139,6 +139,17 @@
 - **踩坑（测试侧，复用价值）**：① resource timing 默认 250 条 buffer 在游戏页必然溢出——先 `performance.setResourceTimingBufferSize(10000)` + `clearResourceTimings()`，否则语音请求根本不进 entries；② audio 走 `mediaUrl` 的**去扩展名**形式（`/assets/audio/X` → `/media/X`，`assets/audio` 整段剥掉），断言实际请求要看 `/media/voice/...`；③ `JSON.stringify(localStorage)` 对 Storage 对象返回 `{}`（属性不可枚举），要 `localStorage.getItem('sp.pref.settings')`；④ 测试切语言必须走真实 UI 路径 `updateSettings`——直接调 `audio.setVoiceLang` 绕过 store，store 不会同步（store→audio 单向，与 setVolumes 同构）。
 - **已知边界**：en/kr 语音未下载（四国只落地中日）；将来补齐 = 下载素材 + settings 单选加一项 + `setVoiceLang` 放行一项，机制已通用。切换不重播当前句（gentle 切换）。
 
+### 休整期等待投票（prepWait，2026-10-07 自研追加）
+
+- **需求（用户）**：休整期准备按钮旁加「等待」按钮——准备就绪后才可按；当已就绪的活人**全部**激活它（= 活人数 −1，等最后一名未就绪者）时**暂停本回合倒计时**，让最后一人无限时操作（电表倒转等长操作玩法）。
+- **协议**：`g.prepWait { on }`（shared/protocol.js）。服务端 `Match.prepWait(ps, on)`：仅 PREP、仅已就绪者、solo 拒（WRONG_PHASE/NOT_YOUR_TURN/ALREADY 文案）。投票语义：**每个已就绪玩家一票，活人数−1 票齐且恰好只剩 1 名未就绪活人（`_waitTargetId`）⇒ hold**；≥2 人未就绪时 hold 不成立（等谁不明确），0 人未就绪直接 endPrep。
+- **倒计时暂停/恢复（`_prepWaitRefresh`）**：hold ⇒ 记住剩余秒数（`_prepWaitRemainSecs`）+ cancel `_phaseTimer` + `deadline=0`（客户端倒计时消失）；释放 ⇒ `setDeadline(剩余秒)` 恢复原定时器 + **清空投票**（`_prepWaiters.clear()`——血案预防：漏掉会毒化下一回合）。`onReadyChanged` 联动刷新（目标就绪 ⇒ 释放 + maybeEndPrep 正常结束）；`enterPrep` 重置全部投票状态。
+- **m.public.prepWait**：`{ held, waiters[], target }`（PREP 且有投票时携带；hold 时 deadline 已是 0，客户端倒计时自然消失——无需改 Countdown）。老客户端多余字段无副作用。
+- **客户端**：`actions.prepWait(on)`（gameActions.js）；`ReadyToggle`（hud.js）就绪时在准备按钮旁渲染等待按钮（`readywrap__pair` 并排，amber 橙色调，hold 时 mint 脉冲动画 + 「已暂停 · 等待 N 人同意中」提示条，文案三态 等待/等待中…/等待中）；game.js `toggleWait` 接线（仅 PREP 且已就绪）。**不改倒计时组件**——deadline=0 本来就是「无倒计时」的既有语义。
+- **验证**：`node tools/verify-prep-wait.mjs <port>`（17/17：未就绪拒绝/发起/广播 held+target/deadline=0/重复 ALREADY/取消恢复 deadline>0/再等待/B 就绪 endPrep/投票清空）+ `node tools/verify-prep-wait-ui.mjs <port>`（9/9：源码锚点 + fixture 组件直渲三态）+ pool/seats6 回归 20/20 + monitor-watch 14/14 + shadow-pin 15/15（无回归）。
+- **测试踩坑（复用价值）**：① 服务器不 serve `.cache/`——组件渲染 fixture 必须放 `public/` 下（404 表现为 title 空且 __vl null）；② CDP `waitForFunction` 谓词**不能是 async**（Runtime.callFunctionOn 直接超时）；③ 游戏页永不 networkidle2（长连接）+ 大 evaluate 会超时——组件级验证用 fixture 直渲最稳；④ 同回合完整周期测试顺序：等待→hold→取消→恢复→再等待→B 就绪（B 就绪 = endPrep 不可逆，一切「之后还要 PREP」的断言必须放它前面）。
+- **已知边界**：hold 期间被等待者若断线/离开，`alivePlayers` 变化后 `_waitTargetId` 返回 null ⇒ 自动释放（安全的默认）；hold 无上限时长（这正是需求），若全员卡死可由房主「取消准备」打破（un-ready ⇒ target 变多 ⇒ hold 释放）。`update-restart` 后线上生效。
+
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。

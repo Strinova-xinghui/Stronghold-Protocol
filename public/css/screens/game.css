@@ -219,6 +219,31 @@
 .readybtn:disabled .readybtn__box { border-color: var(--line-2); }
 .readybtn.is-busy { opacity: .7; }
 
+/* 休整期等待投票（自研 2026-10-07）: the 等待 toggle sits beside 准备就绪; amber look (a held clock reads as a
+   warning, not a confirm), the held state reuses the pausebtn's pulsing mint so it matches the solo pause button. */
+.readywrap__pair { display: flex; align-items: stretch; gap: .08rem; }
+.waitbtn {
+  display: flex; align-items: center; gap: .08rem; height: .56rem; padding: 0 .14rem;
+  background: rgba(10, 14, 12, .9); border: 2px solid var(--orange); color: var(--text-hi);
+  font-size: .18rem; font-weight: 700; letter-spacing: .1em; cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast);
+}
+.waitbtn:hover { background: rgba(255, 168, 50, .12); box-shadow: 0 0 .22rem rgba(255, 168, 50, .3); }
+.waitbtn__box { width: .26rem; height: .26rem; border: 2px solid var(--orange); display: grid; place-items: center; flex: none; }
+.waitbtn__box .icon { width: .22rem; height: .22rem; }
+.waitbtn__label { white-space: nowrap; }
+.waitbtn.is-on { background: var(--orange); color: #1a0800; box-shadow: 0 0 .22rem rgba(255, 168, 50, .45); }
+.waitbtn.is-on .waitbtn__box { border-color: #1a0800; }
+.waitbtn.is-held { border-color: var(--mint-500); animation: prep-wait-pulse 1.2s ease-in-out infinite; }
+@keyframes prep-wait-pulse { 0%, 100% { box-shadow: 0 0 .14rem rgba(23, 249, 183, .3); } 50% { box-shadow: 0 0 .3rem rgba(23, 249, 183, .6); } }
+.waitbtn.is-busy { opacity: .7; pointer-events: none; }
+.readywrap__wait {
+  display: inline-flex; align-items: center; gap: .05rem; padding: .02rem .1rem .02rem .06rem; font-size: .14rem; font-weight: 700;
+  color: #fff3d6; background: rgba(43, 30, 6, .88); border: 1px solid rgba(255, 168, 50, .7); border-right: 3px solid var(--orange); white-space: nowrap;
+}
+.readywrap__wait .icon { width: .16rem; height: .16rem; color: var(--orange); flex: none; }
+.readywrap__wait b { color: var(--orange); font-size: .16rem; }
+
 /* ---- bond strip ---------------------------------------------------------------------------------------- */
 .gm__bonds { position: absolute; left: 1.56rem; top: 1.36rem; right: 5.2rem; pointer-events: none;
   display: flex; align-items: flex-start; gap: max(.1rem, 8px); }

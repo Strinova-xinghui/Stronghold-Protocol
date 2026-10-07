@@ -1074,6 +1074,11 @@ export class Match {
       };
     }
     if (this.phase === PHASE.UNITE && this.unitePlan) v.unite = { helpers: this.unitePlan.helpers.map((p) => p.playerId), leakers: this.unitePlan.leakers.map((p) => p.playerId) };
+    // 休整期等待投票（自研）：held = 倒计时已被暂停（deadline 已清 0）；waiters = 等待中的玩家 id；
+    // target = 被等待的最后一名未就绪活人。老客户端收到多余字段无副作用。
+    if (this.phase === PHASE.PREP && this._prepWaiters?.size) {
+      v.prepWait = { held: !!this._prepWaitHeldApplied, waiters: [...this._prepWaiters], target: this._waitTargetId() };
+    }
     return v;
   }
 
@@ -1239,6 +1244,7 @@ export class Match {
       case 'g.reward': return ps.pickReward(msg.idx);
       case 'g.choice': return this.pickCard(ps, msg.idx);
       case 'g.ready': return ps.setReady(!!msg.ready);
+      case 'g.prepWait': return this.prepWait(ps, !!msg.on);
       case 'g.emote': return this.emote(ps, msg.id);
       case 'g.watch': return this.watch(ps, msg.fieldId);
       case 'g.autoplay': return this.setAutoplay(ps, !!msg.on);
@@ -1891,6 +1897,9 @@ export class Match {
     }
     // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime
     const secs = this.soloUntimed ? null : this.gd.prepTime(this.round);
+    this._prepWaiters = new Set();      // 新回合重置等待投票（自研）
+    this._prepWaitHeldApplied = false;
+    this._prepWaitRemainSecs = null;
     this.setDeadline(secs, () => this.prepDeadline());
     let i = 0;
     for (const ps of alive) if (ps.botControlled) this.scheduleBotPrep(ps, i++);
@@ -1960,6 +1969,8 @@ export class Match {
   onReadyChanged(ps) {
     this.markPublic();
     void ps;
+    // 等待投票联动（自研）：目标玩家就绪/有人取消准备后，重新评估 hold（目标就绪 ⇒ 释放倒计时并清空投票）
+    this._prepWaitRefresh();
     this.maybeEndPrep();
   }
 
@@ -1974,6 +1985,71 @@ export class Match {
       this._prepEndQueued = false;
       if (this.phase === PHASE.PREP && this.round === round && allReady()) this.endPrep();
     });
+  }
+
+  // ---- 休整期等待投票（自研，2026-10-07） ------------------------------------------------------------
+
+  /**
+   * Whether the prep clock is currently HELD by the wait vote (m.public.prepWait.held, m.public.deadline 0):
+   * every waiting-ready player votes and the only unready alive player is the one being waited for —
+   * `aliveHumans - 1` activations among the ready is enough (user request: 电表倒转 needs unlimited time on the
+   * last player's board). Bots never vote.
+   */
+  get prepWaitHeld() {
+    return !!this._prepWaiters?.size && this._waitTargetId() !== null;
+  }
+
+  /** The one alive player still unready (the vote waits for THEM); null when none/ambiguous (0 or ≥2 unready). */
+  _waitTargetId() {
+    const unready = this.alivePlayers().filter((p) => !p.ready);
+    return unready.length === 1 ? unready[0].playerId : null;
+  }
+
+  /**
+   * Pause (on) or release (off) the prep countdown by vote of the ready players. Holding: the remaining seconds are
+   * remembered and the deadline cleared (m.public.deadline 0 ⇒ every client's countdown disappears); resuming puts
+   * the remaining time back on the clock. A vote that would hold nothing (the target already ready / left) is a
+   * no-op refusal ALREADY. Any ready change re-evaluates: someone un-readies ⇒ the vote state stays but the hold
+   * may end (onReadyChanged → _prepWaitRefresh).
+   * @param {any} ps caller's PlayerState
+   * @param {boolean} on
+   */
+  prepWait(ps, on) {
+    if (this.phase !== PHASE.PREP) return fail(ERR.WRONG_PHASE);
+    if (this.soloUntimed) return fail(ERR.WRONG_PHASE, 'solo has no clock to hold');
+    if (!ps.ready) return fail(ERR.NOT_YOUR_TURN, '只有已就绪的玩家可以发起等待');
+    if (!this._prepWaiters) this._prepWaiters = new Set();
+    if (on) {
+      if (this._waitTargetId() === null) return fail(ERR.ALREADY, '没有需要等待的玩家');
+      if (this._prepWaiters.has(ps.playerId)) return fail(ERR.ALREADY, '已在等待中');
+      this._prepWaiters.add(ps.playerId);
+    } else {
+      if (!this._prepWaiters.delete(ps.playerId)) return fail(ERR.ALREADY, '未在等待中');
+    }
+    this._prepWaitRefresh();
+    return OK;
+  }
+
+  /** Re-apply the hold after any vote/ready change: pause or resume the phase clock to match the vote state. */
+  _prepWaitRefresh() {
+    if (this.phase !== PHASE.PREP) return;
+    const held = this.prepWaitHeld;
+    if (held === this._prepWaitHeldApplied) { this.markPublic(); return; }
+    this._prepWaitHeldApplied = held;
+    if (held) {
+      // pause: keep the remaining seconds for the resume (the phase timer is cancelled like any deadline change)
+      this._prepWaitRemainSecs = this._phaseTimer ? Math.max(1, Math.ceil((this.deadline - this.sched.now()) / 1000)) : null;
+      this.cancel(this._phaseTimer);
+      this._phaseTimer = null;
+      this.deadline = 0;
+    } else {
+      // release: the wait concluded (target readied / no unique target) — the votes are spent either way
+      this._prepWaiters.clear();
+      const secs = this._prepWaitRemainSecs ?? 1;
+      this._prepWaitRemainSecs = null;
+      this.setDeadline(secs, () => this.prepDeadline());
+    }
+    this.markPublic();
   }
 
   prepDeadline() {
