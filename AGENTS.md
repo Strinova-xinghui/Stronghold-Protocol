@@ -49,6 +49,17 @@
 - **安全提醒**：无鉴权，拿到房间码的人即可窥看所有人手牌/商店。纯合作 PVE 影响有限；若将来开 PVP 或公开房间，需加 monitor 口令或限本机来源。
 - **已知边界**：监看者视角是「数据面板」；要看**实时战场画面**用卡片上的「客户端」链接（`/?room=CODE`，走原生观战，会占 1 个观战席）。
 
+### monitor 全功能影子观战（2026-10-06，提交 649e726）
+
+- **能力（三合一，正是用户要的）**：`/monitor` 玩家行点「观战」→ 新标签打开 `/?shadow=CODE&as=PLAYERID` → **以被看者视角渲染完整游戏界面**（棋盘、商店、整备区、装备、盟约、HUD、战场画面），同时**不占观战席位**（原生观战仅 2 席且看不到手牌/商店）且**零干扰**（只读）。
+- **实现原理**：客户端渲染 100% 由 `store.me.playerId`（myId）驱动 → 影子模式把 `me.playerId` 指向被看者，再接收服务端转发的被看者帧序列，整个 UI 自动以他的视角渲染（**无需改任何渲染代码**）。
+- **服务端（Match.js 约 25 行）**：`sendTo()` 内**统一镜像**——发给被看玩家的每一帧（m.private / 战场 b.start / m.public / m.result / m.ticker）都原样转发给监看他的人（带 `_monitor: true`）。这比逐路径打补丁完整；`monitorWatchers` 里的人不在 `players` 中，天然不递归。
+- **客户端（新增 `public/js/ui/shadow.js`，约 90 行）**：`parseShadowParam` 解析入口 → `installShadow({store,net})`：① 身份改写（me.playerId → 被看者 + `shadow:true`）；② **只读屏蔽**（`net.send`/`net.request` 拦截 `g.*` / `room.*`，影子发操作也无效）；③ welcome 后自动订阅、beforeunload 退订。
+- **接线**：`main.js` 引入并调用 `installShadow`（命中则 `net.setName('观战·影')` **触发 hello** —— 不 setName 就不会握手，这是踩过的坑）；`store.js` 的 `selectRoute` 在 `s.me.shadow` 时直返 `'game'`（影子无 session.entered，否则卡在标题页）。
+- **验证**：`node tools/verify-shadow.mjs <port>`（7/7：订阅成功、_monitor private、shop/hand/board 字段、m.public 到达、**无头浏览器渲染出真实对局界面**（如「选择策略/决策顺序/玩家A 决策中」）、无 JS 错误）+ 核心回归 pool 10/10、bonds 7/7、seats6 10/10。
+- **两个入口并存**（monitor 玩家行两个按钮）：「观战」= 影子客户端（全功能画面）；「数据」= 侧栏数据面板（轻量文字，不加载客户端）。
+- **安全**：同样无鉴权，且能力更强（可看战场细节）。纯合作 PVE 可接受；开 PVP 前必须加口令或限本机。
+
 以下均为本项目本地追加，上游无此代码；更新代码时注意 rebase 保护。
 
 ### /monitor 服务器监控面板
