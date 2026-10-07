@@ -1693,13 +1693,15 @@ export function shortcutBlocked(act, { modal = false, drawer = false } = {}) {
 
 // ---- settings ------------------------------------------------------------------------------------------------------
 
-export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high' });
+export const DEFAULT_SETTINGS = Object.freeze({ bgm: 0.6, sfx: 0.8, voice: 0.8, muted: false, damageNumbers: true, quality: 'high', voiceLang: 'cn' });
 const QUALITIES = ['high', 'medium', 'low'];
+const VOICE_DUBS = ['cn', 'jp'];
 
 /**
  * Sanitize persisted settings.
  * @param {any} raw
- * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean, quality: 'high'|'medium'|'low' }}
+ * @returns {{ bgm: number, sfx: number, voice: number, muted: boolean, damageNumbers: boolean,
+ *   quality: 'high'|'medium'|'low', voiceLang: 'cn'|'jp' }}
  */
 export function sanitizeSettings(raw) {
   const r = isObj(raw) ? raw : {};
@@ -1711,6 +1713,7 @@ export function sanitizeSettings(raw) {
     muted: typeof r.muted === 'boolean' ? r.muted : DEFAULT_SETTINGS.muted,
     damageNumbers: typeof r.damageNumbers === 'boolean' ? r.damageNumbers : DEFAULT_SETTINGS.damageNumbers,
     quality: QUALITIES.includes(r.quality) ? r.quality : DEFAULT_SETTINGS.quality,
+    voiceLang: VOICE_DUBS.includes(r.voiceLang) ? r.voiceLang : DEFAULT_SETTINGS.voiceLang,
   };
 }
 

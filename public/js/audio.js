@@ -332,6 +332,24 @@ export function voiceKey(x, gd = null) {
   return x.charId || voiceKey(x.id || x.chessId || x.defId || x.def || x.spine, gd) || null;
 }
 
+/**
+ * Rewrite a manifest voice line to the selected dub's file (中日配音热切换, user request): the official dubs share
+ * the very same file names (the CN_* numbering — only the dump folder differs), so a switch is a URL prefix rewrite,
+ * `/voice/cn/` → `/voice/<lang>/`. Null when no rewrite applies — the line is not a dub-able voice URL, or the target
+ * dub is the manifest's own — and the caller plays the line as-is.
+ * Pure (exported for tests). Every dub is served from `public/assets/audio/voice/<lang>/`; a line the other dub has
+ * no file for 404s and `AudioManager._playVoice` falls back to the manifest's own line inside the same token window.
+ * @param {string} line manifest URL, e.g. '/assets/audio/voice/cn/char_102_texas/cn_019.mp3'
+ * @param {string} lang target dub ('jp' …); the manifest's own language is 'cn'
+ * @returns {string|null}
+ */
+export function voiceLangUrl(line, lang) {
+  if (typeof line !== 'string' || !line || !lang || lang === 'cn') return null;
+  const i = line.indexOf('/voice/cn/');
+  if (i < 0) return null;
+  return `${line.slice(0, i)}/voice/${lang}/${line.slice(i + '/voice/cn/'.length)}`;
+}
+
 /** Concurrency + cooldown gate for battle SFX. Pure (time is passed in). */
 /** Gestures that may unlock audio: iOS Safari only accepts touchend / click / keydown; pointerdown covers the rest. */
 const UNLOCK_EVENTS = ['pointerdown', 'touchend', 'click', 'keydown'];
@@ -477,6 +495,7 @@ export class AudioManager {
     this.voiceGate = new VoiceGate();
     this.voiceNode = null;    // { src, gain, url, token } of the line on air
     this.voiceToken = 0;
+    this.voiceLang = 'cn';    // voice dub (setVoiceLang): the manifest carries cn; the jp dub mirrors it under /voice/jp/
     this.startVoiceDone = false; // 行动出发 of this field (the first operator deployed says it)
     this.uiVoices = 0;
     this.wantBgm = null;      // desired key (kept while locked)
@@ -843,6 +862,19 @@ export class AudioManager {
   // ---- operator battle voice ----------------------------------------------------------------------------------
 
   /**
+   * Switch the voice dub (cn/jp 局内热切换, user request): subsequent battle lines resolve to the other dub's file of
+   * the same name (`voiceLangUrl`). A line already on air keeps playing in the language it was asked for; the gate
+   * drops its cooldowns so the new dub answers at once. Idempotent (the settings store also feeds it on every change).
+   * @param {string} lang 'cn' (default) | 'jp'
+   */
+  setVoiceLang(lang) {
+    const next = lang === 'jp' ? lang : 'cn';
+    if (next === this.voiceLang) return;
+    this.voiceLang = next;
+    try { this.voiceGate.reset(); } catch { /* ignore */ }
+  }
+
+  /**
    * Play an operator's battle line (`audio.voice[charId][slot]`; a slot with several lines draws one at random).
    * Only in battle: every caller is a running battle's own event stream or its settlement (user request — the 休整期
    * is silent). The line must pass VoiceGate: one at a time, a global gap, a per-unit cooldown, higher priority wins.
@@ -859,56 +891,68 @@ export class AudioManager {
       const line = this.getManifest()?.audio?.voice?.[charId]?.[slot];
       const url = Array.isArray(line) ? line[Math.floor(Math.random() * line.length)] : line;
       if (typeof url !== 'string' || !url) return false;
+      // the selected dub (jp) mirrors the cn file names: a prefix rewrite resolves to its file, and a line the dub
+      // has no file for falls back to the manifest's own (cn) one inside _playVoice
+      const dub = voiceLangUrl(url, this.voiceLang);
       const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
       const verdict = this.voiceGate.request(slot, o.unitKey ?? null, now);
       if (verdict === 'drop') return false;
       if (verdict === 'preempt') this._stopVoice();
       this.voiceGate.start(slot, o.unitKey ?? null, now);
       const token = ++this.voiceToken;
-      this._playVoice(url, token, o.volume);
+      this._playVoice(dub || url, token, o.volume, dub ? url : null);
       return true;
     } catch (err) { this._warn('voice', err); return false; }
   }
 
-  /** Fetch/decode and start one voice line through the voice channel. */
-  _playVoice(url, token, volume) {
+  /**
+   * Fetch/decode and start one voice line through the voice channel. `fallbackUrl` is the manifest's own line to
+   * retry when the requested (dub-rewritten) one has no file — same name, other language.
+   */
+  async _playVoice(url, token, volume, fallbackUrl = null) {
     // `token` is the line's own `voiceToken`. Every deferred step below — the decode, a failed fetch, `onended` and the
     // safety timer — can land AFTER this line was taken over or stopped: `voiceToken` has moved on and the channel then
     // belongs to the line that replaced it. So each step re-checks its token and, when it is stale, touches NOTHING:
     // `_stopVoice` (takeover / stop) and `setFieldUnits` released the gate themselves. An unconditional release here let
     // a stale callback free the channel the NEW line had just taken, and the next line walked in on top of it (review
     // on #73).
-    this._buffer(url).then((buf) => {
-      if (token !== this.voiceToken) return;   // taken over / stopped while it decoded: not ours to release
-      if (!buf || !this.ctx || !this.voiceGain) { this.voiceGate.release(); return; }
-      try {
-        const src = this.ctx.createBufferSource();
-        src.buffer = buf;
-        const gain = this.ctx.createGain();
-        gain.gain.value = Math.max(0, Math.min(1.5, Number.isFinite(volume) ? volume : 1));
-        src.connect(gain); gain.connect(this.voiceGain);
-        const node = { src, gain, url, token };
-        let done = false;
-        const end = () => {
-          if (done) return;
-          done = true;
-          // this line's own end (natural, or the safety timer): only the line that still owns the channel may free it.
-          // A stale end is the takeover's leftovers — `_stopVoice` already faded it out and released the gate.
-          if (token === this.voiceToken) {
-            if (this.voiceNode === node) this.voiceNode = null;
-            this.voiceGate.release();
-          }
-          try { gain.disconnect(); } catch { /* ignore */ }
-        };
-        src.onended = end;
-        setTimeout(end, (buf.duration + 0.3) * 1000); // safety if onended never fires
-        src.start();
-        this.voiceNode = node;
-      } catch (err) {
-        this._warn('voice-play', err);
-        if (token === this.voiceToken) this.voiceGate.release();
-      }
-    }, () => { if (token === this.voiceToken) this.voiceGate.release(); });
+    let buf = await this._buffer(url);
+    if (token !== this.voiceToken) return;   // taken over / stopped while it decoded: not ours to release
+    if (!buf && fallbackUrl && url !== fallbackUrl) {
+      // the selected dub has no file for this line (its 404 is cached in the buffer map, so the retry is cheap):
+      // fall back to the manifest's own line inside the same token window — the gate slot stays held, the channel
+      // still belongs to this line
+      buf = await this._buffer(fallbackUrl);
+      if (token !== this.voiceToken) return;
+    }
+    if (!buf || !this.ctx || !this.voiceGain) { this.voiceGate.release(); return; }
+    try {
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      const gain = this.ctx.createGain();
+      gain.gain.value = Math.max(0, Math.min(1.5, Number.isFinite(volume) ? volume : 1));
+      src.connect(gain); gain.connect(this.voiceGain);
+      const node = { src, gain, url, token };
+      let done = false;
+      const end = () => {
+        if (done) return;
+        done = true;
+        // this line's own end (natural, or the safety timer): only the line that still owns the channel may free it.
+        // A stale end is the takeover's leftovers — `_stopVoice` already faded it out and released the gate.
+        if (token === this.voiceToken) {
+          if (this.voiceNode === node) this.voiceNode = null;
+          this.voiceGate.release();
+        }
+        try { gain.disconnect(); } catch { /* ignore */ }
+      };
+      src.onended = end;
+      setTimeout(end, (buf.duration + 0.3) * 1000); // safety if onended never fires
+      src.start();
+      this.voiceNode = node;
+    } catch (err) {
+      this._warn('voice-play', err);
+      if (token === this.voiceToken) this.voiceGate.release();
+    }
   }
 
   /** Fade the line on air out (a higher priority line is taking the channel over). */

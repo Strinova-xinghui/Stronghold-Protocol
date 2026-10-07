@@ -124,6 +124,20 @@
 - **未移植**：fork 的双语语音系统（用户明确不要语音）——audio.js 取上游版，settings.js 的 voiceLang 选择器为**死控件**（无副作用，介意可手动删）。fork 的 android/ 目录已从工作区删除（git 历史可找回）。
 - **测试**：skins.test 5/5 ✓ + 皮肤/加成/监控全线复验通过。
 
+### 中日配音局内热切换（2026-10-07 完成，接手死会话的调查落地）
+
+- **能力**：设置弹窗「语音语言」单选（中文 (默认)/日语）**局内热切换**——点一下立即生效，无需重启/刷新；正在播的那句保持原语言播完，之后每句按新语言解析。上游四国配音资产本地只落地了 cn（本功能补下 jp：**1680 文件 / ~51MB，12/12 战斗槽位全覆盖，0 失败**），原 fork 双语语音系统未移植的死控件就此激活。
+- **关键认知（实现原理）**：官方四国配音**共享同一套文件名**（zh_CN 表的 `CN_*` 编号，jp 文件也叫 `cn_019.mp3`），只有 dump 目录不同 → 切换 = URL 前缀改写 `/voice/cn/` → `/voice/jp/`，**assets.json 清单零改动**（不碰 data/ 官方生成物，build-data 与上游同步都安全）。jp 缺某行时 404，`_playVoice` 在同 token 窗口内回退 cn 行（`_buffer` 缓存住 404，回退零成本）。
+- **实现（3 处客户端 + 2 工具）**：
+  1. `public/js/audio.js`：导出纯函数 `voiceLangUrl(line, lang)`（`/voice/cn/` 前缀改写，无需改写返回 null）；`setVoiceLang(lang)`（幂等 + 切换时 `voiceGate.reset()` 让新配音立即响应）；`voice()` 改写后交 `_playVoice(dub || url, token, volume, fallbackUrl)`；`_playVoice` 改 async，buffer 为 null 且有 fallback 时同 token 窗口内重试清单原行。
+  2. `public/js/ui/gameLogic.js`：`DEFAULT_SETTINGS` + `sanitizeSettings` 加 `voiceLang`（'cn'|'jp'，默认 'cn'）——死控件的另一半根因就是 sanitize 之前会剥掉该字段，选了也不落盘。
+  3. `public/js/ui/settings.js`：`settingsStore.subscribe` 加 `audio.setVoiceLang(s.voiceLang)`（每次设置变化自动生效，这是热切换的通道）+ 模块加载处初始化；VOICE_LANG 标签改 `[['cn','中文 (默认)'],['jp','日语']]`——**默认 cn 与现状行为一致**，老玩家不会被悄悄切日语（要 fork 的日语默认改 DEFAULT_SETTINGS 一处即可）。
+  4. `tools/fetch-bilingual-voices.mjs`（fork 皮肤合并 53d9e35 带入，原直连 raw.githubusercontent 本机不通）：加 `SP_GITHUB_PROXY` 前缀代理支持（默认 gh-proxy.com，与皮肤管线 `sources.mjs` 同一传输；`SP_GITHUB_PROXY=''` 恢复直连）。
+  5. `tools/verify-voice-lang.mjs`（新，12 断言，无头浏览器）。
+- **验证**：`node tools/verify-voice-lang.mjs <port>` **12/12**（setVoiceLang 存在、voiceLangUrl 改写/不改写/null、默认 cn、updateSettings→store→localStorage 三同步、幂等、真实播放 jp/cn 各自请求 `/voice/jp|cn/`、404 回退 cn、0 JS 错误）+ 弹窗**真实点击**「日语」→ store=jp/按钮高亮/localStorage 落盘（.cache/modal-check.mjs 临时件）+ audio/mix/media 回归 31/31 + UI 回归 51/52（唯一失败 HUD_REM 与干净 HEAD 基线逐条相同 = fork 存量）+ 符号审计 ✓。服务器零改动。
+- **踩坑（测试侧，复用价值）**：① resource timing 默认 250 条 buffer 在游戏页必然溢出——先 `performance.setResourceTimingBufferSize(10000)` + `clearResourceTimings()`，否则语音请求根本不进 entries；② audio 走 `mediaUrl` 的**去扩展名**形式（`/assets/audio/X` → `/media/X`，`assets/audio` 整段剥掉），断言实际请求要看 `/media/voice/...`；③ `JSON.stringify(localStorage)` 对 Storage 对象返回 `{}`（属性不可枚举），要 `localStorage.getItem('sp.pref.settings')`；④ 测试切语言必须走真实 UI 路径 `updateSettings`——直接调 `audio.setVoiceLang` 绕过 store，store 不会同步（store→audio 单向，与 setVolumes 同构）。
+- **已知边界**：en/kr 语音未下载（四国只落地中日）；将来补齐 = 下载素材 + settings 单选加一项 + `setVoiceLang` 放行一项，机制已通用。切换不重播当前句（gentle 切换）。
+
 ### IPv6 直连（队友调研，报告 docs/ipv6-feasibility.md）
 
 - 判定**高可行性**：本机已获移动全局 IPv6（2409:8a55::/64），出口 ping 10-15ms；服务器代码 `HOST='::'` 即双栈；Windows 防火墙已有放行。

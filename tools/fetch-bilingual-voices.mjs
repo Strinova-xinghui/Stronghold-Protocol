@@ -15,6 +15,15 @@ const VOICE_ROOT = path.join(ROOT, 'public', 'assets', 'audio', 'voice');
 
 const RAW_VOICE_BASE = 'https://raw.githubusercontent.com/ArknightsAssets/ArknightsAssets2/voice/assets/dyn/audio/sound_beta_2/';
 
+// raw.githubusercontent.com is unreachable from this network without a prefix proxy (tools/assets/sources.mjs
+// DEFAULT_GITHUB_PROXY, the same transport the skin pipeline uses): SP_GITHUB_PROXY='' restores the plain URL.
+const GITHUB_PROXY = process.env.SP_GITHUB_PROXY === '' ? '' : (process.env.SP_GITHUB_PROXY || 'https://gh-proxy.com/');
+
+/** Prefix the GitHub proxy onto a raw download URL (never twice; empty proxy passes through). */
+function proxied(rawUrl) {
+  return GITHUB_PROXY && rawUrl.startsWith('https://raw.githubusercontent.com/') ? GITHUB_PROXY + rawUrl : rawUrl;
+}
+
 const VOICE_SLOTS = {
   BATTLE_START: 'start',
   BATTLE_FACE_ENEMY: 'faceEnemy',
@@ -89,7 +98,7 @@ export async function buildVoicePlan() {
             const prefix = `/assets/audio/voice/${lang}/`;
             if (!u.startsWith(prefix)) continue;
             const relFile = u.slice(prefix.length);
-            const url = `${RAW_VOICE_BASE}${remoteDir}/${relFile}`;
+            const url = proxied(`${RAW_VOICE_BASE}${remoteDir}/${relFile}`);
             const dest = path.join(VOICE_ROOT, lang, ...relFile.split('/'));
             const key = `${lang}:${relFile}`;
             if (!registeredUrls.has(key)) {
@@ -136,7 +145,7 @@ export async function buildVoicePlan() {
       }
 
       const remoteDir = LANG_DIRS[lang];
-      const url = `${RAW_VOICE_BASE}${remoteDir}/${relFile}`;
+      const url = proxied(`${RAW_VOICE_BASE}${remoteDir}/${relFile}`);
       const dest = path.join(VOICE_ROOT, lang, parts[0], voiceFileName);
 
       const key = `${lang}:${relFile}`;

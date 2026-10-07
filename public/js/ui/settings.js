@@ -16,8 +16,12 @@ export const settingsStore = createStore(sanitizeSettings(loadPref('settings', n
 settingsStore.subscribe((s) => {
   savePref('settings', sanitizeSettings(s));
   audio.setVolumes(s);
+  // voice dub hot switch (中日配音, user request): a settings change reaches the audio manager at once — the line on
+  // air keeps playing, every new line resolves to the other dub's file (audio.setVoiceLang / voiceLangUrl)
+  audio.setVoiceLang(s.voiceLang);
 });
 audio.setVolumes(settingsStore.get());
+audio.setVoiceLang(settingsStore.get().voiceLang);
 
 /** @param {Partial<ReturnType<typeof sanitizeSettings>>} patch */
 export function updateSettings(patch) {
@@ -46,7 +50,7 @@ function Toggle({ label, micro, value, onChange }) {
 }
 
 const QUALITY = [['high', '高'], ['medium', '中'], ['low', '低']];
-const VOICE_LANG = [['jp', '日语 (默认)'], ['cn', '中文']];
+const VOICE_LANG = [['cn', '中文 (默认)'], ['jp', '日语']];
 
 /**
  * Settings modal.
