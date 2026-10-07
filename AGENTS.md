@@ -167,7 +167,8 @@
 - **Node ESM 进程内热更做不到**（代码加载后不可替换；`node --watch` 也是重启）。等效方案：`update-restart.bat`。
 - `update-restart.ps1` 安全重启逻辑：查 `/healthz` → `matches > 0` 时**拒绝重启**（打印对局数，exit 1，绝不坑在线玩家）→ `matches == 0` 时杀旧进程拉新代码 → 健康检查通过才报成功。
 - **座位模式继承（2026-10-07，提交 423789f）**：`update-restart` 默认**自动读取当前服务器的 `maxSeats` 并在重启时带上 `SP_MAX_SEATS`**（6 座换代不会悄悄退回 4 座）；没在跑时默认 6；也可显式 `-MaxSeats 4`。打印行含「座位 N」。
-- 使用：对局间隙双击 `update-restart.bat` 即可换代（监控器/盟约加成/未来一切服务器改动通用）。
+- **使用**：对局间隙双击 `update-restart.bat` 即可换代（监控器/盟约加成/未来一切服务器改动通用）。
+- **⚡ 闪断授权（用户 2026-10-07 明确）**：只要服务器**没有对局在进行**（healthz `matches == 0`，即没人在玩），**允许 agent 直接闪断重启**，无需再逐次询问；用户说「可以闪断」即确认此授权长期有效。执行顺序：① curl healthz 确认 `matches == 0`（>0 则拒绝并报对局数，绝不坑在线玩家——脚本本身也有此保护）→ ② `powershell -ExecutionPolicy Bypass -File update-restart.ps1` → ③ healthz 复查 + 线上复跑相关 verify。服务器没在跑（healthz 不通）时则直接 `start-online.ps1` 拉起（等同新代码上线）。
 
 ### 上游 v0.1.4 同步（2026-10-07，合并提交 e3c17ee）——已上线
 
