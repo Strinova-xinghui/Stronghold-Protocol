@@ -136,6 +136,19 @@
 - **座位模式继承（2026-10-07，提交 423789f）**：`update-restart` 默认**自动读取当前服务器的 `maxSeats` 并在重启时带上 `SP_MAX_SEATS`**（6 座换代不会悄悄退回 4 座）；没在跑时默认 6；也可显式 `-MaxSeats 4`。打印行含「座位 N」。
 - 使用：对局间隙双击 `update-restart.bat` 即可换代（监控器/盟约加成/未来一切服务器改动通用）。
 
+### 上游 v0.1.4 同步（2026-10-07，合并提交 e3c17ee）——已上线
+
+- **范围**：基点 19a8908 → v0.1.4（tag=master HEAD=9f93096），33 commit / 66 文件 / +10320−420（大头是新增 golden 测试语料）。**注意：19a8908 在 v0.1.4 之前、v0.1.3 之后**——标题页设置/素材镜像/地形点选/漏怪警报这些 0.1.3 末特性我们早有；本轮真增量是 0.1.4 发布内容。
+- **拿到的玩法修复（按裁定：冲突处玩法一律取官方上游）**：阿戈尔吞噬基础 ATK 改**最终加算**（`atkFinal`，GitHub #165）；**高台按特性**「可以放置于远程位」（#153/#69，崖心/见行者/歌蕾蒂娅普通+精锐+任意模组都可上高台，取代 0.1.3「只精锐歌蕾蒂娅+淡金坠饰」）；5-阿戈尔复活名额给最先倒下的 3 名（#105）；联防阿戈尔吞队友（#140）；**沉睡敌人不可阻挡、不占阻挡位**（#140）；缇缇 S2 每次沉睡脉冲计入特质（#162）；耀骑士临光 S2 撤退+不屈再部署不再丢骑士戒律、伊内丝影哨收回（重启内自重启事件归属）；引星棘刺 S1 自动触发（#124）；盟约概率封顶 100%（#108）；观战按钮发密钥修复（#119）；Q 撤退 X 出售（#114）；结算语音 chess→char 映射（#73 移植修复）；棋盘贴图 WebP（#186）；**golden 结果安全网**（`npm run golden`，`test/golden/*.json`，以后改 sim 可回归验证战斗结果逐字段一致）。
+- **合并方式（方法论升级：不再 tarball+robocopy）**：`git fetch origin --tags` 这次**直连成功**（此前常被墙）——上游对象入库后走**真三方合并**：
+  1. `git merge-tree --write-tree --merge-base=19a8908 HEAD 9f93096` → 合并树 + 权威冲突清单（**7 个真冲突，其中代码只有 2 个**；其余 51 个上游文件全部干净自动合并，含全部 sim 玩法文件）。
+  2. 隔离 worktree（E:\sp-up-sync + junction 复用 node_modules）里 `git read-tree -m -u <合并树>` 物化冲突态 → 手工解 7 处 → `git add -A` → `git write-tree` → `git commit-tree <tree> -p <我们HEAD> -p <9f93096>` 造双亲合并提交。
+  3. 主仓库 `git merge --ff-only <commit>` 落地。**坑**：`read-tree -m -u --reset` 会报「Which one?」——`-m -u` 连用即可，别加 `--reset`。
+  4. **merge-base 必须显式给 19a8908**：默认 merge-base 是 bce1827（tarball 同步没历史，共同祖先太老）→ 假冲突 30+ 个；用对 base 后真实冲突仅 7 个。
+- **7 处冲突的解法（存档备查）**：`shared/constants.js`/`package.json`/`package-lock.json`/`README.md` 版本号保留我们的 `0.1.6-pre-skin`（对外连续、纯展示串，healthz 的 app 字段用它）；`lobby.js` import 行取**并集**（上游 `ERR` + 我们 `RESULT_LIMITS`，ERR 两边都从 constants 导出）；`CHANGELOG.md` 我们的 0.1.5.2/0.1.6-pre-skin 两条在上、上游 0.1.4 条目在下（历史都留）；`docs/DESIGN.md` 上游 §24.7–24.9 在前（接 §24.6）、我们的 §25（6 人）在后。
+- **验证（全在 worktree 里跑完才落地）**：全 JS `node --check` ✓ → `check-missing-imports` ✓ → **核心 2352 个（match/sim/content）通过 2351**（唯一失败=性能测试 0.61ms vs 0.5ms 阈值，**负载抖动**：单独跑合并前后都是 ~0.30ms ✓）→ lobby 72/72 → **golden 6/6**（新安全网直接绿，说明合并没改任何战斗结果）→ 自研甄选 9/9 → UI/render 899/902（**3 个失败与合并前基线逐条相同**=fork 语音/皮肤存量，非本次引入）。落地后线上：verify-shadow 7/7、高台规则测试 8/8 全绿（歌蕾蒂娅普通可上高台/重装被拒）、甄选配置 bondId 未因 bonds.json 更新失效。
+- **裁定记录（用户 2026-10-07）**：「冲突的功能优先，走官方上游而不是第三方分支」——第三方包（fork 0.1.6-pre-skin）与官方上游在**玩法逻辑**上冲突时取官方；我们的自研（皮肤字段/6 人/monitor/影子观战/定向甄选）与上游无逻辑冲突，全部保留。
+
 ### 上游同步方法论（2026-10-06 定稿，下次直接照做）
 
 - **同步流程**：① `api.github.com` 查远程 HEAD（github.com 直连常被墙，codeload/api/jsDelivr 可用）→ ② `codeload.github.com/.../tar.gz/<sha>` 下载精确 commit 的 tarball → ③ 解压后 robocopy 覆盖（**绝不用 /MIR**！）→ ④ `git status` 审查 → 恢复被覆盖的自研文件 → ⑤ 跑关键测试 → 提交。
