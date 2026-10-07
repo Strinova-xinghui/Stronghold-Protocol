@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from '../../vendor/hooks.module.js';
 import { DIFFICULTIES, DIFFICULTY_NAMES, DIFFICULTY_COLORS, ROOM_CODE_LEN, MAX_SEATS, MAX_SPECTATORS, modeIdFor } from '../../../shared/constants.js';
+import { RESULT_LIMITS } from '../../../shared/protocol.js';
 import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame, Tooltip, Spinner, DifficultyIcon, doctorNo } from '../ui/components.js';
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
@@ -72,10 +73,16 @@ const MODE_CARDS = [
   },
   {
     id: 'coop', name: '同盟模拟', en: 'ALLIANCE SIMULATION', icon: 'users',
-    desc: `与至多 ${MAX_SEATS - 1} 名博士组成同盟，共享干员池，联防协作抵御敌潮。`,
-    points: [`1–${MAX_SEATS} 名博士 · 可由 AI 队友补位`, '联防阶段 · 最终攻势合并生命值'],
+    // The seat count is the RUNNING server's capacity (4 by default, 6 with SP_MAX_SEATS=6) — it reaches the client on
+    // `welcome` / room.state (net.js raises RESULT_LIMITS.players; see server/match/scaling.js). These are getters so
+    // the card follows the server instead of a constant, without re-rendering anything else.
+    get desc() { return `与至多 ${coopSeats() - 1} 名博士组成同盟，共享干员池，联防协作抵御敌潮。`; },
+    get points() { return [`1–${coopSeats()} 名博士 · 可由 AI 队友补位`, '联防阶段 · 最终攻势合并生命值']; },
   },
 ];
+
+/** Co-op seats the connected server accepts (4 until a `welcome` / room.state says otherwise). */
+function coopSeats() { return Math.max(2, RESULT_LIMITS.players | 0 || MAX_SEATS); }
 
 /**
  * Text for a difficulty card, preferring data/config.json.

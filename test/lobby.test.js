@@ -1546,6 +1546,8 @@ describe('6-seat co-op room', () => {
 
   test('six doctors fill the room, a seventh is refused, and the match starts with six seats', async () => {
     const host = await pool.player('Host');
+    // the capacity also rides on `welcome`, so the client can size the lobby's 同盟模拟 card before any room exists
+    assert.equal(host.welcome.maxSeats, 6, 'welcome carries the server seat capacity');
     const st = await createRoom(host, 'coop', 'HARD');
     assert.equal(st.maxSeats, 6, 'the room reports six seats');
     assert.equal(st.seats.length, 6, 'six seat slots, not four');

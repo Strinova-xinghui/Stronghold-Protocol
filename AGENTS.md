@@ -169,7 +169,10 @@
 
 - **怎么开 6 人房**：双击 **`start-6p-online.bat`**（内部调 `start-online.ps1 -MaxSeats 6`，端口/隧道/剪贴板逻辑与 4 人版完全一致）；或命令行 `$env:SP_MAX_SEATS='6'; npm start`。4 人版仍是 `start-online.bat`（不带该变量）。
 - **座位模式启动时固定、不能热改**：已在跑 4 人服时再点 6 人启动器，脚本会**明确提示「必须重启才生效」**并让你先 `stop-online.bat`（不会静默混用）。
-- **自证**：`GET /healthz` 与 `/monitor?json` 都有 `maxSeats` 字段（4 或 6）。
+- **自证**：`GET /healthz` 与 `/monitor?json` 都有 `maxSeats` 字段（4 或 6）；`welcome` 帧也带 `maxSeats`，所以**客户端在进房前就知道容量**——
+  - 大厅「同盟模拟」卡片的人数文案改成**渲染时读 `RESULT_LIMITS.players`**（getter，不再用常量 `MAX_SEATS`），6 人服显示「1–6 名博士」而不是误导性的「1–4」；4 人服显示不变。
+  - `public/js/net.js` 在收到 `welcome` 或 `room.state` 任一帧时提升协议上界（`setSeatLimit`），所以在房间外 `room.removeBot` 的座位上界也已经是 6。
+  - 服务端 `welcome` 的 `maxSeats` 取自 `RESULT_LIMITS.players`（`Lobby` 构造时已写入）——**无需给 Network 加配置项**，老客户端收到多余字段无副作用。
 - **4 人及以下行为不变**：两条缩放系数在 ≤4 人时恒为 1、盟约 ban 用模式自身值 —— 所以**6 人模式的房间里玩 4 人局 = 官方原版**，只是座位板显示 6 格。怕影响 4 人体验的顾虑可以放下。
 
 #### 来源与改动集（第三方包 `D:\Download\Stronghold-Protocol-v0.1.2(gai (2).zip`）
@@ -198,7 +201,7 @@
 
 ### 一键开服/关服（2026-10-06 定稿，完全脱离 DSH）
 
-- **开服**：双击 `start-online.bat`（脚本内已固化 `$env:SP_BOND_BOOST='2'`，盟约加成默认开）。所有打印地址以 frp-way.com:17913 为主力。
+- **开服**：双击 `start-online.bat`（4 人版）。`SP_BOND_BOOST` 在脚本里**已注释停用**（朋友反馈全格加成太高，改由「定向甄选」按 `config/custom-rules.json` 生效）；想恢复取消注释即可。6 人版双击 `start-6p-online.bat`。所有打印地址以 frp-way.com:17913 为主力。
 - **关服**：双击 `stop-online.bat` —— 只停 24500 上的游戏服务器（先 curl 验身份防误杀），不动 frpc/其他程序；有 SYSTEM 残留时自动 taskkill 兜底并提示。
 - **主力地址已切换**：`https://frp-way.com:17913`（#218 新节点，自动 HTTPS）——因合肥 #83 节点故障退役；APK 明文线 `http://frp-cup.com:30756`（日本 #74）不变；剪贴板文案与脚本打印已同步。
 - 关服脚本若提示「被守护进程复活」，说明还有别的自启机制在拉 node，按提示排查计划任务。

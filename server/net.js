@@ -37,7 +37,7 @@
 
 import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
-import { C2S, validateC2S } from '../shared/protocol.js';
+import { C2S, validateC2S, RESULT_LIMITS } from '../shared/protocol.js';
 import { ERR, ERR_TEXT, NAME_MAX_LEN, PROTOCOL_VERSION } from '../shared/constants.js';
 
 /** Tunables (all overridable through the Network / SessionRegistry constructors). */
@@ -653,7 +653,10 @@ export class Network {
     session.addr = conn.ip;
     session.limitKey = conn.key;
 
-    const welcome = { t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed };
+    // `maxSeats` = the co-op seat capacity this server was booted with (4 by default, 6 with SP_MAX_SEATS=6; Lobby
+    // raises RESULT_LIMITS.players at construction). The client shows it on the lobby's 同盟模拟 card and raises its
+    // local protocol bounds from it, so it knows the room's size before it ever receives a room.state.
+    const welcome = { t: 'welcome', playerId: session.playerId, token: session.token, name: session.name, serverNow: now, version: PROTOCOL_VERSION, resumed, maxSeats: RESULT_LIMITS.players };
     if (validRid(rid)) welcome.rid = rid;
     this.reply(conn, welcome);
     try {

@@ -557,10 +557,11 @@ export class Net {
       this._emit('unhandledError', new NetError(msg.code, msg.msg, msg.detail));
     }
 
-    // The server's seat capacity (4, or 6 with SP_MAX_SEATS) arrives with room.state: raise the local protocol bounds
-    // (room.removeBot's seat index, b.result's per-player map) BEFORE listeners act on the room, so a 6-seat room can
-    // remove a bot seated at index 4/5. Absent (older server / mock): the bounds stay 4.
-    if (t === 'room.state' && Number.isInteger(msg.maxSeats) && msg.maxSeats > 0) {
+    // The server's seat capacity (4, or 6 with SP_MAX_SEATS) arrives with `welcome` (so the lobby's 同盟模拟 card can
+    // show the real size) and with room.state: raise the local protocol bounds (room.removeBot's seat index, b.result's
+    // per-player map) BEFORE listeners act on either, so a 6-seat room can remove a bot seated at index 4/5.
+    // Absent (older server / mock): the bounds stay 4.
+    if ((t === 'welcome' || t === 'room.state') && Number.isInteger(msg.maxSeats) && msg.maxSeats > 0) {
       try { setSeatLimit(msg.maxSeats); } catch { /* out-of-range capacity: keep the current bounds */ }
     }
 
