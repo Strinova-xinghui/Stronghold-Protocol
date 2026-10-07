@@ -122,11 +122,10 @@ const MONITOR_HTML = `<!doctype html>
   .lp { font-variant-numeric: tabular-nums; color: #ffd479; }
   .spec { margin-top: 8px; font-size: 12px; color: #7a8698; }
   .empty { color: #7a8698; text-align: center; padding: 40px 0; }
-  /* 监看（自研） */
-  .mon-btn { background: #223047; color: #9db4d0; border: 1px solid #2f4057; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; }
+  /* 观战/数据（自研） */
+  .mon-btn { display: inline-block; background: #223047; color: #9db4d0; border: 1px solid #2f4057; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; margin-right: 6px; text-decoration: none; line-height: 1.6; }
   .mon-btn:hover { background: #2b3d59; color: #fff; }
-  .mon-link { margin-left: 6px; color: #7ecbff; font-size: 12px; text-decoration: none; }
-  .mon-link:hover { text-decoration: underline; }
+  .mon-btn.ghost { background: transparent; color: #7a8698; }
   .watch { position: fixed; right: 16px; top: 16px; width: 420px; max-height: 88vh; overflow: auto; background: #131a25; border: 1px solid #2f4057; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.5); z-index: 20; }
   .watch.hidden { display: none; }
   .watch-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #223047; position: sticky; top: 0; background: #131a25; }
@@ -199,11 +198,11 @@ function render(d) {
         const conn = p.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
         const tag = p.isBot ? ' <span class="bot">AI</span>' : '';
         const alive = p.alive ? '' : ' <span class="dead">淘汰</span>';
-        // 监看（自研）: 非 bot 的真人玩家才可被监看；按钮打开数据面板 + 完整客户端入口
+        // 观战入口（自研）: 「观战」= 影子客户端（全功能视角，不占席位、不影响玩家）；「数据」= 侧栏数据面板
         const watchable = !p.isBot && p.playerId;
         const btns = watchable
-          ? '<button class="mon-btn" data-code="' + esc(r.code) + '" data-pid="' + esc(p.playerId) + '" data-name="' + esc(p.name) + '">监看</button>' +
-            '<a class="mon-link" href="/?room=' + esc(r.code) + '" target="_blank" rel="noopener">客户端</a>'
+          ? '<a class="mon-btn" href="/?shadow=' + esc(r.code) + '&as=' + esc(p.playerId) + '" target="_blank" rel="noopener">观战</a>' +
+            '<button class="mon-btn ghost" data-code="' + esc(r.code) + '" data-pid="' + esc(p.playerId) + '" data-name="' + esc(p.name) + '">数据</button>'
           : '';
         h += '<tr><td>' + esc(p.name) + tag + alive + '</td><td>' + conn +
              '</td><td class="lp">LP ' + p.lp + '</td><td>商店 Lv' + (p.shopLevel ?? '?') + '</td><td>场上 ' + (p.boardCount ?? '?') + '</td>' +

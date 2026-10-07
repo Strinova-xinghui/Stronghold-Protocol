@@ -95,6 +95,9 @@ export const store = createStore(initialState);
  * @returns {'title'|'lobby'|'room'|'game'}
  */
 export function selectRoute(s) {
+  // monitor 影子观战（自研）: 以被看者身份直入对局画面，跳过标题/大厅（未登录、无房间）。
+  // 对局帧到达前也停在 game（GameScreen 自带 restoring 状态，不会崩）。
+  if (s?.me?.shadow) return 'game';
   if (!s?.session?.entered) return 'title';
   const phase = s.match?.public?.phase;
   if (phase && phase !== PHASE.LOBBY) return 'game';

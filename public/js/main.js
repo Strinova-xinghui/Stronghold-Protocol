@@ -43,6 +43,7 @@ import { installAudio, audio } from './audio.js';
 import { settingsStore } from './ui/settings.js';
 import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
+import { installShadow } from './ui/shadow.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { installLoadoutSync } from './ui/loadoutSync.js';
 import { installSkinsSync } from './ui/skins.js';
@@ -364,6 +365,12 @@ async function boot() {
   }));
 
   wireNet();
+  // monitor 影子观战（自研）: 入口 ?shadow=CODE&as=PLAYERID —— 以被看者视角渲染，只读、不占座位。
+  const shadow = installShadow({ store, net });
+  if (shadow.active) {
+    // 影子必须像普通客户端一样握手（hello）才能被服务器识别；用固定昵称，不进任何房间。
+    net.setName('观战·影');
+  }
   installLoadoutSync({ net });
   installSkinsSync({ net });
   net.attachBrowserHooks();
@@ -377,6 +384,7 @@ async function boot() {
   data.load('local').catch(() => {});
 
   const connectWhenReady = identityReady.then(() => {
+    if (shadow.active) return;      // 影子观战：已自行 connect，且不需要昵称/身份
     if (entered) net.setName(savedName);
     else net.connect();
   });

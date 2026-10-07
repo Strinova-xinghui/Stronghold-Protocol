@@ -559,11 +559,18 @@ export class Match {
     const ps = this.players.get(targetPlayerId);
     if (!ps) { this.log?.warn?.(`[monitor] no such player ${targetPlayerId}; have=${[...this.players.keys()].join(',')}`); return false; }
     this.monitorWatchers.set(watcherId, targetPlayerId);
-    // 立即补发一份当前状态（不必等下一次 dirty）
+    // 立即补发一份当前状态（不必等下一次 dirty）：private + public + 战场帧，等价于被看者的完整接收状态。
     try {
       const view = ps.privateView();
       const sent = this.sendTo(watcherId, { ...view, playerId: ps.playerId, _monitor: true });
-      this.log?.info?.(`[monitor] ${watcherId} watching ${targetPlayerId}, initial send=${sent}`);
+      this.sendTo(watcherId, this.publicView());
+      // 战场帧：影子监看者需要与被看者相同的战场（含 b.start 规格）才能渲染战斗画面
+      if (this.clientCombat) {
+        const fid = this.watchers.get(ps.playerId) || (this.fields.find((x) => x.players.includes(ps.playerId)) || {}).fieldId;
+        const f = fid ? this.fields.find((x) => x.fieldId === fid) : null;
+        if (f) this.sendTo(watcherId, this._startMsg(f, ps.playerId, { watch: true }));
+      }
+      this.log?.info?.(`[monitor] ${watcherId} shadowing ${targetPlayerId}, initial send=${sent}`);
     } catch (e) { this.reportError('monitorWatcher resend', e); }
     return true;
   }
@@ -808,11 +815,21 @@ export class Match {
   sendTo(playerId, msg) {
     if (this.disposed) return false;
     const ps = this.players.get(playerId) || this.spectators.get(playerId);
-    // monitor 监看者（自研）: 不是玩家也不是观战席位，只是一个额外的收件人（不需要 PlayerState）
+    // monitor 影子监看者（自研）: 不是玩家也不是观战席位，只是一个额外的收件人（不需要 PlayerState）
     const isMonitor = !ps && this.monitorWatchers && this.monitorWatchers.has(playerId);
     if (!ps && !isMonitor) return false;
     if (ps && (ps.isBot || ps.left)) return false;
-    try { return !!this.sendFn(playerId, msg); } catch (e) { this.reportError('send', e); return false; }
+    try {
+      const ok = !!this.sendFn(playerId, msg);
+      // 统一镜像（自研）：把发给被看玩家的每一帧（private / 战场 / 结果 / ticker…）原样转发给监看他的人，
+      // 使影子客户端拿到与被看者完全相同的帧序列。监看者自己不在 players 里，天然不会递归。
+      if (ok && ps && !ps.spectator && this.monitorWatchers && this.monitorWatchers.size) {
+        for (const [watcherId, targetId] of this.monitorWatchers) {
+          if (targetId === playerId) this.sendFn(watcherId, { ...msg, _monitor: true });
+        }
+      }
+      return ok;
+    } catch (e) { this.reportError('send', e); return false; }
   }
 
   broadcast(msg) {
@@ -871,14 +888,8 @@ export class Match {
     const json = JSON.stringify(view);
     if (!force && json === ps._lastPriv) return;
     ps._lastPriv = json;
+    // sendTo 内已统一镜像给 monitor 影子监看者（自研），这里只需发给本人
     this.sendTo(ps.playerId, view);
-    // monitor 监看者（自研）: 把同一份 privateView 也发给正在监看这名玩家的人。
-    // 独立于观战席位（spectators），不影响玩家、不计入房间统计；收件人拿到的数据与被看者逐字节相同。
-    if (this.monitorWatchers && this.monitorWatchers.size) {
-      for (const [watcherId, targetId] of this.monitorWatchers) {
-        if (targetId === ps.playerId) this.sendTo(watcherId, { ...view, playerId: ps.playerId, _monitor: true });
-      }
-    }
   }
 
   _maybeSendPublic(force) {
@@ -903,6 +914,13 @@ export class Match {
     this._lastPubJson = json;
     this._lastPubAt = now;
     this.broadcast(view);
+    // monitor 影子监看者（自研）: 也要收到 m.public（否则客户端不知道阶段/回合/玩家列表）
+    for (const watcherId of this._monitorIds()) this.sendTo(watcherId, view);
+  }
+
+  /** 影子监看者 id 列表（自研）。 */
+  _monitorIds() {
+    return this.monitorWatchers && this.monitorWatchers.size ? [...this.monitorWatchers.keys()] : [];
   }
 
   // ===================================================================================================
