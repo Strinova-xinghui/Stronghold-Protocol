@@ -654,6 +654,7 @@ export class Match {
       ps.connected = false;
       ps.autoplay = false;
       this.watchers.delete(playerId);
+      this._prepWaiters?.delete(playerId);   // 等待投票联动（自研）：离开者的一票作废，hold 状态随活人集合重估
       if (this.ended) return;
       this._resume();
       if (this.clientCombat) this._authorityLost(ps, 'left');
@@ -1074,10 +1075,9 @@ export class Match {
       };
     }
     if (this.phase === PHASE.UNITE && this.unitePlan) v.unite = { helpers: this.unitePlan.helpers.map((p) => p.playerId), leakers: this.unitePlan.leakers.map((p) => p.playerId) };
-    // 休整期等待投票（自研）：held = 倒计时已被暂停（deadline 已清 0）；waiters = 等待中的玩家 id；
-    // target = 被等待的最后一名未就绪活人。老客户端收到多余字段无副作用。
+    // 休整期等待投票（自研 v2）：held = 倒计时已暂停（全员等待）；waiters = 等待中的玩家 id。老客户端多余字段无副作用。
     if (this.phase === PHASE.PREP && this._prepWaiters?.size) {
-      v.prepWait = { held: !!this._prepWaitHeldApplied, waiters: [...this._prepWaiters], target: this._waitTargetId() };
+      v.prepWait = { held: !!this._prepWaitHeldApplied, waiters: [...this._prepWaiters], all: this.prepWaitHeld };
     }
     return v;
   }
@@ -1991,12 +1991,13 @@ export class Match {
 
   /**
    * Whether the prep clock is currently HELD by the wait vote (m.public.prepWait.held, m.public.deadline 0):
-   * every waiting-ready player votes and the only unready alive player is the one being waited for —
-   * `aliveHumans - 1` activations among the ready is enough (user request: 电表倒转 needs unlimited time on the
-   * last player's board). Bots never vote.
+   * **every alive player is waiting**（全员等待，2026-10-07 v2 user request — 等待与准备完全独立）. Waiting needs
+   * no readiness and never locks operations: two players can both run 电表倒转 on their boards while the clock is
+   * held; anyone releasing the wait resumes the clock with the remaining seconds.
    */
   get prepWaitHeld() {
-    return !!this._prepWaiters?.size && this._waitTargetId() !== null;
+    const alive = this.alivePlayers();
+    return !!this._prepWaiters?.size && alive.length > 0 && alive.every((p) => this._prepWaiters.has(p.playerId));
   }
 
   /** The one alive player still unready (the vote waits for THEM); null when none/ambiguous (0 or ≥2 unready). */
@@ -2006,21 +2007,18 @@ export class Match {
   }
 
   /**
-   * Pause (on) or release (off) the prep countdown by vote of the ready players. Holding: the remaining seconds are
-   * remembered and the deadline cleared (m.public.deadline 0 ⇒ every client's countdown disappears); resuming puts
-   * the remaining time back on the clock. A vote that would hold nothing (the target already ready / left) is a
-   * no-op refusal ALREADY. Any ready change re-evaluates: someone un-readies ⇒ the vote state stays but the hold
-   * may end (onReadyChanged → _prepWaitRefresh).
+   * Join (on) / leave (off) the prep wait — **independent of readiness**（v2）: an unready player waits to keep
+   * operating, a ready one waits to signal patience. ALL alive players waiting holds the clock (`prepWaitHeld`);
+   * any single release resumes it. Solo has no clock to hold. The wait never changes what a player may do — only
+   * readiness does (user request: 和准备状态完全独立).
    * @param {any} ps caller's PlayerState
    * @param {boolean} on
    */
   prepWait(ps, on) {
     if (this.phase !== PHASE.PREP) return fail(ERR.WRONG_PHASE);
     if (this.soloUntimed) return fail(ERR.WRONG_PHASE, 'solo has no clock to hold');
-    if (!ps.ready) return fail(ERR.NOT_YOUR_TURN, '只有已就绪的玩家可以发起等待');
     if (!this._prepWaiters) this._prepWaiters = new Set();
     if (on) {
-      if (this._waitTargetId() === null) return fail(ERR.ALREADY, '没有需要等待的玩家');
       if (this._prepWaiters.has(ps.playerId)) return fail(ERR.ALREADY, '已在等待中');
       this._prepWaiters.add(ps.playerId);
     } else {

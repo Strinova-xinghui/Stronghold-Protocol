@@ -1,5 +1,6 @@
-// 休整期等待投票（prepWait）端到端验证：已就绪玩家发起等待 → 全员（活人−1）同意后倒计时暂停（deadline 0），
-// 目标就绪后恢复/直接结束。用法: node tools/verify-prep-wait.mjs [port]（假设验证服务器已在 PORT 上运行）
+// 休整期等待投票 v2 端到端验证：等待与准备完全独立——不就绪也能等待、等待不锁操作；
+// **全员等待**时倒计时暂停（deadline 0），任一人取消即恢复。
+// 用法: node tools/verify-prep-wait.mjs [port]（假设验证服务器已在 PORT 上运行）
 import fs from 'node:fs';
 import { TestClient } from '../test/helpers/wsClient.js';
 
@@ -52,47 +53,62 @@ for (let i = 0; i < 40; i++) {
   }
 }
 check('进入休整期（PREP，计时模式）', phase === 'PREP', `phase=${phase}`);
-
-// ② 记录当前 deadline（>0）
 const pub1 = pubOf(a);
-const dl1 = pub1?.deadline || 0;
-check('PREP 有倒计时（deadline > 0）', dl1 > 0, `deadline=${dl1}`);
+check('PREP 有倒计时（deadline > 0）', (pub1?.deadline || 0) > 0, `deadline=${pub1?.deadline}`);
 
-// ③ 未就绪时发起等待 → 拒绝（NOT_YOUR_TURN 系文案）
-const r0 = await a.request({ t: 'g.prepWait', on: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
-check('未就绪发起等待被拒', r0.t === 'error', r0.t === 'error' ? r0.code : 'unexpected ok');
-
-// ④ A 先就绪 → A 发起等待（此时 B 未就绪，等待目标 = B）
-const rA = await a.request({ t: 'g.ready', ready: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
-check('A 准备就绪', rA.t === 'ok', rA.t === 'error' ? rA.code : '');
-// A 就绪会触发 maybeEndPrep，但 B 未就绪不会结束；等待投票：A 一个人 = 活人(2) − 1 = 全部已就绪者
+// ② 未就绪也可以等待（v2 核心变化——v1 这里被拒）
 const r1 = await a.request({ t: 'g.prepWait', on: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
-check('A 发起等待成功', r1.t === 'ok', r1.t === 'error' ? r1.code : '');
+check('未就绪发起等待成功（与准备独立）', r1.t === 'ok', r1.t === 'error' ? r1.code : '');
 const pub2 = await a.waitFor('m.public', (f) => f.prepWait?.waiters?.includes(A_ID), 4000).catch(() => null);
 check('m.public.prepWait 广播（waiters 含 A）', !!pub2?.prepWait, JSON.stringify(pub2?.prepWait || {}).slice(0, 80));
-check('倒计时已暂停（deadline = 0）', pub2?.deadline === 0, `deadline=${pub2?.deadline}`);
-check('hold 状态 = true', pub2?.prepWait?.held === true, `held=${pub2?.prepWait?.held}`);
-check('等待目标 = B', pub2?.prepWait?.target === B_ID, `target=${pub2?.prepWait?.target}`);
+check('仅一人等待：hold 不成立、倒计时不暂停', pub2?.prepWait?.held === false && (pub2?.deadline || 0) > 0,
+  `held=${pub2?.prepWait?.held} deadline=${pub2?.deadline}`);
 
-// ⑤ 重复发起 → ALREADY
-const r2 = await a.request({ t: 'g.prepWait', on: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
-check('重复发起等待被拒（ALREADY）', r2.t === 'error' && r2.code === 'ALREADY', r2.t === 'error' ? r2.code : 'unexpected ok');
+// ③ B 也等待 → 全员等待 ⇒ hold 成立（deadline 0）
+const r2 = await b.request({ t: 'g.prepWait', on: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('B 发起等待成功', r2.t === 'ok', r2.t === 'error' ? r2.code : '');
+const pub3 = await a.waitFor('m.public', (f) => f.prepWait?.held === true, 4000).catch(() => null);
+check('全员等待 ⇒ hold 成立（deadline=0）', pub3?.prepWait?.held === true && pub3?.deadline === 0,
+  `held=${pub3?.prepWait?.held} deadline=${pub3?.deadline}`);
+check('waiters = A+B', pub3?.prepWait?.waiters?.length === 2, JSON.stringify(pub3?.prepWait || {}).slice(0, 80));
 
-// ⑥ 同回合先验证完整周期：取消等待 → 倒计时恢复 → 再等待（hold）→ B 就绪 → endPrep
+// ④ hold 期间仍可操作（v2 核心：等待不锁操作、不算准备状态）——A 刷新商店成功
+const actR = await a.request({ t: 'g.refresh' }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('hold 期间玩家操作不被拒绝（等待≠准备）', actR.t === 'ok', actR.t === 'error' ? actR.code : 'act=g.refresh');
+
+// ⑤ A 取消等待 → hold 释放、倒计时恢复（剩余秒数）
 const r3 = await a.request({ t: 'g.prepWait', on: false }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
 check('A 取消等待成功', r3.t === 'ok', r3.t === 'error' ? r3.code : '');
 const pub5 = await a.waitFor('m.public', (f) => (!f.prepWait || f.prepWait.held === false) && f.deadline > 0, 5000).catch(() => null);
 check('取消等待后倒计时恢复（deadline > 0）', !!pub5 && pub5.deadline > 0, `deadline=${pub5?.deadline} prepWait=${JSON.stringify(pub5?.prepWait || {}).slice(0, 60)}`);
+
+// ⑥ 未加入时取消被拒
+const r4 = await a.request({ t: 'g.prepWait', on: false }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('未加入时取消被拒（ALREADY）', r4.t === 'error' && r4.code === 'ALREADY', r4.t === 'error' ? r4.code : 'unexpected ok');
+
+// ⑦ 两人重新等待 → hold；B 就绪（就绪不影响等待状态）→ hold 仍成立（等待与准备独立）
 await a.request({ t: 'g.prepWait', on: true }, 3000).catch(() => {});
+await b.request({ t: 'g.prepWait', on: true }, 3000).catch(() => {});
 const pub7 = await a.waitFor('m.public', (f) => f.prepWait?.held === true, 4000).catch(() => null);
-check('恢复等待（hold 再挂起，deadline=0）', pub7?.prepWait?.held === true && pub7?.deadline === 0, JSON.stringify(pub7?.prepWait || {}).slice(0, 60));
-// B（等待目标）就绪 → hold 释放、投票清空、对局进入下一阶段（endPrep 因全员就绪）
-const rB = await b.request({ t: 'g.ready', ready: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
-check('B（等待目标）就绪', rB.t === 'ok', rB.t === 'error' ? rB.code : '');
+check('再次全员等待 ⇒ hold', pub7?.prepWait?.held === true, JSON.stringify(pub7?.prepWait || {}).slice(0, 80));
+const rReadyB = await b.request({ t: 'g.ready', ready: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('B 就绪成功（等待中也可准备）', rReadyB.t === 'ok', rReadyB.t === 'error' ? rReadyB.code : '');
+await new Promise((r) => setTimeout(r, 800));
+const pub8 = pubOf(a);
+check('B 就绪后 hold 仍成立（等待独立于准备）', pub8?.prepWait?.held === true && pub8?.deadline === 0,
+  `held=${pub8?.prepWait?.held} deadline=${pub8?.deadline} phase=${pub8?.phase}`);
+
+// ⑧ B 取消等待 → hold 释放（A 还在等待但不构成全员）→ A 也取消 → 双方就绪推进
+const r5 = await b.request({ t: 'g.prepWait', on: false }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('B 取消等待 → hold 释放', r5.t === 'ok', r5.t === 'error' ? r5.code : '');
+const pub9 = await a.waitFor('m.public', (f) => (!f.prepWait || f.prepWait.held === false) && f.deadline > 0, 5000).catch(() => null);
+check('hold 释放后倒计时恢复', !!pub9 && pub9.deadline > 0, `deadline=${pub9?.deadline}`);
+await a.request({ t: 'g.prepWait', on: false }, 3000).catch(() => {});
+const rReadyA = await a.request({ t: 'g.ready', ready: true }, 3000).catch(() => ({ t: 'error', code: 'timeout' }));
+check('A 就绪', rReadyA.t === 'ok', rReadyA.t === 'error' ? rReadyA.code : '');
 await a.waitFor('m.public', (f) => f.phase !== 'PREP', 30000).catch(() => null);
-const pub3 = pubOf(a);
-check('目标就绪后离开休整期（全员就绪 ⇒ endPrep）', pub3?.phase && pub3.phase !== 'PREP', `phase=${pub3?.phase}`);
-check('结束时投票已清空（无残留 waiters）', !pub3?.prepWait?.waiters?.length || pub3.phase !== 'PREP', JSON.stringify(pub3?.prepWait || {}).slice(0, 60));
+const pub10 = pubOf(a);
+check('全员就绪 ⇒ 离开休整期', pub10?.phase && pub10.phase !== 'PREP', `phase=${pub10?.phase}`);
 
 await a.close(); await b.close();
 const failed = results.filter((r) => !r.ok);

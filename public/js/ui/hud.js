@@ -206,10 +206,11 @@ export function tempReadyReason(priv) {
 /**
  * Ready toggle (PREP only). Disabled while the temp row holds pieces — the reason shows under it (not only on hover):
  * "临时整备区 N 个单位待处理" (user playtest #3 item 3).
- * Beside it the 等待 toggle (自研 2026-10-07): only while ready; every ready player activating it (活人 −1） holds the
- * prep clock so the last unready player can take unlimited time (电表倒转). `pw` = m.public.prepWait.
+ * Beside it the 等待 toggle (自研 2026-10-07, v2): **always available in PREP, independent of readiness and never
+ * locking operations**（用户需求：等待与准备完全独立，两个人可以同时倒转）. ALL alive players waiting holds the prep
+ * clock (`pw.held`, m.public.deadline 0); any single release resumes it. `pw` = m.public.prepWait.
  * @param {{ priv:any, onToggle:(ready:boolean)=>void, busy?:boolean, readyCount?:number, total?:number,
- *   pw?: { held?: boolean, waiters?: string[], target?: string|null }|null, onWait?:(on:boolean)=>void,
+ *   pw?: { held?: boolean, waiters?: string[], all?: boolean }|null, onWait?:(on:boolean)=>void,
  *   waitBusy?:boolean }} props
  */
 export function ReadyToggle({ priv, onToggle, busy, readyCount, total, pw = null, onWait = () => {}, waitBusy = false }) {
@@ -218,22 +219,26 @@ export function ReadyToggle({ priv, onToggle, busy, readyCount, total, pw = null
   const reason = !ready ? tempReadyReason(priv) || shopBlockReason('ready', { priv, editable: true }) : null;
   const waiting = Array.isArray(pw?.waiters) && pw.waiters.includes(priv?.playerId);
   const held = !!pw?.held;
-  const waitBtn = ready ? html`<button type="button" class=${cx('waitbtn', 'tapx', waiting && 'is-on', held && 'is-held', waitBusy && 'is-busy')}
-      aria-pressed=${waiting ? 'true' : 'false'} title=${held ? '倒计时已暂停：等待最后一名玩家操作' : '发起等待：全员同意后暂停本回合倒计时'}
+  const waitBtn = html`<button type="button" class=${cx('waitbtn', 'tapx', waiting && 'is-on', held && 'is-held', waitBusy && 'is-busy')}
+      aria-pressed=${waiting ? 'true' : 'false'} title=${held ? '全员等待中：倒计时已暂停，所有人仍可操作'
+        : waiting ? '已选择等待：全员等待时暂停倒计时（不影响操作与准备）' : '等待：全员等待时暂停本回合倒计时（不影响操作与准备）'}
       onClick=${() => onWait(!waiting)}>
     <span class="waitbtn__box">${held ? html`<${Icon} name="pause" />` : waiting ? html`<${Icon} name="check" />` : html`<${Icon} name="clock" />`}</span>
     <span class="waitbtn__label">${held ? '等待中' : waiting ? '等待中…' : '等待'}</span>
-  </button>` : null;
-  const btn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy')} disabled=${!!reason || busy}
+  </button>`;
+  const readyBtn = html`<button type="button" class=${cx('readybtn', 'tapx', ready && 'is-on', busy && 'is-busy')} disabled=${!!reason || busy}
       aria-pressed=${ready ? 'true' : 'false'} aria-describedby=${!ready && temp.count ? 'readywrap-why' : undefined} onClick=${() => onToggle(!ready)}>
     <span class="readybtn__box">${ready ? html`<${Icon} name="check" />` : null}</span>
     <span class="readybtn__label">${ready ? '取消准备' : '准备就绪'}</span>
     <kbd class="readybtn__key">Space</kbd>
   </button>`;
   return html`<div class="readywrap">
-    ${ready ? html`<div class="readywrap__pair">${btn}${waitBtn}</div>` : html`<${Tooltip} text=${reason} placement="bottom">${btn}<//>`}
-    ${ready && held && pw?.target ? html`<span class="readywrap__wait" role="status" data-testid="prep-wait-held">
-      <${Icon} name="clock" /><span>已暂停 · 等待 <b class="num">${(pw.waiters || []).length}</b> 人同意中</span></span>` : null}
+    <div class="readywrap__pair">
+      ${reason ? html`<${Tooltip} text=${reason} placement="bottom">${readyBtn}<//>` : readyBtn}
+      ${waitBtn}
+    </div>
+    ${held ? html`<span class="readywrap__wait" role="status" data-testid="prep-wait-held">
+      <${Icon} name="clock" /><span>倒计时已暂停 · 全员等待中 · <b class="num">${(pw.waiters || []).length}</b>/<span class="num">${Number.isFinite(total) ? total : '?'}</span> 人仍可操作</span></span>` : null}
     ${!ready && temp.count ? html`<span class="readywrap__why" id="readywrap-why" role="status" data-testid="ready-why">
       <${Icon} name="warn" /><span>临时整备区 <b class="num">${temp.count}</b> 个单位待处理</span></span>` : null}
     ${Number.isFinite(total) && total > 1 ? html`<span class="readywrap__count">已就绪 <b class="num">${readyCount}</b>/<span class="num">${total}</span></span>` : null}

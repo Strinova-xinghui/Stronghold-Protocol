@@ -139,16 +139,17 @@
 - **踩坑（测试侧，复用价值）**：① resource timing 默认 250 条 buffer 在游戏页必然溢出——先 `performance.setResourceTimingBufferSize(10000)` + `clearResourceTimings()`，否则语音请求根本不进 entries；② audio 走 `mediaUrl` 的**去扩展名**形式（`/assets/audio/X` → `/media/X`，`assets/audio` 整段剥掉），断言实际请求要看 `/media/voice/...`；③ `JSON.stringify(localStorage)` 对 Storage 对象返回 `{}`（属性不可枚举），要 `localStorage.getItem('sp.pref.settings')`；④ 测试切语言必须走真实 UI 路径 `updateSettings`——直接调 `audio.setVoiceLang` 绕过 store，store 不会同步（store→audio 单向，与 setVolumes 同构）。
 - **已知边界**：en/kr 语音未下载（四国只落地中日）；将来补齐 = 下载素材 + settings 单选加一项 + `setVoiceLang` 放行一项，机制已通用。切换不重播当前句（gentle 切换）。
 
-### 休整期等待投票（prepWait，2026-10-07 自研追加）
+### 休整期等待投票（prepWait，2026-10-07 自研追加；**v2 同日重构：与准备完全独立**）
 
-- **需求（用户）**：休整期准备按钮旁加「等待」按钮——准备就绪后才可按；当已就绪的活人**全部**激活它（= 活人数 −1，等最后一名未就绪者）时**暂停本回合倒计时**，让最后一人无限时操作（电表倒转等长操作玩法）。
-- **协议**：`g.prepWait { on }`（shared/protocol.js）。服务端 `Match.prepWait(ps, on)`：仅 PREP、仅已就绪者、solo 拒（WRONG_PHASE/NOT_YOUR_TURN/ALREADY 文案）。投票语义：**每个已就绪玩家一票，活人数−1 票齐且恰好只剩 1 名未就绪活人（`_waitTargetId`）⇒ hold**；≥2 人未就绪时 hold 不成立（等谁不明确），0 人未就绪直接 endPrep。
-- **倒计时暂停/恢复（`_prepWaitRefresh`）**：hold ⇒ 记住剩余秒数（`_prepWaitRemainSecs`）+ cancel `_phaseTimer` + `deadline=0`（客户端倒计时消失）；释放 ⇒ `setDeadline(剩余秒)` 恢复原定时器 + **清空投票**（`_prepWaiters.clear()`——血案预防：漏掉会毒化下一回合）。`onReadyChanged` 联动刷新（目标就绪 ⇒ 释放 + maybeEndPrep 正常结束）；`enterPrep` 重置全部投票状态。
-- **m.public.prepWait**：`{ held, waiters[], target }`（PREP 且有投票时携带；hold 时 deadline 已是 0，客户端倒计时自然消失——无需改 Countdown）。老客户端多余字段无副作用。
-- **客户端**：`actions.prepWait(on)`（gameActions.js）；`ReadyToggle`（hud.js）就绪时在准备按钮旁渲染等待按钮（`readywrap__pair` 并排，amber 橙色调，hold 时 mint 脉冲动画 + 「已暂停 · 等待 N 人同意中」提示条，文案三态 等待/等待中…/等待中）；game.js `toggleWait` 接线（仅 PREP 且已就绪）。**不改倒计时组件**——deadline=0 本来就是「无倒计时」的既有语义。
-- **验证**：`node tools/verify-prep-wait.mjs <port>`（17/17：未就绪拒绝/发起/广播 held+target/deadline=0/重复 ALREADY/取消恢复 deadline>0/再等待/B 就绪 endPrep/投票清空）+ `node tools/verify-prep-wait-ui.mjs <port>`（9/9：源码锚点 + fixture 组件直渲三态）+ pool/seats6 回归 20/20 + monitor-watch 14/14 + shadow-pin 15/15（无回归）。
-- **测试踩坑（复用价值）**：① 服务器不 serve `.cache/`——组件渲染 fixture 必须放 `public/` 下（404 表现为 title 空且 __vl null）；② CDP `waitForFunction` 谓词**不能是 async**（Runtime.callFunctionOn 直接超时）；③ 游戏页永不 networkidle2（长连接）+ 大 evaluate 会超时——组件级验证用 fixture 直渲最稳；④ 同回合完整周期测试顺序：等待→hold→取消→恢复→再等待→B 就绪（B 就绪 = endPrep 不可逆，一切「之后还要 PREP」的断言必须放它前面）。
-- **已知边界**：hold 期间被等待者若断线/离开，`alivePlayers` 变化后 `_waitTargetId` 返回 null ⇒ 自动释放（安全的默认）；hold 无上限时长（这正是需求），若全员卡死可由房主「取消准备」打破（un-ready ⇒ target 变多 ⇒ hold 释放）。`update-restart` 后线上生效。
+- **需求（用户 v2 定稿）**：等待**独立于准备**——不就绪也能等待、等待**不锁任何操作**（不算准备状态）；**所有活人都在等待**时暂停本回合倒计时（deadline 0），所有人仍可同时操作（两个人一起电表倒转）；任一人取消等待即恢复剩余时间。v1（就绪后才可按、活人−1 票等最后一人）已被取代。
+- **协议**：`g.prepWait { on }`（shared/protocol.js）。服务端 `Match.prepWait(ps, on)`：仅 PREP、solo 拒（**无就绪门禁**；重复加入/未加入取消 → ALREADY）。
+- **hold 条件（v2）**：`prepWaitHeld` = `_prepWaiters` 非空 **且 所有活人都在 waiters**（`alivePlayers().every`）——等待人数就是全体，两两倒转天然成立。等待者断线/离开：`onLeave` 里 `_prepWaiters.delete`，活人集合变化后 hold 自动重估（释放是安全默认）。
+- **倒计时暂停/恢复（`_prepWaitRefresh`）**：hold ⇒ 记剩余秒（`_prepWaitRemainSecs`）+ cancel `_phaseTimer` + `deadline=0`；释放 ⇒ `setDeadline(剩余秒)` + 清空投票。`enterPrep` 重置全部状态；`onReadyChanged` 联动刷新。
+- **m.public.prepWait**：`{ held, waiters[], all }`（v2 去掉了 v1 的 target 字段）。hold 时 deadline 已是 0，客户端倒计时自然消失——Countdown 组件零改动（deadline=0 =「无倒计时」的既有 solo 语义）。
+- **客户端**：`actions.prepWait(on)`；`ReadyToggle`（hud.js）**始终渲染等待按钮**（`const waitBtn = html` 不再受 ready 门禁），与准备按钮并排（`readywrap__pair`，amber 色调，hold 时 mint 脉冲）；提示条改「倒计时已暂停 · 全员等待中 · N/total 人仍可操作」。
+- **验证**：`node tools/verify-prep-wait.mjs <port>`（**v2 20/20**：未就绪可等待/单人等待不 hold/全员等待 deadline=0/hold 期间 g.refresh 成功/取消恢复/ALREADY/B 就绪后 hold 仍成立/全员就绪 endPrep）+ `verify-prep-wait-ui.mjs`（10/10：未就绪也渲染等待按钮/三态/提示条）+ pool/seats6 20/20 + shadow-pin 15/15（monitor-watch 13/14 = 多轮验证的已知房间残留）。
+- **测试踩坑（复用价值）**：① 服务器不 serve `.cache/`——组件渲染 fixture 必须放 `public/` 下；② CDP `waitForFunction` 谓词**不能是 async**（超时）；③ 游戏页永不 networkidle2——组件级验证用 fixture 直渲（public/ 下静态 html + 同步写 window.__X + title 标记）；④ 重写测试前删旧文件后 write 工具会报 file no longer exists——先建占位文件再 read+edit，或 pwsh here-string 直接写；⑤ UI fixture 每次跑验证前必须在（清理后忘重建 → 假失败一批）。
+- **已知边界**：hold 无上限（需求本身）；全员卡死 = 任何一人取消等待即恢复；`_waitTargetId` 已无调用方（保留备用，如需恢复 v1「等最后一人」语义改回 hold 条件即可）。`update-restart` 后线上生效。
 
 ### 版本基点与公开 fork（2026-10-07）
 

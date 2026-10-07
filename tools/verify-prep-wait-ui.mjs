@@ -21,7 +21,7 @@ const check = (n, ok, d = '') => { results.push({ n, ok }); console.log(`${ok ? 
 // ① 源码锚点（快速失败定位）
 const hudSrc = fs.readFileSync(path.join(ROOT, 'public/js/ui/hud.js'), 'utf8');
 check('ReadyToggle 含等待按钮（waitbtn）', hudSrc.includes("class=${cx('waitbtn'"));
-check('等待按钮只在就绪时渲染', hudSrc.includes('const waitBtn = ready ?'));
+check('等待按钮始终渲染（v2：与准备独立）', hudSrc.includes('const waitBtn = html`'), 'waitBtn 不再受 ready 门禁');
 check('hold 时显示暂停提示条', hudSrc.includes('prep-wait-held'));
 check('服务端 g.prepWait 已接线', fs.readFileSync(path.join(ROOT, 'shared/protocol.js'), 'utf8').includes("'g.prepWait'"));
 
@@ -47,9 +47,11 @@ for (let i = 0; i < 60; i++) {
 }
 const rendered = await page.evaluate(() => window.__vl || {});
 check('fixture 渲染完成', ready && !!rendered.readyNoWait);
+check('未就绪：等待按钮也渲染（与准备完全独立）', rendered.unready?.waitBtn && rendered.unready?.readyLabel === '准备就绪',
+  `wait=${rendered.unready?.waitLabel} ready=${rendered.unready?.readyLabel}`);
 check('就绪未等待：等待按钮出现且文案「等待」', rendered.readyNoWait?.waitBtn && rendered.readyNoWait?.waitLabel === '等待', rendered.readyNoWait?.waitLabel);
-check('投票中：按钮高亮 + 「等待中…」', rendered.waitingPending?.isOn && rendered.waitingPending?.waitLabel === '等待中…', rendered.waitingPending?.waitLabel);
-check('hold 成立：按钮 is-held + 暂停提示条', rendered.waitingHeld?.isHeld && rendered.waitingHeld?.heldTag, `label=${rendered.waitingHeld?.waitLabel}`);
+check('投票中：按钮高亮 + 「等待中…」（未就绪也能等待）', rendered.waitingPending?.isOn && rendered.waitingPending?.waitLabel === '等待中…', rendered.waitingPending?.waitLabel);
+check('hold 成立：按钮 is-held + 全员等待提示条', rendered.waitingHeld?.isHeld && rendered.waitingHeld?.heldTag, `label=${rendered.waitingHeld?.waitLabel}`);
 check('页面无 JS 错误', errors.length === 0, errors.slice(0, 2).join('; '));
 
 await browser.close();
