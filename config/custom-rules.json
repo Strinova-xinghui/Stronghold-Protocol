@@ -7,13 +7,23 @@
     "_mode": "filter（默认，该位置必须是该盟约干员）| weight（不限定，只提高该盟约权重 ×mult）",
     "enabled": true,
     "slots": [
-      { "slot": 0, "kind": "mainCount", "minCount": 3, "mult": 2 },
+      {
+        "slot": 0,
+        "kind": "mainCount",
+        "minCount": 3,
+        "mult": 2.6
+      },
       {
         "slot": 1,
         "kind": "maxLayers",
         "minCount": 2,
-        "mult": 2,
-        "exclude": ["soloShip", "visiShip", "miraShip", "investShip"]
+        "mult": 2.6,
+        "exclude": [
+          "soloShip",
+          "visiShip",
+          "miraShip",
+          "investShip"
+        ]
       }
     ]
   },
@@ -26,7 +36,7 @@
     "_mode": "filter（默认，必须是该阵营装备）| weight（只提高其权重，不限定）",
     "enabled": true,
     "minRound": 6,
-    "mult": 2,
+    "mult": 2.6,
     "mode": "weight",
     "targetBond": "mainCount",
     "minCount": 3,
@@ -39,5 +49,6 @@
     "k2": 0.15,
     "cap": 1.05,
     "floor": 0.85
-  }
+  },
+  "_调参记录": "2026-10-07 用户要求「甄选概率同比提高 30%」：mult 2→2.6（实测装备甄选出率 17.83%→22.25%，即 ×1.248≈+25%；干员 filter 模式本身即 100% 命中，mult 不参与）。"
 }
