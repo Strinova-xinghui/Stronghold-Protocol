@@ -85,18 +85,17 @@ function normalize(raw) {
     });
   }
 
-  // ---- 休整期负债规则（prepDebt，自研 2026-10-07）：lp ≤ 0 不淘汰进入负债，全队总和 < 0 才清算；
-  //      敌人波次强度按团队负债量化（与准备/等待完全独立）。详见 AGENTS.md「休整期负债规则」。
+  // ---- 休整期负债规则（prepDebt，自研 2026-10-07 v3）：lp ≤ 0 不淘汰进入负债，全队总和 < 0 才清算；
+  //      敌人波次强度按**净负债**量化——只有真正负血（lp < 0）才算负债，高出血策略（lp > Ā）是存款可对冲
+  //      队友负债；net = Σ负债 − Σ存款（与准备/等待完全独立）。详见 AGENTS.md「休整期负债规则」。
   const pd = raw.prepDebt && typeof raw.prepDebt === 'object' ? raw.prepDebt : null;
   if (pd && pd.enabled) {
     out.prepDebt = Object.freeze({
       enabled: true,   // 进入产物即启用（使用方统一检查 rule.enabled；enabled:false 在上方已被拦下）
-      // 超额压力斜率：团队压力每超出免赔额一份 Ā，敌人 HP ×(1 + k)。默认 0.3（一份超额 = +30%，即 cap）
+      // 净负债斜率：净负债每满一份 Ā，敌人 HP ×(1 + k)。默认 0.3
       k: Math.max(0, numOr(pd.k, 0.3)),
-      // 盈余斜率：团队盈余（歌利亚等高血策略撑起来的存款）每一份 Ā，敌人 HP ×(1 − k2)。默认 0.15
+      // 盈余斜率：净存款（歌利亚等高血策略撑起来的存款）每一份 Ā，敌人 HP ×(1 − k2)。默认 0.15
       k2: Math.max(0, numOr(pd.k2, 0.15)),
-      // 免赔额度倍数：团队压力 ≤ graceMul × Ā 时不惩罚（团队缓冲，「3 个帮 1 个」的数学形态）。默认 1
-      graceMul: Math.max(0, numOr(pd.graceMul, 1)),
       // 倍率钳制 [floor, cap]
       cap: Math.max(1, numOr(pd.cap, 1.3)),
       floor: Math.min(1, numOr(pd.floor, 0.85)),

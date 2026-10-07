@@ -1,10 +1,14 @@
 {
+  "rewardOffer": {
+    "enabled": false,
+    "slots": []
+  },
   "prepDebt": {
     "enabled": true,
+    "_comment": "休整期负债规则 v3：净负债 net = Σmax(0,−lp) − Σmax(0,lp−Ā)（Ā=26，全策略排除歌利亚45的平均向上取整）。net>0 每满一份 Ā 敌人 HP ×(1+k)，封顶 cap；net<0 每份 ×(1−k2)，下限 floor；net=0 ⇒ ×1。只有真正负血才算负债，高出血是存款。热参数随时可调（mtime 热更）。",
     "k": 0.3,
     "k2": 0.15,
-    "graceMul": 1,
-    "cap": 1.3,
+    "cap": 1.05,
     "floor": 0.85
   }
 }

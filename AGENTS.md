@@ -154,12 +154,12 @@
 ### 休整期负债规则（prepDebt，2026-10-07 自研追加，朋友需求）
 
 - **需求**：lp ≤ 0 不淘汰进入**负债**（负血继续作战），全队血量总和 < 0 才回到原逻辑让负债者死；同时敌人为负债提供倍率加成（**只作用于普通/联防波次敌人 HP，不作用于领袖/Boss**）。动机：电表倒转等长操作玩法 + 高血量策略（歌利亚 45）有价值。
-- **量化设计（用户朋友原案 + 免赔额度修正）**：Ā = 全策略平均初始血量**排除最高的歌利亚（45）后向上取整 = 26**（Match 构造时从 bands 数据自动计算）；团队压力 P = 活人数 × Ā − Σ(活人 LP)（高血策略/满血 = 盈余 P<0，低血策略/负债 = 压力 P>0——**选低血策略本身就是自带负债**，朋友的明确意图）。**免赔额度**：第一份 graceMul × Ā 的压力免费（团队缓冲 = 「3 个帮 1 个」的数学形态，同时解决「四人各扣 10 血容易触发」的敏感度问题）；超额部分线性：每份 Ā ⇒ 敌人 HP ×(1+k)，k=0.3，封顶 cap=1.3；盈余对称减弱 k₂=0.15，下限 floor=0.85。全部热参数走 custom-rules.json。
+- **量化设计（用户朋友原案 + 免赔额度修正）**：Ā = 全策略平均初始血量**排除最高的歌利亚（45）后向上取整 = 26**（Match 构造时从 bands 数据自动计算）；团队压力 P = 活人数 × Ā − Σ(活人 LP)（高血策略/满血 = 盈余 P<0，低血策略/负债 = 压力 P>0——**选低血策略本身就是自带负债**，朋友的明确意图）。**v3 净负债量化（用户定稿：只有真正负血才算负债，与准备完全独立）**：debt = Σ max(0, −lp)（真正负血才算负债，血量低于平均不算）；savings = Σ max(0, lp − Ā)（歌利亚 45 满血 = +19 存款）；net = debt − savings。net > 0 ⇒ 敌人 HP ×(1 + k·net/Ā)，k=0.3，封顶 cap=1.05；net < 0 ⇒ ×(1 + k₂·net/Ā)，k₂=0.15，下限 floor=0.85；net = 0 ⇒ ×1（三人 1/3/3 血量低于平均但未负血 ⇒ 不惩罚）。全部热参数走 custom-rules.json。
 - **淘汰/清算（Match.settle 内，原 lp≤0 即淘汰处改造）**：负债规则开启时跳过原判定；结算后 Σ(活人 LP) < 0 ⇒ **从最深负债者逐个淘汰**（每淘汰一人移除其负 LP 总和回升）直至总和 ≥ 0；全灭 → afterSettle finish(eliminated)。淘汰文案「全队生命值总和告负，你的负债被清算」。**踩坑**：原代码 `ps.lp = 0` 在淘汰时归零——负债者存活期间 lp 保留负值，LpTower 客户端改为负数红字显示（`lp__val--debt`，gameComponents.js 原 `Math.max(0,...)` clamp 移除）。
 - **倍率注入点（关键选择）**：`Match._sanitizeSpawns(list, ownerPlayerId, applyDebtMul)`——普通波次（_normalOpts）与联防波次传 true（**联防敌人更强 = 「增加队友压力一起负重前行」原话的直接实现**），领袖/Boss 战（L3249）不传。注入方式 = spawns[].mods.hpMul ×倍率（spawnEnemy 原生支持 mods 乘数，与波次自带 hpMul（如 0.8）正确叠乘）。**不动 sim 内核 → golden 语料安全**。
 - **m.public.debt**：`{ lpSum, mul, avgHp }`（规则开启时任何阶段广播）；HUD 顶栏 `debtpill`「敌方 ×1.16」>1 时红色警示。
 - **golden 解耦（重要）**：prepDebt.enabled 会改变 golden 语料的对局结果（AI 淘汰行为偏离官方）→ `customRules.js getCustomRules` 加 **`SP_OFFICIAL_RULES=1` 强制全关**，`golden.mjs` 入口设置该 env（worker 继承）——golden 语料与用户配置永久解耦。已验证 golden 全绿（46+22+16）。
-- **验证**：`node --test tools/prep-debt.test.mjs`（**12/12**：倍率曲线 5 + 清算逻辑 3 + 波次注入同 seed 基线对比 1 + settle 结算接线 3）；E2E 的「真实漏怪扣血」路径不可行（client combat 由 authority 浏览器模拟，TestClient 不模拟 → 服务器 takeover 的替身战斗不产生漏怪扣血）——settle 接线单测替代。回归：甄选 4/4、物品 5/5（**必须单跑**——三个测试文件并发会互写 custom-rules.json）、prep-wait v2 20/20、shadow-pin 15/15。
+- **验证**：`node --test tools/prep-debt.test.mjs`（**v3 15/15**：倍率曲线 8 含三人 1/3/3 回归 + 清算逻辑 3 + 波次注入同 seed 基线对比 1 + settle 结算接线 3）；E2E 的「真实漏怪扣血」路径不可行（client combat 由 authority 浏览器模拟，TestClient 不模拟 → 服务器 takeover 的替身战斗不产生漏怪扣血）——settle 接线单测替代。回归：甄选 4/4、物品 5/5（**必须单跑**——三个测试文件并发会互写 custom-rules.json）、prep-wait v2 20/20、shadow-pin 15/15。
 - **已知边界**：负债无个人上限（总和 < 0 才清算，高血队友兜底 = 设计）；hold 倒计时 + 负债叠加 = 无限时长的整活局（设计意图）；最终攻势个人 LP 冻结（只扣 teamLp），血池倍率按进入时负债锁定；普通波次倍率在每场战斗 spec 生成时锁定（回合内不变）。
 
 ### 版本基点与公开 fork（2026-10-07）

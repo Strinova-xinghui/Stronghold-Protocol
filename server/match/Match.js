@@ -1091,14 +1091,23 @@ export class Match {
     if (this.phase === PHASE.PREP && this._prepWaiters?.size) {
       v.prepWait = { held: !!this._prepWaitHeldApplied, waiters: [...this._prepWaiters], all: this.prepWaitHeld };
     }
-    // 休整期负债规则（自研）：lpSum = 全队血量总和（可负）；mul = 敌人波次强度倍率；avgHp = 量化基准。
+    // 休整期负债规则（自研 v3）：lpSum = 全队血量总和（可负）；mul = 敌人波次强度倍率；avgHp = 量化基准；
+    // debt/savings/net = 净负债三元组（与 _debtEnemyMul 相同口径：只有真正负血才算负债，高出血是存款）。
     // 开启时任何阶段都广播（负血/倍率横跨整局），客户端顶栏显示「敌方强度 ×mul」。
     if (this._debtRule?.enabled) {
       const aliveDebt = this.alivePlayers();
+      let debt = 0, savings = 0;
+      for (const p of aliveDebt) {
+        if (p.lp < 0) debt += -p.lp;
+        else if (p.lp > this._debtAvgHp) savings += p.lp - this._debtAvgHp;
+      }
       v.debt = {
         lpSum: aliveDebt.reduce((s, p) => s + p.lp, 0),
         mul: this._debtEnemyMul(),
         avgHp: this._debtAvgHp,
+        debt,
+        savings,
+        net: debt - savings,
       };
     }
     return v;
@@ -2019,25 +2028,28 @@ export class Match {
   }
 
   /**
-   * 敌人波次强度倍率（自研负债惩罚，作用于普通/联防波次的敌人 HP，**不作用于领袖/Boss**）：
-   * 团队压力 P = 活人数 × Ā − Σ(活人 LP)（Ā = 排除歌利亚的全策略平均初始血量，向上取整）——
-   * 高血量策略与满血状态产生盈余（P < 0），低血策略与负债产生压力（P > 0）。
-   * 第一份 graceMul × Ā 的压力免罚（团队缓冲，「3 个帮 1 个」）；超出部分线性放大敌人 HP：
-   * 每份 Ā 的超额压力 ⇒ ×(1 + k)，封顶 cap；盈余对称减弱，下限 floor。
-   * 等待投票/准备状态与倍率无关——纯看全队血量总和（用户需求：等待与准备完全独立）。
-   * @returns {number} ≥ 1 的增强或 < 1 的减弱乘数（原版规则恒 1）
+   * 敌人波次强度倍率（自研负债惩罚 v3，作用于普通/联防波次的敌人 HP，**不作用于领袖/Boss**）：
+   * 只有**真正负血（lp < 0）**才算负债（用户 v3 定稿：没人负血就不加）：
+   *   负债 debt = Σ max(0, −lp)；存款 savings = Σ max(0, lp − Ā)（歌利亚满血 45 → +19 存款）。
+   * 净负债 net = debt − savings：> 0 ⇒ 敌人 HP ×(1 + k·net/Ā)（惩罚负债），封顶 cap；
+   * < 0 ⇒ ×(1 + k2·net/Ā)（高血存款减弱敌人，floor）；= 0 ⇒ ×1。
+   * 等待投票/准备状态与倍率无关——纯看血量（用户需求：等待与准备完全独立）。
+   * @returns {number} 增强或减弱乘数（原版规则恒 1）
    */
   _debtEnemyMul() {
     const rule = this._debtRule;
     if (!rule || !(this._debtAvgHp > 0)) return 1;
     const alive = this.alivePlayers();
     if (!alive.length) return 1;
-    const sum = alive.reduce((s, p) => s + p.lp, 0);
-    const pressure = alive.length * this._debtAvgHp - sum;
-    const grace = this._debtAvgHp * (Number.isFinite(rule.graceMul) && rule.graceMul > 0 ? rule.graceMul : 1);
+    let debt = 0, savings = 0;
+    for (const p of alive) {
+      if (p.lp < 0) debt += -p.lp;
+      else if (p.lp > this._debtAvgHp) savings += p.lp - this._debtAvgHp;
+    }
+    const net = debt - savings;
     let mul = 1;
-    if (pressure > grace) mul = 1 + rule.k * (pressure - grace) / this._debtAvgHp;
-    else if (pressure < 0) mul = 1 + rule.k2 * pressure / this._debtAvgHp;
+    if (net > 0) mul = 1 + rule.k * net / this._debtAvgHp;
+    else if (net < 0) mul = 1 + rule.k2 * net / this._debtAvgHp;
     return Math.min(rule.cap, Math.max(rule.floor, mul));
   }
 
