@@ -1041,7 +1041,8 @@ export class Match {
         isBot: ps.isBot,
         connected: ps.isBot || (ps.connected && !ps.left),
         alive: ps.alive,
-        lp: Math.max(0, ps.lp),
+        // 负债规则（自研）：负债者广播真实负数（原为 Math.max(0, ps.lp)）——队友面板/HUD 才能看到红字负债
+        lp: ps.lp,
         bandId: ps.bandId,
         shopLevel: ps.shop.level,
         boardCount: ps.deployCount,

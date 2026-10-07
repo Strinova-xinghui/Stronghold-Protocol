@@ -1741,7 +1741,8 @@ export function normalizeResult(res, pub) {
       name: p.name || pp.name || '博士',
       isBot: !!(p.isBot ?? pp.isBot),
       alive,
-      lp: teamLp != null ? (alive === false ? 0 : Math.max(0, teamLp)) : ownLp,
+      // 负债规则（自研）：负债队伍的结算画面保留真实负数（不 clamp），否则会显示成 0
+      lp: teamLp != null ? (alive === false ? 0 : teamLp) : ownLp,
       lpShared: teamLp != null,
       bandId: p.bandId ?? pp.bandId ?? null,
       roundsPassed: Number.isFinite(p.roundsPassed) ? p.roundsPassed : (Number.isFinite(r.roundsPassed) ? r.roundsPassed : 0),

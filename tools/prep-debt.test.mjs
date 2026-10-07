@@ -152,6 +152,19 @@ describe('休整期负债规则 · 清算逻辑', () => {
     }
     assert.equal(m.alivePlayers().length, 0, '全负血队清算即全灭');
   });
+
+  test('负血广播：publicView 保留真实负数（曾 clamp 到 0 → 队友面板看不到负债）', () => {
+    writeCfg({ prepDebt: { enabled: true, k: 0.3, k2: 0.15, cap: 1.05, floor: 0.85 } });
+    const { m, a, b } = setupCoop(23);
+    a.lp = -17; b.lp = 40;   // 总和 23 ≥ 0 ⇒ 都存活，A 挂着 −17 负债
+    const pv = m.publicView();
+    const rowA = pv.players.find((p) => p.playerId === a.playerId);
+    const rowB = pv.players.find((p) => p.playerId === b.playerId);
+    assert.equal(rowA.lp, -17, '负债者广播 −17（不被 clamp 成 0）');
+    assert.equal(rowB.lp, 40, '健康队友广播原值');
+    assert.ok(pv.debt && pv.debt.net > 0, `debt 明细 net > 0（实际 ${pv.debt?.net}）`);
+    assert.equal(pv.debt.debt, 17, 'debt = 17（只有真正负血的部分）');
+  });
 });
 
 describe('休整期负债规则 · 敌人波次注入', () => {
