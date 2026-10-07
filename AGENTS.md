@@ -45,7 +45,7 @@
   3. `server/match/Match.js`：`this.monitorWatchers: Map<watcherId, targetPlayerId>` + `addMonitorWatcher/removeMonitorWatcher/monitorWatcherCount`；`_sendPrivate` 末尾把同一份 view 追加发给监看者（带 `_monitor: true`）；`sendTo` 放行 monitorWatchers 中的 id（它们没有 PlayerState）。
   4. `server/index.js`：monitorSnapshot 的 players 补 `playerId` 字段（**否则按钮渲染不出**）+ MONITOR_HTML 加监看面板（WS 连接、privateView 渲染器、事件委托）。
 - **语义（重要）**：监看是「同一份数据的独立视图」，**不是屏幕镜像**——被看者的 UI 状态（打开哪个干员详情、滚动位置、相机）从不经过服务器，双方零干扰、互不可见。
-- **验证**：`node tools/verify-monitor-watch.mjs <port>`（14/14：订阅、_monitor 标记、playerId 一致、shop/hand/board 字段、不占席位、不计 humans、取消、非法目标 BAD_TARGET、不存在房间 ROOM_NOT_FOUND）+ `node tools/verify-monitor-ui.mjs <port>`（7/7：无头浏览器点按钮→面板渲染→WS 已连接→无 JS 错误）。
+- **验证**：`node tools/verify-monitor-watch.mjs <port>`（14/14：订阅、_monitor 标记、playerId 一致、shop/hand/board 字段、不占席位、不计 humans、取消、非法目标 BAD_TARGET、不存在房间 ROOM_NOT_FOUND）+ `node tools/verify-monitor-ui.mjs <port>`（7/7：无头浏览器点按钮→面板渲染→WS 已连接→无 JS 错误）。⚠️ 「不计 humans」断言数的是**全局** humans——在同一服务器上连跑多轮验证会因残留房间（每轮留 1 个宽限期内的离线房主）而超数报 13/14，**属测试残留非缺陷**（等 60s 宽限期自然衰减；干净服上 14/14）。
 - **安全提醒**：无鉴权，拿到房间码的人即可窥看所有人手牌/商店。纯合作 PVE 影响有限；若将来开 PVP 或公开房间，需加 monitor 口令或限本机来源。
 - **已知边界**：监看者视角是「数据面板」；要看**实时战场画面**用卡片上的「客户端」链接（`/?room=CODE`，走原生观战，会占 1 个观战席）。
 
@@ -133,6 +133,7 @@
 
 - **Node ESM 进程内热更做不到**（代码加载后不可替换；`node --watch` 也是重启）。等效方案：`update-restart.bat`。
 - `update-restart.ps1` 安全重启逻辑：查 `/healthz` → `matches > 0` 时**拒绝重启**（打印对局数，exit 1，绝不坑在线玩家）→ `matches == 0` 时杀旧进程拉新代码 → 健康检查通过才报成功。
+- **座位模式继承（2026-10-07，提交 423789f）**：`update-restart` 默认**自动读取当前服务器的 `maxSeats` 并在重启时带上 `SP_MAX_SEATS`**（6 座换代不会悄悄退回 4 座）；没在跑时默认 6；也可显式 `-MaxSeats 4`。打印行含「座位 N」。
 - 使用：对局间隙双击 `update-restart.bat` 即可换代（监控器/盟约加成/未来一切服务器改动通用）。
 
 ### 上游同步方法论（2026-10-06 定稿，下次直接照做）
