@@ -2,16 +2,17 @@
   "_说明": "自研规则热更配置。改完本文件立即生效（无需重启服务器）。enabled=false 或删除本文件 = 原版行为。",
   "_热更边界": "本文件只控制规则「参数」；规则逻辑在 server/ 代码里，改动逻辑仍需重启。",
   "rewardOffer": {
-    "_说明": "干员三选一定向（晋升奖励/免费挑选）。slots 按候选位置映射：slot 0 = 第一张，slot 1 = 第二张…未列出的位置保持纯随机。",
+    "_说明": "干员三选一定向（weight 概率加权）（晋升奖励/免费挑选）。slots 按候选位置映射：slot 0 = 第一张，slot 1 = 第二张…未列出的位置保持纯随机。",
     "_kind": "mainCount = 激活人数最多的主盟约（核心盟约激活阈值 3）；maxLayers = 层数最多的副盟约。",
-    "_mode": "filter（默认，该位置必须是该盟约干员）| weight（不限定，只提高该盟约权重 ×mult）",
+    "_mode": "weight（2026-10-07 用户改）：三选一不再指定命中，只把主/副盟约干员的权重 ×mult（柔和概率提升）",
     "enabled": true,
     "slots": [
       {
         "slot": 0,
         "kind": "mainCount",
         "minCount": 3,
-        "mult": 2.6
+        "mult": 2.6,
+        "mode": "weight"
       },
       {
         "slot": 1,
@@ -23,7 +24,8 @@
           "visiShip",
           "miraShip",
           "investShip"
-        ]
+        ],
+        "mode": "weight"
       }
     ]
   },
