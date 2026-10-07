@@ -273,8 +273,9 @@ export const C2S = {
   'room.addBot': {},
   'room.removeBot': { seat: (v) => isInt(v, 0, RESULT_LIMITS.players - 1) },
   // the host removes another human before the match (server/lobby.js kick; community report #17); playerId = the one the
-  // host confirmed — a seat that changed hands meanwhile is refused
-  'room.kick': { seat: (v) => isInt(v, 0, MAX_SEATS - 1), playerId: isId },
+  // host confirmed — a seat that changed hands meanwhile is refused. The seat bound follows the room's capacity like
+  // room.removeBot's (the kick handler indexes room.seats[seat], so seats 4/5 must validate in a 6-seat room).
+  'room.kick': { seat: (v) => isInt(v, 0, RESULT_LIMITS.players - 1), playerId: isId },
   'room.start': {},
   // operator loadout (DESIGN §16): stored per session/seat; accepted until the match leaves INFO_CHECK
   'room.loadout': { entries: isLoadoutEntries },
