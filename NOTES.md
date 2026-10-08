@@ -21,6 +21,7 @@
 | 回合抽奖 | `roundLottery` | 开启，第 3/6/10 回合各 2 轮 5 选 1 | ✅ |
 | 回合编排（加时赛） | `extraRounds` | 开启，第 13 回合后插 4 个发育回合，BOSS 18/隐藏 19 | ✅（BOSS 时间可热改） |
 | 对局节奏 | `pacing` | 策略轮选 + 机变 ×1.5；战斗加速**未启用** | ✅（combatSpeed 需重开一局） |
+| BOSS 血量倍率 | `bossHp` | 开启，mul 2 / layerK 0.01 / floor 0 / cap 7（玩家实测后手动调） | ✅（血池开打瞬间生成，只影响未开始的 BOSS 战） |
 
 全部规则可用 `http://<主机>:24500/console` 可视化编辑（仅限内网来源）。
 
@@ -191,6 +192,23 @@
 1. 官方的**回合索引表**（`mode.rounds`）长度有限（本作到 15），任何「顺延回合」的功能都必须**同时映射 BOSS/隐藏 BOSS 的模板**，不能只映射普通波次。
 2. 验证波次时断言 **`spawns.length`**，不要只数 `bossWaves.length`/`fields`。
 3. 对「超出官方表」的回合加**兜底**，避免任何空回合（静默失败最难发现）。
+
+### BOSS 血量倍率（bossHp，2026-10-08 自研追加，用户需求）
+
+- **需求定稿**：「手动系数乘上盟约总数折算系数等于最终系数」= `final = mul × min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))`；layerSum = 全场活人盟约层数总和（主 BOSS 开打瞬间取值，隐藏 BOSS 沿用同一值）。
+- **实现**：**复活上游预留的 `gd.bossHpMul(bossId[, layerSum])` 钩子**（`finalAssault.bossPoolHp` 本来就在调用它，原为 `return 1` 存根）——不算自创机制。`bossPoolHp` 加第 5 参 `layerSum`，`Match.startFinalAssault` 传 `this.hiddenLayerSum || 0`，**audit.js 同步传同值（否则审计一致性检查失败）**。`bossHp` 配置组（mul/layerK/layerFloor/layerCap）+ 控制台「BOSS 血量」标签页。
+- **生效时机**：`SharedBossPool` 血量在 **startFinalAssault 生成瞬间快照**——热改只影响**尚未开打的 BOSS 战**；正在打的血池不变；服务器重启清全部对局。
+- **验证**：`tools/boss-hp.test.mjs` **10/10**（解析/相乘/floor/cap/端到端血池 = official × 2 × 1.5 / 热改）。**踩坑**：测试里 `writeCfg(bossHp({...}))` 会擦掉其他组（extraRounds 丢失 → 对局在 R14 就结束）——必须 `{...JSON.parse(original), bossHp: ...}` 合并写。
+- **部署**：提交 `c9f4087`，闪断重启 + 推送。玩家实测后经控制台手动调为 mul 2 / layerK 0.01 / cap 7。
+
+### 策略搜索（bandDraft 搜索栏，2026-10-09 自研追加，用户需求）
+
+- **需求**：选策略（BAND_DRAFT 2/2）页面策略太多（40 张），加搜索。**纯客户端改动，改完刷新即生效，无需重启**（当时有人在玩，全程未动服务器进程）。
+- **实现**：① 新模块 `public/js/ui/bandSearch.js`（**零依赖**：`bandSearchText(band, bondName)` + `bandMatchesQuery(band, q, texts)`——bandDraft.js 拖着 PixiJS/audio 等 DOM 依赖链，node --test 无法直接导入，抽零依赖模块才能单测）；② `bandDraft.js` 加搜索栏（复用带 IME 合成事件保护的 `TextField`，placeholder「搜索策略 / 效果 / 盟约」）+ 计数 `N/N` + 清空按钮 + 空态提示；匹配范围 = 策略名 / 效果名 / 描述（`descRaw` 剥 `<tag>` 标记）/ 盟约名（`band.bondIds` → `gd.bond(id).name`），大小写不敏感子串。
+- **纯展示层约束**：过滤只影响渲染，`bands` 仍是完整 allowed 列表——选中/超时/队友已选逻辑零改动；被过滤掉的选中策略仍留在详情面板。
+- **验证**：`tools/band-search.test.mjs` **10/10**（名字/效果/描述/盟约/大小写/空查询/缺字段不炸/回退）；`tools/verify-band-search.mjs` **14/14**（无头浏览器走真实路径：标题→独立模拟→房间→简报→选策略，输入「华法」→ 40/40 → 1/40、乱关键词空态、清空复原、零页面错误）。**踩坑**：选择器 `[class*="mode-card"]` 会先匹配到**容器** `.mode-cards`（文本同时含「独立模拟」和「同盟模拟」）→ 点容器无效——要按 `button.mode-card` 根类精确选卡片。
+- **键盘安全**：`shortcutFor`（gameLogic.js）对 INPUT/TEXTAREA 目标直接返回 null——搜索框内打字不会误触 R/F/D/Q/X/空格 快捷键（验证过代码路径）。
+
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。

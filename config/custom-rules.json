@@ -97,9 +97,9 @@
     "_layerFloor": "层数免计水位：官方 13 回合水位以内的部分不加压（设 0 = 全部计入）。发育回合攒下的超出部分才加压。",
     "_默认值": "layerK=0.0005 ⇒ 每 200 层 +10% 血量；layerCap=5 封顶防爆炸。",
     "enabled": true,
-    "mul": 1,
-    "layerK": 0.0005,
+    "mul": 2,
+    "layerK": 0.01,
     "layerFloor": 0,
-    "layerCap": 5
+    "layerCap": 7
   }
 }

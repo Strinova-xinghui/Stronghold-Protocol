@@ -1,6 +1,7 @@
 // Band draft — BAND_DRAFT "2/2 选择策略" (research 06 §4.2, D1): left = draft order (avatar, name, state:
 // … waiting / ⌛ 决策中 / chosen band ✓), current picker highlighted; centre = grid of every band allowed
-// for the mode type (icon, name, LP); a band a teammate already picked carries the picker's avatar and is marked
+// for the mode type (icon, name, LP) under a search bar (策略搜索 2026-10-08: 策略名 / 效果 / 描述 / 盟约名,
+// display-only — bands stays the full list); a band a teammate already picked carries the picker's avatar and is marked
 // 队友已选 — it cannot be chosen again (research 09 §5, guidebook 策略与轮选; the server refuses it too); right =
 // detail pane (icon, 初始生命值, name, effect name + rich description) with 跳过 (co-op, once) and 确认选择.
 // One countdown (user playtest #4 item 4): every turn has the same clock (Match BAND_TURN_SECONDS, m.public.draft
@@ -19,10 +20,11 @@
 // never touches the highlighted band or the buttons.
 
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { html, Button, Icon, MicroLabel, useTicker, secondsLeft } from '../ui/components.js';
+import { html, Button, Icon, MicroLabel, TextField, useTicker, secondsLeft } from '../ui/components.js';
 import { useGameData, BandIcon, RichText, PlayerAvatar, LpTower, Sprite } from '../ui/gameComponents.js';
 import { StepHeader, ExitModal } from '../ui/matchChrome.js';
 import { MatchInfoDialog, matchInfoModel } from '../ui/matchInfo.js';
+import { bandSearchText, bandMatchesQuery } from '../ui/bandSearch.js';
 import { actions, act } from '../ui/gameActions.js';
 import { normalizeDraft, sortedPlayers } from '../ui/gameLogic.js';
 import { useStore } from '../store.js';
@@ -56,6 +58,7 @@ export function allowedBands(bands, modeType) {
 
 /** The official default strategy of an automatic assignment (data/config.json bandDraft.timeoutBandId). */
 export const DEFAULT_TIMEOUT_BAND = 'band_bldsk';
+// 策略搜索的匹配函数在 ui/bandSearch.js（零依赖，node --test 可直接导入）— bandSearchText / bandMatchesQuery
 
 /**
  * The strategy the server assigns me when my turn times out (server/match/Match.js defaultBand): the official default
@@ -172,11 +175,23 @@ export function BandDraftScreen() {
   const [exit, setExit] = useState(false);
   const [skipped, setSkipped] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [query, setQuery] = useState('');
 
   const mode = gd.config?.modes?.[pub?.modeId];
   const offBonds = modeOffBonds(mode); // the bonds this mode never activates (标准: 10 of 23)
   const solo = roomSolo || mode?.type === 'SINGLE' || String(pub?.modeId || '').includes('single');
   const bands = useMemo(() => allowedBands(gd.list('bands'), mode?.type || (solo ? 'SINGLE' : 'MULTI')), [gd.ready, mode?.type, solo]);
+  // 策略搜索 (2026-10-08): filter the cards by 策略名 / 效果 / 描述 / 盟约名 — display-only, `bands` stays the full
+  // allowed list for the pick / timeout / 队友已选 logic; a selection on a filtered-out card stays in the detail pane
+  const q = query.trim().toLowerCase();
+  const searchTexts = useMemo(() => {
+    const m = new Map();
+    for (const b of bands) m.set(b.bandId, bandSearchText(b, (id) => gd.bond(id)?.name || id));
+    return m;
+  }, [bands, gd.ready]);
+  const visibleBands = useMemo(
+    () => (q ? bands.filter((b) => bandMatchesQuery(b, q, searchTexts)) : bands),
+    [bands, q, searchTexts]);
   const players = sortedPlayers(pub);
   const draft = normalizeDraft(pub?.draft, players);
   const myPick = draft.picks.get(myId) || priv?.bandId || null;
@@ -278,8 +293,16 @@ export function BandDraftScreen() {
         ${!solo ? html`<p class="draft-order__tip" data-testid="draft-tip">${draftTip({ timed, turnSeconds: turnLen, autoName: myPick ? null : autoName, selected: autoId === sel })}</p>` : null}
       </aside>
 
-      <section class="draft-grid" role="listbox" aria-label="策略">
-        ${bands.map((b) => {
+      <div class="draft-gridwrap">
+        <div class="draft-grid__bar" data-testid="draft-search">
+          <${TextField} icon="search" value=${query} placeholder="搜索策略 / 效果 / 盟约" class="draft-grid__search" aria-label="搜索策略"
+            onInput=${(v) => setQuery(String(v).slice(0, 24))} />
+          ${query ? html`<button type="button" class="draft-grid__clear" title="清空搜索" aria-label="清空搜索" onClick=${() => setQuery('')}><${Icon} name="close" /></button>` : null}
+          <span class="draft-grid__count num" data-testid="draft-search-count">${visibleBands.length}/${bands.length}</span>
+        </div>
+        <section class="draft-grid" role="listbox" aria-label="策略">
+        ${q && !visibleBands.length ? html`<p class="draft-grid__empty" data-testid="draft-search-empty">没有匹配的策略，试试其他关键词</p>` : null}
+        ${visibleBands.map((b) => {
           const who = pickers.get(b.bandId) || [];
           const isTaken = taken.has(b.bandId);
           const offNames = bandOffBonds(b, offBonds).map((id) => gd.bond(id)?.name || id); // 本局禁用 (still selectable)
@@ -294,7 +317,8 @@ export function BandDraftScreen() {
             ${isTaken ? html`<span class="dband__taken">队友已选</span>` : null}
           </button>`;
         })}
-      </section>
+        </section>
+      </div>
 
       <aside class="draft-detail brackets">
         ${band ? html`

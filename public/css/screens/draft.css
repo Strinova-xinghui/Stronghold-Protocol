@@ -85,6 +85,26 @@
 .draft-detail__off .icon { width: max(.16rem, 10px); height: max(.16rem, 10px); flex: none; margin-top: .02rem; }
 .draft-detail__offname { color: var(--text-dim); text-decoration: line-through; text-decoration-color: rgba(255, 84, 84, .6); }
 
+/* ---- 策略搜索 (2026-10-08): a bar above the strategy grid — filters the cards by 策略名 / 效果 / 描述 / 盟约名 ----
+   Display-only (the pick / timeout logic reads the full list); the count, the 清空 button and the empty note keep the
+   filtered state obvious. Every size is max(design rem, px floor) like the 本局信息 blocks — readable on phones. */
+.draft-gridwrap { display: flex; flex-direction: column; min-height: 0; gap: .1rem; }
+.draft-gridwrap .draft-grid { flex: 1; min-height: 0; }
+.draft-grid__bar { flex: none; display: flex; align-items: center; gap: max(.06rem, 4px); }
+.draft-grid__search { flex: 1; min-width: 0; }
+.draft-grid__search .field__box { height: max(.5rem, 28px); padding: 0 max(.16rem, 6px); background: rgba(12, 15, 14, .82); }
+.draft-grid__search .field__input { font-size: max(.18rem, 11px); }
+.draft-grid__search .field__icon { width: max(.2rem, 12px); height: max(.2rem, 12px); }
+.draft-grid__clear {
+  flex: none; width: max(.5rem, 28px); height: max(.5rem, 28px); display: flex; align-items: center; justify-content: center;
+  background: rgba(12, 15, 14, .82); border: 1px solid var(--line); color: var(--text-dim);
+  transition: border-color var(--t-fast), color var(--t-fast);
+}
+.draft-grid__clear:hover { border-color: var(--line-3); color: var(--text-hi); }
+.draft-grid__clear .icon { width: max(.18rem, 11px); height: max(.18rem, 11px); }
+.draft-grid__count { flex: none; font-family: var(--font-num); font-size: max(.15rem, 10px); color: var(--text-dim); white-space: nowrap; }
+.draft-grid__empty { grid-column: 1 / -1; margin: .16rem 0; font-size: max(.16rem, 10px); color: var(--text-dim); text-align: center; }
+
 /* ---- 本局信息 (GitHub issue #8 item 1, DESIGN §21.28): the entry under the order list and the read-only dialog -------
    The dialog shows the briefing's own blocks (.brief-bonds / .brief-legend / .brief-banned, css/screens/briefing.css)
    at the briefing's size on desktop; every size is max(design rem, px floor), so on a phone (1rem = 40 px) the text
