@@ -32,12 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -132,7 +132,41 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery ? out : OFF;
+  // ---- 回合编排（extraRounds，自研 2026-10-08）：延后 BOSS 给玩家更多发育回合。
+  //      语义：把原 bossRound/hiddenRound/lastRound 整体顺延 `count` 回合；插入的回合**复用 `templateRound`
+  //      （默认 13）的波次**（官方 data/ 零改动 → golden 安全），难度按 `curve` 策略决定：
+  //        stretch = 整条难度曲线重排到新的最后普通回合（端点不变，前期随之变缓）—— 用户 2026-10-08 定稿
+  //        append  = 从模板回合的等级接着涨（k+1, k+2…，每回合 +20%）
+  //        smooth  = 插入的回合共同完成「一级」的成长（总量 1.2×，平摊）
+  //        flat    = 完全沿用模板回合难度（不涨）
+  //      怪组多样性：`poolTemplates`（同难度模板池）里随机混排，强度不变、组合变化。
+  const er = raw.extraRounds && typeof raw.extraRounds === 'object' ? raw.extraRounds : null;
+  if (er && er.enabled) {
+    const insertAfter = Math.max(1, Math.trunc(numOr(er.insertAfter, 13)));
+    const count = Math.max(1, Math.min(10, Math.trunc(numOr(er.count, 4))));
+    const templateRound = Math.max(1, Math.trunc(numOr(er.templateRound, insertAfter)));
+    const pool = Array.isArray(er.poolTemplates)
+      ? er.poolTemplates.filter((x) => typeof x === 'string' && x)
+      : [];
+    const CURVES = ['stretch', 'stretchShape', 'append', 'smooth', 'flat'];
+    out.extraRounds = Object.freeze({
+      enabled: true,
+      insertAfter,                        // 从这一回合之后开始插入（即原 BOSS 之前）
+      count,                              // 插入几个发育回合
+      templateRound,                      // 波次模板取自哪一回合
+      curve: CURVES.includes(er.curve) ? er.curve : 'stretch',
+      // ---- 难度曲线（官方公式 hp = curveBase × curveRate^k，k = 表里的 kHp/kAtk）----
+      // 默认值即官方反解值：0.8 × 1.2^k / 0.8 × 1.1^k
+      curveBase: Math.max(0.01, numOr(er.curveBase, 0.8)),
+      curveRate: Math.max(1, numOr(er.curveRate, 1.2)),
+      curveBaseAtk: Math.max(0.01, numOr(er.curveBaseAtk, 0.8)),
+      curveRateAtk: Math.max(1, numOr(er.curveRateAtk, 1.1)),
+      poolTemplates: Object.freeze(pool), // 怪组多样性池（波次模板 id；空 = 只用 templateRound 的模板）
+      mixPerRound: er.mixPerRound !== false, // 每个插入回合是否从池里随机挑一个模板
+    });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds ? out : OFF;
 }
 
 /**

@@ -1681,6 +1681,9 @@ export class Match {
   startRound(r) {
     this.phase = PHASE.ROUND_START;
     this.round = r;
+    // 回合编排热改保护（自研 2026-10-08）：本局已到达的回合不能再被重新定义——把 floor 抬到当前回合，
+    // 使「改 BOSS 时间」只对尚未到达的回合生效（改小会被顺延到下一回合触发，改大立即生效）。
+    this.gd.raiseExtraRoundsFloor(r);
     this.fields = [];
     this.watchers.clear();
     this.unitePlan = null;
@@ -2198,6 +2201,7 @@ export class Match {
     for (const ps of alive) ps.endPrep();
     const r = this.round;
     if (r === this.gd.bossRound) {
+      this.gd.lockBossRound(r);          // 锁定：后续回合不再把 bossRound 算成自己（热改安全）
       this.hiddenLayerSum = alive.reduce((s, p) => s + p.activatedLayers(), 0);
       this.startFinalAssault(false);
     } else if (r === this.gd.hiddenRound) {

@@ -12,6 +12,7 @@
 // that still carries them is ignored).
 
 import { getConfig, getMode } from '../data.js';
+import { getCustomRules } from './customRules.js';
 import { isShopItem } from '../sim/simdata.js';
 import { poolCopyMulFor, bossPoolShareFor, coopBansFor } from './scaling.js';
 
@@ -68,6 +69,9 @@ export class GameData {
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
     this.mode = getMode(modeId, this.raw) || {};
+    // 自研「回合编排」：热读（见 extraRounds getter）；_erFloor 由 Match 抬高以防热改重定义已打过的回合
+    this._erFloor = 0;
+    this._mixedTemplates = null;
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
@@ -281,19 +285,100 @@ export class GameData {
 
   // ---- mode -----------------------------------------------------------------------------------------
 
+  /**
+   * 自研「回合编排」（custom-rules.json extraRounds）：延后 BOSS 给玩家更多发育回合。
+   * **热读**（getter，每次从 customRules 取 + mtime 缓存）——用户 2026-10-08 要求「改 BOSS 轮时间后自动重算难度
+   * 以实现热改」。但**回合结构不能在局中回退**：Match 侧用 `_erFloor` 记录「本局已用过的最大 insertAfter+count」，
+   * 只接受不小于它的新结构（见 Match._erSync），避免玩家已打过的回合被重新定义。
+   * 语义：insertAfter 之后的 `count` 个回合为插入的发育回合，复用 `templateRound` 的波次，难度按 `curve` 策略；
+   * 原 bossRound / hiddenRound / lastRound 全部顺延 `count`。
+   */
+  get extraRounds() {
+    if (this._erCacheStamp === undefined) this._erCacheStamp = -1;
+    // customRules 自带 mtime 缓存，这里只做一层「同一 tick 内复用」避免热路径反复解析
+    let er = null;
+    try { er = getCustomRules({}).extraRounds || null; } catch { er = null; }
+    return er;
+  }
+
+  /** 本局回合结构的下界（Match 在推进回合时抬高它，防止热改把已打过的回合重新定义）。 */
+  get extraRoundsFloor() { return this._erFloor || 0; }
+  raiseExtraRoundsFloor(n) { if (Number.isFinite(n) && n > (this._erFloor || 0)) this._erFloor = n; }
+  /** BOSS 触发时锁定回合号（防止后续回合把 bossRound 算成自己）。 */
+  lockBossRound(r) { if (Number.isFinite(r) && this._erBossAt == null) this._erBossAt = r; }
+
+  /** 该回合是否为插入的发育回合（复用模板回合的波次与难度）。 */
+  isInsertedRound(r) {
+    const er = this.extraRounds;
+    return !!er && r > er.insertAfter && r <= er.insertAfter + er.count;
+  }
+
+  /** 插入回合 → 其模板回合号（非插入回合返回自身）。 */
+  templateRoundFor(r) {
+    const er = this.extraRounds;
+    return er && this.isInsertedRound(r) ? er.templateRound : r;
+  }
+
   get isSolo() { return this.mode.type === 'SINGLE' || /^mode_single_/.test(this.modeId || ''); }
   get difficulty() { return this.mode.difficulty || (this.modeId ? String(this.modeId).split('_').pop().toUpperCase() : 'NORMAL'); }
-  get lastRound() {
-    if (Number.isInteger(this.mode.lastRound) && this.mode.lastRound > 0) return this.mode.lastRound;
-    return this.modeId === 'mode_single_funny' ? 9 : 14;
+  get lastRound() { return this.bossRound; }
+  /**
+   * 主 BOSS 回合（热读 + 两道保护，用户 2026-10-08 要求「改 BOSS 轮时间后自动重算难度」）：
+   *   ① `_erFloor` = 本局已开始的回合：BOSS 不能落在过去（`computed > floor ? computed : floor + 1`）——
+   *      改小到已过去的回合时，顺延到**下一个回合**立即触发，对局仍能正常结束。
+   *   ② `_erBossAt` = BOSS 实际触发的回合：一旦触发就**锁定**，避免后续回合把 bossRound 算成自己
+   *      （否则 r === bossRound 会在每回合成立）。
+   */
+  get bossRound() {
+    if (this._erBossAt != null) return this._erBossAt;               // ② 已触发 → 锁定
+    const er = this.extraRounds;
+    const base = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : 14;
+    const computed = base + (er ? er.count : 0);
+    const floor = this._erFloor || 0;
+    // ① 不落在**已经过去**的回合（floor 是当前正在进行的回合，它本身还可以成为 BOSS）。
+    //    即 computed >= floor 就用 computed；只有 computed < floor（落在过去）才顺延到 floor。
+    return computed >= floor ? computed : floor;
   }
-  get bossRound() { return Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : this.lastRound; }
-  get hiddenRound() { return Number.isInteger(this.mode.hiddenRound) && this.mode.hiddenRound > 0 ? this.mode.hiddenRound : null; }
+  /** 隐藏 BOSS = 主 BOSS + 官方两者的差值（保持「紧跟主 BOSS」的相对关系）。 */
+  get hiddenRound() {
+    const base = Number.isInteger(this.mode.hiddenRound) && this.mode.hiddenRound > 0 ? this.mode.hiddenRound : null;
+    if (base == null) return null;
+    const baseBoss = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : 14;
+    return this.bossRound + (base - baseBoss);
+  }
   get maxShopLevel() { return posIntOr(this.mode.maxShopLevel, DEFAULTS.maxShopLevel); }
 
   roundCfg(r) {
     const rounds = this.mode.rounds;
+    const er = this.extraRounds;
+    // 插入的发育回合：复用模板回合（默认 13）的**时长/时长上限**，但
+    //   ① 清掉 bossTemplates/isBoss（它们不是 BOSS 回合）；
+    //   ② 波次模板从 poolTemplates 里**随机挑一个**（怪组多样性；强度不变，靠 enemyScale 控制难度）。
+    if (er && this.isInsertedRound(r)) {
+      const tpl = rounds && typeof rounds === 'object' && rounds[String(er.templateRound)] && typeof rounds[String(er.templateRound)] === 'object' ? rounds[String(er.templateRound)] : null;
+      if (tpl) {
+        const mixed = this._mixTemplateFor(r, tpl);
+        return { ...tpl, template: mixed, isBoss: false, isHidden: false, bossTemplates: null, bossOvertimeAfter: null };
+      }
+    }
     return rounds && typeof rounds === 'object' && rounds[String(r)] && typeof rounds[String(r)] === 'object' ? rounds[String(r)] : null;
+  }
+
+  /**
+   * 插入回合的波次模板：从 `poolTemplates` 里随机挑（同一回合多次调用返回同一个，保证「本回合内一致」）。
+   * 池空 / 未开 mixPerRound → 用模板回合自己的模板。
+   */
+  _mixTemplateFor(r, tpl) {
+    const er = this.extraRounds;
+    const fallback = tpl && typeof tpl.template === 'string' ? tpl.template : null;
+    if (!er || !er.mixPerRound || !er.poolTemplates.length) return fallback;
+    if (!this._mixedTemplates) this._mixedTemplates = new Map();
+    if (this._mixedTemplates.has(r)) return this._mixedTemplates.get(r);
+    // 用 rngMeta 之外的一次性随机：模板选择只需「每回合固定一次」，不必可复现到战斗序列
+    const pool = er.poolTemplates.filter((id) => !!this.wave(id));
+    const pick = pool.length ? pool[Math.floor(Math.random() * pool.length)] : fallback;
+    this._mixedTemplates.set(r, pick);
+    return pick;
   }
 
   spRounds() { return Array.isArray(this.mode.spRounds) ? this.mode.spRounds.filter((n) => Number.isInteger(n)) : []; }
@@ -375,9 +460,72 @@ export class GameData {
     };
   }
 
-  /** Enemy multipliers of round r = the official table (baseEnemyScale; no custom multiplier). */
+  /**
+   * Enemy multipliers of round r = the official table (baseEnemyScale; no custom multiplier).
+   * 自研「回合编排」插入的发育回合按 `curve` 策略取难度（用户 2026-10-08 定稿：**stretch = 整条曲线重排**）：
+   *   stretch：把官方的 k 值曲线**等比拉伸**到新的最后普通回合，端点不变——插入回合取重排后的 k，
+   *            故第 13 回合的 k 会比原来小（前期整体变缓），曲线在更长回合数内走完同样的 0→K。
+   *   append ：插入回合接着模板回合的 k 递增（k+1, k+2…，每回合 ×1.2）。
+   *   smooth ：插入回合共同完成「一级」的成长（总量 ×1.2，平摊到各回合）。
+   *   flat   ：完全沿用模板回合难度（不涨）。
+   * 官方公式（已验证）：hp = 0.8 × 1.2^k，atk = 0.8 × 1.1^k（k = enemyScale 表里的 kHp/kAtk）。
+   * 递推常数与基准值全部可外置（extraRounds.curveBase / curveRate / curveRateAtk）。
+   */
   enemyScale(r) {
-    return this.baseEnemyScale(r);
+    const er = this.extraRounds;
+    if (!er) return this.baseEnemyScale(r);
+    const K = this._kOfRound(er.insertAfter);        // 官方终点 k（第 insertAfter 回合，如 13 → 7）
+    if (K == null) return this.baseEnemyScale(r);
+    const at = (k, speedMul) => ({
+      hpMul: Math.max(0.01, er.curveBase * Math.pow(er.curveRate, k)),
+      atkMul: Math.max(0, er.curveBaseAtk * Math.pow(er.curveRateAtk, k)),
+      speedMul,
+    });
+    const officialSpeed = this.baseEnemyScale(r).speedMul;
+    // stretch（线性重排，用户 2026-10-08 定稿）：官方 k 从 0 到 K 的那条直线，摊到**新的最后普通回合**
+    // （insertAfter + count）。端点不变（第 17 回合 = 官方第 13 回合的 k=7）→ 后期明显变缓，但**前中期会比官方略陡**
+    // （官方前期是平台式缓涨，拉直后反而抬高）。
+    if (er.curve === 'stretch') {
+      const newLast = er.insertAfter + er.count;
+      const k = Math.min(K, (K / newLast) * r);
+      return at(k, officialSpeed);
+    }
+    // stretchShape（形状保持的横向拉伸）：把官方的 k 曲线整体横向拉长到新的回合数——第 r 回合取官方
+    // 第 r×(insertAfter/newLast) 回合的 k（线性插值）。**全程 ≤ 官方**（最柔和的「拉伸」读法）。
+    if (er.curve === 'stretchShape') {
+      const k = this._kStretched(r);
+      return k == null ? this.baseEnemyScale(r) : at(k, officialSpeed);
+    }
+    // 以下三种只作用于插入回合，非插入回合保持官方原值
+    if (!this.isInsertedRound(r)) return this.baseEnemyScale(r);
+    const tpl = this.baseEnemyScale(er.templateRound);
+    const kTpl = this._kOfRound(er.templateRound) ?? K;
+    let k = kTpl;
+    if (er.curve === 'append') k = kTpl + (r - er.templateRound);                 // 接着涨：k+1, k+2…
+    else if (er.curve === 'smooth') k = kTpl + (r - er.templateRound) / er.count; // 平摊一级：总量 ×1.2
+    return at(k, tpl.speedMul);                                                   // flat：k = kTpl（不涨）
+  }
+
+  /** stretchShape 用：第 r 回合取官方「横向拉长后」对应的 k（线性插值）。 */
+  _kStretched(r) {
+    const er = this.extraRounds;
+    const newLast = er.insertAfter + er.count;
+    const x = (r * er.insertAfter) / newLast;
+    const lo = Math.floor(x), hi = Math.ceil(x);
+    const kLo = this._kOfRound(lo), kHi = this._kOfRound(hi);
+    if (kLo == null && kHi == null) return null;
+    if (kLo == null) return kHi;
+    if (kHi == null || lo === hi) return kLo;
+    return kLo + (kHi - kLo) * (x - lo);
+  }
+
+  /** 某回合在官方 enemyScale 表里的等级序号 k（kHp）。表里没有 → null。 */
+  _kOfRound(r) {
+    const es = this.mode && this.mode.enemyScale;
+    const e = es && typeof es === 'object' ? es[String(r)] : null;
+    if (!e || typeof e !== 'object') return null;
+    const k = Number(e.kHp);
+    return Number.isFinite(k) ? k : null;
   }
 
   timer(key) {

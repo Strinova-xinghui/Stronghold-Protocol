@@ -121,7 +121,45 @@
     </div>
   </section>
 
-  <!-- ⑤ 原始 JSON -->
+  <!-- ⑤ 回合编排 -->
+  <section class="panel" data-panel="extraRounds">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="extraRounds"> 回合编排（extraRounds）</label></h2>
+      <p class="desc">延后 BOSS，给玩家更多发育回合。第 <code>insertAfter</code> 回合之后插入 <code>count</code> 个发育回合（复用模板回合的波次），原 BOSS／隐藏 BOSS 整体顺延。<b>改 BOSS 轮时间会立即生效</b>（对尚未到达的回合），已打过的回合不会被重定义。</p>
+      <div class="row">
+        <label class="f">插入起点 insertAfter<input type="number" data-f="extraRounds.insertAfter" min="1" max="30"></label>
+        <label class="f">插入回合数 count<input type="number" data-f="extraRounds.count" min="1" max="10"></label>
+        <label class="f">波次模板回合 templateRound<input type="number" data-f="extraRounds.templateRound" min="1" max="30"></label>
+        <label class="chk"><input type="checkbox" data-f="extraRounds.mixPerRound"> 怪组混排</label>
+      </div>
+      <div class="row">
+        <label class="f">难度曲线 curve
+          <select data-f="extraRounds.curve">
+            <option value="stretchShape">stretchShape（形状保持横向拉伸，全程 ≤ 官方）</option>
+            <option value="stretch">stretch（线性重排，端点不变但前中期略陡）</option>
+            <option value="append">append（接着模板回合递增 ×1.2/回合）</option>
+            <option value="smooth">smooth（平摊一级成长，总量 ×1.2）</option>
+            <option value="flat">flat（不涨，沿用模板回合难度）</option>
+          </select>
+        </label>
+      </div>
+      <details style="margin-top:6px">
+        <summary>难度公式常数（默认即官方反解值）</summary>
+        <div class="row" style="margin-top:9px">
+          <label class="f">HP 基准 curveBase<input type="number" data-f="extraRounds.curveBase" min="0.01" max="5" step="0.01"></label>
+          <label class="f">HP 比率 curveRate<input type="number" data-f="extraRounds.curveRate" min="1" max="2" step="0.01"></label>
+          <label class="f">ATK 基准 curveBaseAtk<input type="number" data-f="extraRounds.curveBaseAtk" min="0.01" max="5" step="0.01"></label>
+          <label class="f">ATK 比率 curveRateAtk<input type="number" data-f="extraRounds.curveRateAtk" min="1" max="2" step="0.01"></label>
+        </div>
+        <p class="hint">官方公式：hp = curveBase × curveRate^k，atk = curveBaseAtk × curveRateAtk^k（k = config 里 enemyScale[回合].kHp，默认 0.8 × 1.2^k / 0.8 × 1.1^k）。</p>
+      </details>
+      <label class="f" style="margin-top:10px">怪组池 poolTemplates（波次模板 id，逗号分隔）
+        <input type="text" data-f="extraRounds.poolTemplates" placeholder="act1autochess_h04,act1autochess_h05,act1autochess_h06" style="width:100%">
+      </label>
+    </div>
+  </section>
+
+  <!-- ⑥ 原始 JSON -->
   <section class="panel" data-panel="__raw">
     <div class="card">
       <h2>原始 JSON</h2>
@@ -205,6 +243,8 @@ function setStat(d) {
   if (d.rules?.itemOffer) on.push('装备甄选');
   if (d.rules?.prepDebt) on.push('负债');
   if (d.rules?.roundLottery) on.push('抽奖');
+
+  if (d.rules?.extraRounds) on.push('回合编排');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -218,10 +258,16 @@ function ensureShape() {
   cfg.prepDebt = cfg.prepDebt || { enabled: true, k: 0.3, k2: 0.15, cap: 1.05, floor: 0.85 };
   cfg.roundLottery = cfg.roundLottery || { enabled: true, rolls: 2, choices: 5, label: '军备抽奖', includeBots: false, rounds: [] };
   cfg.roundLottery.rounds = Array.isArray(cfg.roundLottery.rounds) ? cfg.roundLottery.rounds : [];
+  cfg.extraRounds = cfg.extraRounds || {
+    enabled: true, insertAfter: 13, count: 4, templateRound: 13, curve: 'stretchShape',
+    curveBase: 0.8, curveRate: 1.2, curveBaseAtk: 0.8, curveRateAtk: 1.1,
+    mixPerRound: true, poolTemplates: [],
+  };
+  cfg.extraRounds.poolTemplates = Array.isArray(cfg.extraRounds.poolTemplates) ? cfg.extraRounds.poolTemplates : [];
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';
@@ -242,6 +288,7 @@ function renderAll() {
     const [g, f] = inp.dataset.f.split('.');
     const v = cfg[g]?.[f];
     if (inp.type === 'checkbox') inp.checked = v === true;
+    else if (Array.isArray(v)) inp.value = v.join(',');          // 数组字段（poolTemplates）以逗号显示
     else inp.value = v == null ? '' : v;
   }
   renderSlots();
@@ -320,6 +367,10 @@ for (const cb of document.querySelectorAll('[data-en]')) {
 for (const inp of document.querySelectorAll('[data-f]')) {
   inp.addEventListener('change', () => {
     const [g, f] = inp.dataset.f.split('.');
+    if (f === 'poolTemplates') {                                 // 逗号分隔 → 数组
+      cfg[g][f] = inp.value.split(',').map((x) => x.trim()).filter(Boolean);
+      return;
+    }
     cfg[g][f] = inp.type === 'checkbox' ? inp.checked : (inp.type === 'number' ? Number(inp.value) : inp.value);
   });
 }

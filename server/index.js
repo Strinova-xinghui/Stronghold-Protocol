@@ -619,6 +619,8 @@ function consoleApiRead() {
   if (rules.itemOffer) on.push('装备甄选');
   if (rules.prepDebt) on.push('负债');
   if (rules.roundLottery) on.push('抽奖');
+
+  if (rules.extraRounds) on.push('回合编排');
   return { ok: true, path: 'config/custom-rules.json', config, rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' };
 }
 
@@ -645,6 +647,8 @@ async function consoleApiWrite(req, res, log) {
     if (rules.itemOffer) on.push('装备甄选');
     if (rules.prepDebt) on.push('负债');
     if (rules.roundLottery) on.push('抽奖');
+
+    if (rules.extraRounds) on.push('回合编排');
     log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
     sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' });
   } catch (e) {

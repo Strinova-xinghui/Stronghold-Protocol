@@ -47,9 +47,39 @@
     "label": "军备抽奖",
     "includeBots": false,
     "rounds": [
-      { "round": 3, "minTier": 1 },
-      { "round": 6, "minTier": 2 },
-      { "round": 10, "minTier": 3 }
+      {
+        "round": 3,
+        "minTier": 1
+      },
+      {
+        "round": 6,
+        "minTier": 2
+      },
+      {
+        "round": 10,
+        "minTier": 3
+      }
+    ]
+  },
+  "extraRounds": {
+    "_说明": "回合编排（2026-10-08）：延后 BOSS，给玩家更多发育回合。insertAfter 之后插入 count 个发育回合（原 BOSS/隐藏 BOSS/最后回合全部顺延 count）。插入回合**复用 templateRound 的波次与时长**，但敌人组合从 poolTemplates 里逐回合随机挑（同档不同编排 = 多样性），难度按 curve 策略。官方 data/ 零改动。",
+    "_curve": "stretchShape（形状保持的横向拉伸：第 r 回合取官方 r×13/17 处的 k，**全程 ≤ 官方**，最柔和——用户 2026-10-08 定稿）| stretch（线性重排：端点不变但前中期略陡）| append（接着 k 递增 ×1.2/回合）| smooth（平摊一级）| flat（不涨）",
+    "_公式": "官方反解：hp = curveBase × curveRate^k，atk = curveBaseAtk × curveRateAtk^k（k = config 里 enemyScale[回合].kHp/kAtk，已验证 0.8×1.2^k 与表逐值吻合）。",
+    "_poolTemplates": "怪组多样性池（波次模板 id）。留空 = 只用 templateRound 自己的模板（4 个回合完全一样）。后期 h04/h05/h06 敌种相同、仅数量与编排不同，适合当同档池。",
+    "enabled": true,
+    "insertAfter": 13,
+    "count": 4,
+    "templateRound": 13,
+    "curve": "stretchShape",
+    "curveBase": 0.8,
+    "curveRate": 1.2,
+    "curveBaseAtk": 0.8,
+    "curveRateAtk": 1.1,
+    "mixPerRound": true,
+    "poolTemplates": [
+      "act1autochess_h04",
+      "act1autochess_h05",
+      "act1autochess_h06"
     ]
   },
   "_调参记录": "2026-10-07 用户要求「甄选概率同比提高 30%」：mult 2→2.6（实测装备甄选出率 17.83%→22.25%，即 ×1.248≈+25%；干员 filter 模式本身即 100% 命中，mult 不参与）。"
