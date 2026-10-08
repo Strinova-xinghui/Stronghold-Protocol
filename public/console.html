@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234ea1ff'/%3E%3Cpath d='M9 22V10h3l4 7 4-7h3v12h-3v-7l-4 6-4-6v7z' fill='%2308111f'/%3E%3C/svg%3E">
+<title>卫戍协议 · 规则控制台</title>
+<style>
+  :root { --bg:#12141a; --card:#1b1e26; --line:#2c3140; --fg:#e8eaf0; --dim:#9aa3b5; --acc:#4ea1ff; --ok:#3ddc97; --warn:#ffb020; --err:#ff5d5d; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; flex-wrap:wrap; position:sticky; top:0; background:var(--bg); z-index:5; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .grow { flex:1; }
+  .pill { font-size:12px; padding:2px 9px; border-radius:999px; border:1px solid var(--line); color:var(--dim); }
+  .pill.on { color:var(--ok); border-color:#2a5c47; background:#14261f; }
+  .pill.off { color:var(--dim); }
+  main { padding:18px 20px 90px; max-width:1080px; margin:0 auto; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .tab { padding:7px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--dim); cursor:pointer; font-size:13px; }
+  .tab.active { color:#fff; border-color:var(--acc); background:#16233a; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .card h2 { font-size:14px; margin:0 0 4px; font-weight:600; }
+  .card .desc { color:var(--dim); font-size:12.5px; margin:0 0 14px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+  label.f { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--dim); }
+  input[type=text], input[type=number], select, textarea {
+    background:#0f1116; color:var(--fg); border:1px solid var(--line); border-radius:7px; padding:6px 9px; font:inherit; font-size:13px; min-width:0;
+  }
+  input[type=number] { width:92px; }
+  input[type=text] { width:150px; }
+  select { width:130px; }
+  textarea { width:100%; min-height:320px; font-family:Consolas,Menlo,monospace; font-size:12.5px; line-height:1.5; }
+  .chk { display:flex; align-items:center; gap:7px; font-size:13px; cursor:pointer; user-select:none; }
+  .chk input { width:16px; height:16px; accent-color:var(--acc); }
+  .sw { display:inline-flex; align-items:center; gap:8px; font-weight:600; }
+  .sub { border:1px solid var(--line); border-radius:8px; padding:11px 13px; margin-bottom:9px; background:#171a21; }
+  .subhead { display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+  .subhead b { font-size:12.5px; color:var(--acc); }
+  button { background:#232838; color:var(--fg); border:1px solid var(--line); border-radius:7px; padding:7px 13px; cursor:pointer; font:inherit; font-size:13px; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:var(--acc); color:#08111f; border-color:var(--acc); font-weight:600; }
+  button.danger { color:var(--err); }
+  .bar { position:fixed; left:0; right:0; bottom:0; padding:11px 20px; background:#161922; border-top:1px solid var(--line); display:flex; align-items:center; gap:12px; }
+  .msg { font-size:13px; }
+  .msg.ok { color:var(--ok); } .msg.err { color:var(--err); } .msg.info { color:var(--dim); }
+  code { background:#0f1116; padding:1px 5px; border-radius:4px; font-size:12px; }
+  .hint { color:var(--dim); font-size:12px; }
+  details summary { cursor:pointer; color:var(--acc); font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>卫戍协议 · 规则控制台</h1>
+  <span class="pill" id="filePill">config/custom-rules.json</span>
+  <span class="grow"></span>
+  <button id="reload">重新读取</button>
+  <span class="pill" id="stat">载入中…</span>
+</header>
+
+<main>
+  <div class="tabs" id="tabs"></div>
+
+  <!-- ① 干员三选一定向 -->
+  <section class="panel" data-panel="rewardOffer">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="rewardOffer"> 干员三选一定向（rewardOffer）</label></h2>
+      <p class="desc">晋升奖励/免费挑选时，按候选位置把主盟约/副盟约干员的权重提高（weight）或限定必须命中（filter）。未列出的位置保持纯随机。</p>
+      <div id="roSlots"></div>
+      <button id="roAdd">+ 添加候选位规则</button>
+    </div>
+  </section>
+
+  <!-- ② 装备甄选 -->
+  <section class="panel" data-panel="itemOffer">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="itemOffer"> 装备甄选（itemOffer）</label></h2>
+      <p class="desc">提高「与目标盟约同阵营、可参与转职」的商店装备出率。只作用于商店装备槽。</p>
+      <div class="row">
+        <label class="f">起始回合 minRound<input type="number" data-f="itemOffer.minRound" min="0" max="30"></label>
+        <label class="f">权重倍率 mult<input type="number" data-f="itemOffer.mult" min="1" max="50" step="0.1"></label>
+        <label class="f">模式 mode<select data-f="itemOffer.mode"><option value="weight">weight（加权）</option><option value="filter">filter（必中）</option></select></label>
+      </div>
+      <div class="row">
+        <label class="f">目标盟约 targetBond<input type="text" data-f="itemOffer.targetBond" placeholder="mainCount 或 yanShip"></label>
+        <label class="f">激活阈值 minCount<input type="number" data-f="itemOffer.minCount" min="0" max="6"></label>
+        <label class="f">层级落空 onTierMiss<select data-f="itemOffer.onTierMiss"><option value="fallback">fallback（退层保证命中）</option><option value="random">random（保持层级随机）</option></select></label>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ 休整期负债 -->
+  <section class="panel" data-panel="prepDebt">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="prepDebt"> 休整期负债规则（prepDebt）</label></h2>
+      <p class="desc">只有<b>真正负血</b>才算负债：net = Σmax(0,−lp) − Σmax(0,lp−Ā)，Ā=26。net&gt;0 ⇒ 敌人 HP ×(1+k·net/Ā) 封顶 cap；net&lt;0 ⇒ ×(1+k₂·net/Ā) 下限 floor。只作用于普通/联防波次。</p>
+      <div class="row">
+        <label class="f">负债斜率 k<input type="number" data-f="prepDebt.k" min="0" max="2" step="0.01"></label>
+        <label class="f">存款斜率 k2<input type="number" data-f="prepDebt.k2" min="0" max="2" step="0.01"></label>
+        <label class="f">惩罚上限 cap<input type="number" data-f="prepDebt.cap" min="1" max="3" step="0.01"></label>
+        <label class="f">减弱下限 floor<input type="number" data-f="prepDebt.floor" min="0.1" max="1" step="0.01"></label>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 回合抽奖 -->
+  <section class="panel" data-panel="roundLottery">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="roundLottery"> 回合抽奖（roundLottery）</label></h2>
+      <p class="desc">指定回合给玩家送装备抽奖（复用凯瑟琳「定向投放」面板）。rolls = 推几轮独立抽奖，choices = 每轮几选 1。</p>
+      <div class="row">
+        <label class="f">轮数 rolls<input type="number" data-f="roundLottery.rolls" min="1" max="10"></label>
+        <label class="f">每轮几选 choices<input type="number" data-f="roundLottery.choices" min="1" max="6"></label>
+        <label class="f">面板标题 label<input type="text" data-f="roundLottery.label"></label>
+        <label class="chk"><input type="checkbox" data-f="roundLottery.includeBots"> 也给 AI 发</label>
+      </div>
+      <div id="rlRounds"></div>
+      <button id="rlAdd">+ 添加回合</button>
+    </div>
+  </section>
+
+  <!-- ⑤ 原始 JSON -->
+  <section class="panel" data-panel="__raw">
+    <div class="card">
+      <h2>原始 JSON</h2>
+      <p class="desc">直接编辑 <code>config/custom-rules.json</code> 全文。切到本页会从当前表单生成；在本页点保存则以此处文本为准。</p>
+      <textarea id="raw" spellcheck="false"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button id="rawFromForm">从表单重新生成</button>
+        <span class="hint">保存前会做结构校验，非法内容会被拒绝。</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="bar">
+  <button class="primary" id="save">保存并热更生效</button>
+  <span class="msg info" id="msg">规则改动保存后立即生效，无需重启服务器。</span>
+</div>
+
+<script>
+'use strict';
+const DEF_EXCLUDE = ['soloShip','visiShip','miraShip','investShip'];
+const $ = (s) => document.querySelector(s);
+const el = (tag, props = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k === 'html') n.innerHTML = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) if (c != null) n.append(c);
+  return n;
+};
+
+/** 当前配置对象（表单的单一数据源）。 */
+let cfg = {};
+let activeTab = 'rewardOffer';
+
+// ---------------- 载入 / 保存 ----------------
+async function load() {
+  setMsg('载入中…', 'info');
+  try {
+    const r = await fetch('/console/api', { cache: 'no-store' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '读取失败');
+    cfg = d.config || {};
+    ensureShape();
+    renderAll();
+    setStat(d);
+    setMsg('已载入当前配置。', 'ok');
+  } catch (e) {
+    setMsg('读取失败：' + e.message, 'err');
+    $('#stat').textContent = '读取失败';
+  }
+}
+async function save() {
+  let payload = cfg;
+  if (activeTab === '__raw') {
+    try { payload = JSON.parse($('#raw').value); }
+    catch (e) { setMsg('JSON 语法错误：' + e.message, 'err'); return; }
+  }
+  setMsg('保存中…', 'info');
+  try {
+    const r = await fetch('/console/api', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || '保存失败');
+    cfg = d.config || payload;
+    ensureShape();
+    renderAll();
+    setStat(d);
+    setMsg('已保存并生效：' + d.summary, 'ok');
+  } catch (e) {
+    setMsg('保存失败：' + e.message, 'err');
+  }
+}
+function setMsg(t, cls) { const m = $('#msg'); m.textContent = t; m.className = 'msg ' + cls; }
+function setStat(d) {
+  const on = [];
+  if (d.rules?.rewardOffer) on.push('三选一');
+  if (d.rules?.itemOffer) on.push('装备甄选');
+  if (d.rules?.prepDebt) on.push('负债');
+  if (d.rules?.roundLottery) on.push('抽奖');
+  const s = $('#stat');
+  s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
+  s.className = 'pill ' + (on.length ? 'on' : 'off');
+}
+
+// ---------------- 结构保证 ----------------
+function ensureShape() {
+  cfg.rewardOffer = cfg.rewardOffer || { enabled: true, slots: [] };
+  cfg.rewardOffer.slots = Array.isArray(cfg.rewardOffer.slots) ? cfg.rewardOffer.slots : [];
+  cfg.itemOffer = cfg.itemOffer || { enabled: true, minRound: 6, mult: 2, mode: 'weight', targetBond: 'mainCount', minCount: 3, onTierMiss: 'fallback' };
+  cfg.prepDebt = cfg.prepDebt || { enabled: true, k: 0.3, k2: 0.15, cap: 1.05, floor: 0.85 };
+  cfg.roundLottery = cfg.roundLottery || { enabled: true, rolls: 2, choices: 5, label: '军备抽奖', includeBots: false, rounds: [] };
+  cfg.roundLottery.rounds = Array.isArray(cfg.roundLottery.rounds) ? cfg.roundLottery.rounds : [];
+}
+
+// ---------------- 渲染 ----------------
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['__raw','原始 JSON']];
+function renderTabs() {
+  const t = $('#tabs');
+  t.textContent = '';
+  for (const [k, name] of TABS) {
+    t.append(el('button', { class: 'tab' + (activeTab === k ? ' active' : ''), text: name, onclick: () => switchTab(k) }));
+  }
+}
+function switchTab(k) {
+  activeTab = k;
+  for (const p of document.querySelectorAll('.panel')) p.classList.toggle('active', p.dataset.panel === k);
+  if (k === '__raw') $('#raw').value = JSON.stringify(cfg, null, 2);
+  renderTabs();
+}
+
+function renderAll() {
+  for (const cb of document.querySelectorAll('[data-en]')) cb.checked = cfg[cb.dataset.en]?.enabled !== false;
+  for (const inp of document.querySelectorAll('[data-f]')) {
+    const [g, f] = inp.dataset.f.split('.');
+    const v = cfg[g]?.[f];
+    if (inp.type === 'checkbox') inp.checked = v === true;
+    else inp.value = v == null ? '' : v;
+  }
+  renderSlots();
+  renderRounds();
+  if (activeTab === '__raw') $('#raw').value = JSON.stringify(cfg, null, 2);
+  renderTabs();
+}
+
+function renderSlots() {
+  const box = $('#roSlots');
+  box.textContent = '';
+  cfg.rewardOffer.slots.forEach((s, i) => {
+    const row = el('div', { class: 'sub' });
+    row.append(el('div', { class: 'subhead' },
+      el('b', { text: `候选位 ${i + 1}` }),
+      el('span', { class: 'hint', text: 'slot 0 = 第一张候选' }),
+      el('span', { class: 'grow' }),
+      el('button', { class: 'danger', text: '删除', onclick: () => { cfg.rewardOffer.slots.splice(i, 1); renderSlots(); } })
+    ));
+    const r1 = el('div', { class: 'row' });
+    r1.append(numField('位置 slot', s.slot, 0, 5, (v) => { s.slot = v; }));
+    r1.append(selField('类型 kind', s.kind, [['mainCount','mainCount（主盟约）'],['maxLayers','maxLayers（副盟约层数）']], (v) => { s.kind = v; }));
+    r1.append(numField('阈值 minCount', s.minCount, 0, 6, (v) => { s.minCount = v; }));
+    r1.append(numField('权重倍率 mult', s.mult, 1, 50, (v) => { s.mult = v; }, 0.1));
+    r1.append(selField('模式 mode', s.mode || 'weight', [['weight','weight（加权）'],['filter','filter（必中）']], (v) => { s.mode = v; }));
+    r1.append(numField('层数门槛 minLayers', s.minLayers == null ? 1 : s.minLayers, 0, 20, (v) => { s.minLayers = v; }));
+    row.append(r1);
+    const r2 = el('div', { class: 'row' });
+    r2.append(el('label', { class: 'f' }, el('span', { text: '排除盟约 exclude（逗号分隔）' }),
+      el('input', { type: 'text', value: (s.exclude || DEF_EXCLUDE).join(','), onchange: (e) => { s.exclude = e.target.value.split(',').map((x) => x.trim()).filter(Boolean); } })));
+    row.append(r2);
+    box.append(row);
+  });
+  if (!cfg.rewardOffer.slots.length) box.append(el('p', { class: 'hint', text: '（无规则：三选一保持原版纯随机）' }));
+}
+
+function renderRounds() {
+  const box = $('#rlRounds');
+  box.textContent = '';
+  cfg.roundLottery.rounds.forEach((r, i) => {
+    const row = el('div', { class: 'sub' });
+    row.append(el('div', { class: 'subhead' },
+      el('b', { text: `第 ${r.round ?? '?'} 回合` }),
+      el('span', { class: 'grow' }),
+      el('button', { class: 'danger', text: '删除', onclick: () => { cfg.roundLottery.rounds.splice(i, 1); renderRounds(); } })
+    ));
+    const r1 = el('div', { class: 'row' });
+    r1.append(numField('回合 round', r.round, 1, 30, (v) => { r.round = v; }));
+    r1.append(numField('最低阶 minTier', r.minTier, 1, 6, (v) => { r.minTier = v; }));
+    r1.append(el('label', { class: 'f' }, el('span', { text: '最高阶 maxTier' }),
+      el('input', { type: 'text', value: r.maxTier == null ? 6 : r.maxTier, placeholder: '6 或 shopLevel', onchange: (e) => { const v = e.target.value.trim(); r.maxTier = v === 'shopLevel' ? 'shopLevel' : (Number(v) || 6); } })));
+    row.append(r1);
+    box.append(row);
+  });
+  if (!cfg.roundLottery.rounds.length) box.append(el('p', { class: 'hint', text: '（无回合：不发放抽奖）' }));
+}
+
+function numField(label, val, min, max, set, step) {
+  const inp = el('input', { type: 'number', min, max, value: val == null ? '' : val });
+  if (step) inp.step = step;
+  inp.addEventListener('change', () => set(Number(inp.value)));
+  return el('label', { class: 'f' }, el('span', { text: label }), inp);
+}
+function selField(label, val, opts, set) {
+  const s = el('select');
+  for (const [v, t] of opts) s.append(el('option', { value: v, text: t, ...(v === val ? { selected: 'selected' } : {}) }));
+  s.value = val;
+  s.addEventListener('change', () => set(s.value));
+  return el('label', { class: 'f' }, el('span', { text: label }), s);
+}
+
+// ---------------- 事件绑定 ----------------
+for (const cb of document.querySelectorAll('[data-en]')) {
+  cb.addEventListener('change', () => { cfg[cb.dataset.en].enabled = cb.checked; });
+}
+for (const inp of document.querySelectorAll('[data-f]')) {
+  inp.addEventListener('change', () => {
+    const [g, f] = inp.dataset.f.split('.');
+    cfg[g][f] = inp.type === 'checkbox' ? inp.checked : (inp.type === 'number' ? Number(inp.value) : inp.value);
+  });
+}
+$('#roAdd').addEventListener('click', () => {
+  cfg.rewardOffer.slots.push({ slot: cfg.rewardOffer.slots.length, kind: 'mainCount', minCount: 3, mult: 2, mode: 'weight', exclude: [...DEF_EXCLUDE] });
+  renderSlots();
+});
+$('#rlAdd').addEventListener('click', () => {
+  cfg.roundLottery.rounds.push({ round: 3, minTier: 1, maxTier: 6 });
+  renderRounds();
+});
+$('#rawFromForm').addEventListener('click', () => { $('#raw').value = JSON.stringify(cfg, null, 2); });
+$('#reload').addEventListener('click', load);
+$('#save').addEventListener('click', save);
+
+switchTab('rewardOffer');
+load();
+</script>
+</body>
+</html>

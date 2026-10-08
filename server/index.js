@@ -43,6 +43,7 @@ import { Network, SessionRegistry, NET_DEFAULTS } from './net.js';
 import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
 import { PROTOCOL_VERSION, APP_VERSION, PHASE, PHASE_NAMES, MAX_SEATS_LIMIT } from '../shared/constants.js';
+import { getCustomRules, saveCustomRules, CUSTOM_RULES_PATH } from './match/customRules.js';
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
 
 /**
@@ -321,7 +322,6 @@ export function resetData() {}
 `;
 /** Files under server/sim that are never served (Node-only). */
 const SIM_PRIVATE = new Set(['nodedata.js']); // lower-case (compared case-insensitively)
-
 /** Extension → Content-Type. */
 export const MIME = Object.freeze({
   '.html': 'text/html; charset=utf-8',
@@ -607,6 +607,49 @@ function sendJson(req, res, status, obj) {
   const body = Buffer.from(JSON.stringify(obj));
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
   res.end(req.method === 'HEAD' ? undefined : body);
+}
+
+/** 读取原始配置文件（控制台用；保留注释键，不做 normalize，让表单看到真实内容）。 */
+function consoleApiRead() {
+  let config = {};
+  try { config = JSON.parse(fs.readFileSync(CUSTOM_RULES_PATH, 'utf8')); } catch { config = {}; }
+  const rules = getCustomRules({});
+  const on = [];
+  if (rules.rewardOffer) on.push('三选一');
+  if (rules.itemOffer) on.push('装备甄选');
+  if (rules.prepDebt) on.push('负债');
+  if (rules.roundLottery) on.push('抽奖');
+  return { ok: true, path: 'config/custom-rules.json', config, rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' };
+}
+
+/** 写入配置（控制台用）。非法内容拒绝落盘；成功即热更（清 mtime 缓存，无需重启）。 */
+async function consoleApiWrite(req, res, log) {
+  let raw = '';
+  try {
+    const chunks = [];
+    let size = 0;
+    for await (const c of req) {
+      size += c.length;
+      if (size > 256 * 1024) { sendJson(req, res, 413, { ok: false, error: '配置过大（>256KB）' }); req.destroy(); return; }
+      chunks.push(c);
+    }
+    raw = Buffer.concat(chunks).toString('utf8');
+  } catch (e) { sendJson(req, res, 400, { ok: false, error: '读取请求体失败：' + e.message }); return; }
+  let obj = null;
+  try { obj = JSON.parse(raw); } catch (e) { sendJson(req, res, 400, { ok: false, error: 'JSON 语法错误：' + e.message }); return; }
+  try {
+    const saved = saveCustomRules(obj);
+    const rules = getCustomRules({});
+    const on = [];
+    if (rules.rewardOffer) on.push('三选一');
+    if (rules.itemOffer) on.push('装备甄选');
+    if (rules.prepDebt) on.push('负债');
+    if (rules.roundLottery) on.push('抽奖');
+    log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
+    sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' });
+  } catch (e) {
+    sendJson(req, res, 400, { ok: false, error: '配置被拒绝：' + e.message });
+  }
 }
 
 /** Split an absolute request URL into raw path + query (also accepts absolute-form URLs). */
@@ -960,7 +1003,9 @@ export async function startServer(opts = {}) {
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
     const parts = splitUrl(url);
     if (!parts) { sendError(req, res, 400, '请求地址无效 · Bad request'); return; }
-    if (req.method !== 'GET' && req.method !== 'HEAD') {
+    // 规则控制台（自研 2026-10-08）的写接口是全站唯一的 POST：放行它，其余仍只收 GET/HEAD。
+    const consoleApiPath = parts.rawPath === '/console/api';
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !(consoleApiPath && req.method === 'POST')) {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
       return;
@@ -985,6 +1030,30 @@ export async function startServer(opts = {}) {
         .replace('__PHASE_NAMES__', JSON.stringify(PHASE_NAMES));
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(html);
+      return;
+    }
+    // 规则控制台（自研 2026-10-08）：把 config/custom-rules.json 的全部外置开关做成网页表单。
+    // 仅允许内网来源（与 /lan/room 同口径）——该页面能改规则参数，不对外开放。
+    if (parts.rawPath === '/console' || parts.rawPath === '/console/api') {
+      if (!isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, '未找到 · Not found'); return; }
+      if (parts.rawPath === '/console/api') {
+        if (req.method === 'POST') { await consoleApiWrite(req, res, log); return; }
+        if (req.method === 'GET' || req.method === 'HEAD') { sendJson(req, res, 200, consoleApiRead()); return; }
+        res.setHeader('Allow', 'GET, HEAD, POST');
+        sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
+        return;
+      }
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.setHeader('Allow', 'GET, HEAD');
+        sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
+        return;
+      }
+      let html = '';
+      try { html = await fsp.readFile(path.join(publicDir, 'console.html'), 'utf8'); } catch { html = null; }
+      if (html == null) { sendError(req, res, 500, '控制台页面缺失 · console.html not found'); return; }
+      const body = Buffer.from(html);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': body.length, 'Cache-Control': 'no-store' });
+      res.end(req.method === 'HEAD' ? undefined : body);
       return;
     }
     // LAN room probe, so a guest can join with only the 4-letter key: the phone sweeps its own /24 and asks each

@@ -166,4 +166,23 @@ export function getCustomRules({ log = null } = {}) {
 /** 测试用：丢弃缓存。 */
 export function resetCustomRules() { cache = null; warned = false; }
 
+/**
+ * 写回配置（自研控制台 /console 用）。**校验后再落盘**：非法 JSON 结构或写盘失败都抛错，绝不写坏文件。
+ * 写入成功后立即清缓存 → 下一次 getCustomRules() 读到的就是新值（热更，无需重启）。
+ * @param {object} raw 完整配置对象（与 config/custom-rules.json 同构）
+ * @returns {{ ok: true, rules: object }}
+ */
+export function saveCustomRules(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('配置必须是 JSON 对象');
+  // 先规范化一遍：能通过 normalize 且不抛错才允许落盘（防手写非法结构）
+  const rules = normalize(raw);
+  const text = `${JSON.stringify(raw, null, 2)}\n`;
+  // 原子写：先写临时文件再改名，避免写一半崩溃留下坏配置
+  const tmp = `${CONFIG_PATH}.tmp`;
+  fs.writeFileSync(tmp, text, 'utf8');
+  fs.renameSync(tmp, CONFIG_PATH);
+  resetCustomRules();
+  return { ok: true, rules };
+}
+
 export const CUSTOM_RULES_PATH = CONFIG_PATH;
