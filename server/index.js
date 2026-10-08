@@ -136,6 +136,8 @@ const MONITOR_HTML = `<!doctype html>
   .watchbar input { flex: 1; min-width: 240px; background: #0f1116; color: #d8e0ea; border: 1px solid #26344a; border-radius: 7px; padding: 6px 10px; font: inherit; font-size: 13px; }
   .watchbar button { background: #223047; color: #d8e0ea; border: 1px solid #2f4057; border-radius: 7px; padding: 6px 14px; cursor: pointer; font: inherit; font-size: 13px; }
   .watchbar .hint { color: #7a8698; font-size: 12px; }
+  .watch-exit { background: #3a1d22; color: #ff9a9a; border: 1px solid #5a2f35; }
+  .watch-exit:hover { background: #4a2228; color: #fff; border-color: #8a444c; }
   .mon-btn { display: inline-block; background: #223047; color: #9db4d0; border: 1px solid #2f4057; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; margin-right: 6px; text-decoration: none; line-height: 1.6; }
   .mon-btn:hover { background: #2b3d59; color: #fff; }
   .mon-btn.ghost { background: transparent; color: #7a8698; }
@@ -176,9 +178,10 @@ const MONITOR_HTML = `<!doctype html>
   <div class="watchbar">
     <input id="watch-url" type="text" placeholder="观战地址（从监控页点某位玩家的「观战」自动填入）">
     <button id="watch-go">载入</button>
+    <button id="watch-exit" class="watch-exit">退出观战</button>
     <span class="hint">页内嵌观战，不占席位、不影响玩家</span>
   </div>
-  <iframe id="watch-frame" title="观战" src="about:blank"></iframe>
+  <iframe id="watch-frame" title="观战" src="about:blank" allow="autoplay"></iframe>
 </div>
 <div id="watch" class="watch hidden">
   <div class="watch-head">
@@ -206,6 +209,14 @@ function showView(name) {
     const w = document.getElementById('watch-frame');
     if (w && w.src !== 'about:blank') w.src = 'about:blank';
   }
+}
+/** 退出观战：断开影子客户端（清空 iframe）+ 停止数据监看 + 回到监控视图。 */
+function exitWatch() {
+  document.getElementById('watch-frame').src = 'about:blank';
+  document.getElementById('watch-url').value = '';
+  // 数据面板（监看 WS）也一并停掉——它跟观战是两条独立连接
+  monClose();
+  showView('monitor');
 }
 /** 在页内 iframe 打开观战（替代原来的新标签页）。 */
 function watchInPage(url) {
@@ -374,6 +385,8 @@ document.getElementById('watch-go').addEventListener('click', () => {
   const u = document.getElementById('watch-url').value.trim();
   if (u) document.getElementById('watch-frame').src = u;
 });
+// 「退出观战」：断影子 WS + 停数据监看 + 回监控视图
+document.getElementById('watch-exit').addEventListener('click', exitWatch);
 </script>
 </body>
 </html>`;

@@ -46,15 +46,17 @@ await new Promise((r) => setTimeout(r, 500));
 check('切到观战视图', await page.$eval('#view-watch', (e) => !e.classList.contains('hidden')));
 check('观战视图有地址输入框', !!(await page.$('#watch-url')));
 check('观战视图有载入按钮', !!(await page.$('#watch-go')));
+check('观战 iframe 有 autoplay 委托（否则没声音）', await page.$eval('#watch-frame', (e) => /autoplay/.test(e.getAttribute('allow') || '')));
+check('有「退出观战」按钮', !!(await page.$('#watch-exit')));
 check('观战 iframe 存在', !!(await page.$('#watch-frame')));
 
 // ⑤ 模拟点击玩家行的「观战」→ 应填入 iframe 且不再新标签
 const hasWatchBtn = await page.$('[data-watch-url]');
 if (hasWatchBtn) {
-  const before = browser.pages().length;
+  const before = (await browser.pages()).length;
   await hasWatchBtn.click();
   await new Promise((r) => setTimeout(r, 1500));
-  const after = browser.pages().length;
+  const after = (await browser.pages()).length;
   const wSrc = await page.$eval('#watch-frame', (e) => e.src);
   check('点「观战」在页内 iframe 打开（未新开标签）', after === before && /shadow=/.test(wSrc), `pages ${before}→${after} src=${wSrc.slice(0, 60)}`);
   check('地址栏已填入观战 URL', /shadow=/.test(await page.$eval('#watch-url', (e) => e.value)));
