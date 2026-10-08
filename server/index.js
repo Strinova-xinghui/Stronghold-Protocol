@@ -703,6 +703,10 @@ function consoleApiRead() {
 
 
   if (rules.pacing) on.push('对局节奏');
+
+
+
+  if (rules.bossHp) on.push('BOSS 血量');
   return { ok: true, path: 'config/custom-rules.json', config, rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' };
 }
 
@@ -734,6 +738,10 @@ async function consoleApiWrite(req, res, log) {
 
 
     if (rules.pacing) on.push('对局节奏');
+
+
+
+    if (rules.bossHp) on.push('BOSS 血量');
     log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
     sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' });
   } catch (e) {

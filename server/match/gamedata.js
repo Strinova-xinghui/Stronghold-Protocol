@@ -107,8 +107,22 @@ export class GameData {
    * (finalAssault.bossPoolHp); use `bossPoolHp` / `bossPoolShare` for the official pool.
    * @deprecated
    */
-  bossHpMul(bossId) { // eslint-disable-line no-unused-vars
-    return 1;
+  /**
+   * 自研「BOSS 血量倍率」（复用上游预留的钩子，finalAssault.bossPoolHp 调用；规则关闭时返回 1 = 官方原值）。
+   * **最终系数 = 手动系数 × 盟约层数折算系数**（用户 2026-10-08 定稿）：
+   *   `mul × min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))`
+   * layerSum = 本局所有活人的盟约层数总和（Match.startFinalAssault 传入 = hiddenLayerSum）。
+   * 热读：BOSS 血池在 startFinalAssault 时生成，改配置对**尚未开始**的 BOSS 战生效。
+   * @param {string} bossId 上游签名保留（当前所有 BOSS 共用同一倍率）
+   * @param {number} [layerSum] 全场盟约层数总和（未传 = 0，即只有手动系数）
+   * @returns {number}
+   */
+  bossHpMul(bossId, layerSum = 0) { // eslint-disable-line no-unused-vars
+    const bh = (() => { try { return getCustomRules({}).bossHp || null; } catch { return null; } })();
+    if (!bh) return 1;
+    const over = Math.max(0, (Number.isFinite(layerSum) ? layerSum : 0) - bh.layerFloor);
+    const layerMul = Math.min(bh.layerCap, 1 + bh.layerK * over);
+    return Math.max(0.01, bh.mul * layerMul);
   }
 
   /**

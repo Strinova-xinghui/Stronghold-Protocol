@@ -32,12 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -181,7 +181,23 @@ function normalize(raw) {
     out.pacing = Object.freeze({ enabled: true, bandDraftMul, spDraftMul, prepMul, combatSpeed });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing ? out : OFF;
+  // ---- BOSS 血量（bossHp，自研 2026-10-08）：复用上游预留的 `gd.bossHpMul` 钩子（finalAssault.bossPoolHp 调用）。
+  //      mul      = 基础倍率（1 = 官方）
+  //      按层数加压：layerMul = min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))
+  //        layerSum = 本局所有活人的盟约层数总和（Match.startFinalAssault 传入 = hiddenLayerSum）
+  //        开发回合会让层数远超官方 13 回合的水位，用 layerFloor 把「官方水位以内」的部分免计，超出才加压。
+  const bh = raw.bossHp && typeof raw.bossHp === 'object' ? raw.bossHp : null;
+  if (bh && bh.enabled) {
+    out.bossHp = Object.freeze({
+      enabled: true,
+      mul: Math.max(0.01, Math.min(100, numOr(bh.mul, 1))),
+      layerK: Math.max(0, Math.min(1, numOr(bh.layerK, 0.0005))),
+      layerFloor: Math.max(0, Math.trunc(numOr(bh.layerFloor, 0))),
+      layerCap: Math.max(1, Math.min(100, numOr(bh.layerCap, 5))),
+    });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp ? out : OFF;
 }
 
 /**

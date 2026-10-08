@@ -182,7 +182,21 @@
     </div>
   </section>
 
-  <!-- ⑦ 原始 JSON -->
+  <!-- ⑦ BOSS 血量 -->
+  <section class="panel" data-panel="bossHp">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="bossHp"> BOSS 血量倍率（bossHp）</label></h2>
+      <p class="desc"><b>最终系数 = 手动系数 × 盟约层数折算系数</b>。作用于主 BOSS（第 18 回合）与隐秘核心（第 19 回合）的共享血池。BOSS 血池在开打瞬间生成——改配置对<b>尚未开打</b>的 BOSS 战生效（正在打的血池不变）。</p>
+      <div class="row">
+        <label class="f">手动系数 mul<input type="number" data-f="bossHp.mul" min="0.01" max="100" step="0.05"></label>
+        <label class="f">层数系数 layerK<input type="number" data-f="bossHp.layerK" min="0" max="1" step="0.0001"></label>
+        <label class="f">免计水位 layerFloor<input type="number" data-f="bossHp.layerFloor" min="0" max="100000" step="50"></label>
+        <label class="f">封顶 layerCap<input type="number" data-f="bossHp.layerCap" min="1" max="100" step="0.5"></label>
+      </div>
+      <p class="hint">层数折算：<code>layerMul = min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))</code>，layerSum = 全场活人的盟约层数总和（主 BOSS 开打时取值，隐秘核心沿用）。默认 <code>layerK=0.0005</code> ⇒ 每 200 层 +10% 血量；<code>layerFloor</code> 可把官方水位以内的层数免计；<code>layerCap=5</code> 封顶防爆炸。</p>
+    </div>
+  </section>
+  <!-- ⑧ 原始 JSON -->
   <section class="panel" data-panel="__raw">
     <div class="card">
       <h2>原始 JSON</h2>
@@ -271,6 +285,10 @@ function setStat(d) {
 
 
   if (d.rules?.pacing) on.push('对局节奏');
+
+
+
+  if (d.rules?.bossHp) on.push('BOSS 血量');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -291,10 +309,11 @@ function ensureShape() {
   };
   cfg.extraRounds.poolTemplates = Array.isArray(cfg.extraRounds.poolTemplates) ? cfg.extraRounds.poolTemplates : [];
   cfg.pacing = cfg.pacing || { enabled: true, bandDraftMul: 1, spDraftMul: 1, prepMul: 1, combatSpeed: null };
+  cfg.bossHp = cfg.bossHp || { enabled: true, mul: 1, layerK: 0.0005, layerFloor: 0, layerCap: 5 };
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['pacing','对局节奏'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';

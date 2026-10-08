@@ -64,13 +64,13 @@ export function pairPlayers(alive) {
 }
 
 /** Shared boss HP for a boss id with `aliveCount` alive players (GameData.bossPoolShare; omitted ⇒ a full team). */
-export function bossPoolHp(gd, bossId, aliveCount, players = 0) {
+export function bossPoolHp(gd, bossId, aliveCount, players = 0, layerSum = 0) {
   const boss = gd.boss(bossId);
   const diff = gd.difficulty;
   let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
   if (base == null && boss && boss.bloodPoint) base = Object.values(boss.bloodPoint).find((v) => Number.isFinite(v)) ?? null;
   if (base == null) base = 500000;
-  const tune = typeof gd.bossHpMul === 'function' ? gd.bossHpMul(bossId) : 1;
+  const tune = typeof gd.bossHpMul === 'function' ? gd.bossHpMul(bossId, layerSum) : 1;
   let share;
   if (typeof gd.bossPoolShare === 'function') share = gd.bossPoolShare(aliveCount) * bossPoolShareFor(players);
   else {
