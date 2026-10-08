@@ -97,6 +97,7 @@ const MONITOR_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237ecbff'/%3E%3Cpath d='M9 22V10h3l4 7 4-7h3v12h-3v-7l-4 6-4-6v7z' fill='%2310151c'/%3E%3C/svg%3E">
 <title>卫戍协议 · 服务器监控</title>
 <style>
   :root { color-scheme: dark; }
@@ -124,6 +125,17 @@ const MONITOR_HTML = `<!doctype html>
   .spec { margin-top: 8px; font-size: 12px; color: #7a8698; }
   .empty { color: #7a8698; text-align: center; padding: 40px 0; }
   /* 观战/数据（自研） */
+  .nav { display: flex; gap: 8px; margin: 0 0 16px; }
+  .nav-btn { background: #182130; color: #9db4d0; border: 1px solid #26344a; border-radius: 8px; padding: 7px 16px; cursor: pointer; font: inherit; font-size: 13px; }
+  .nav-btn:hover { border-color: #3d6fa8; }
+  .nav-btn.active { background: #1d3350; color: #fff; border-color: #3d6fa8; }
+  .viewpage { display: flex; flex-direction: column; height: calc(100vh - 130px); }
+  .viewpage.hidden { display: none; }
+  .viewpage iframe { flex: 1; width: 100%; border: 1px solid #26344a; border-radius: 10px; background: #0f1116; }
+  .watchbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .watchbar input { flex: 1; min-width: 240px; background: #0f1116; color: #d8e0ea; border: 1px solid #26344a; border-radius: 7px; padding: 6px 10px; font: inherit; font-size: 13px; }
+  .watchbar button { background: #223047; color: #d8e0ea; border: 1px solid #2f4057; border-radius: 7px; padding: 6px 14px; cursor: pointer; font: inherit; font-size: 13px; }
+  .watchbar .hint { color: #7a8698; font-size: 12px; }
   .mon-btn { display: inline-block; background: #223047; color: #9db4d0; border: 1px solid #2f4057; border-radius: 6px; padding: 2px 10px; cursor: pointer; font-size: 12px; margin-right: 6px; text-decoration: none; line-height: 1.6; }
   .mon-btn:hover { background: #2b3d59; color: #fff; }
   .mon-btn.ghost { background: transparent; color: #7a8698; }
@@ -148,8 +160,26 @@ const MONITOR_HTML = `<!doctype html>
 <body>
 <h1>卫戍协议 · 服务器监控</h1>
 <div class="sub" id="updated">加载中…</div>
+<nav class="nav">
+  <button class="nav-btn active" data-view="monitor">监控</button>
+  <button class="nav-btn" data-view="console">规则控制台</button>
+  <button class="nav-btn" data-view="watch">观战</button>
+</nav>
+<div id="view-monitor">
 <div class="stats" id="stats"></div>
 <div id="rooms"></div>
+</div>
+<div id="view-console" class="viewpage hidden">
+  <iframe id="console-frame" title="规则控制台" src="about:blank"></iframe>
+</div>
+<div id="view-watch" class="viewpage hidden">
+  <div class="watchbar">
+    <input id="watch-url" type="text" placeholder="观战地址（从监控页点某位玩家的「观战」自动填入）">
+    <button id="watch-go">载入</button>
+    <span class="hint">页内嵌观战，不占席位、不影响玩家</span>
+  </div>
+  <iframe id="watch-frame" title="观战" src="about:blank"></iframe>
+</div>
 <div id="watch" class="watch hidden">
   <div class="watch-head">
     <b id="watch-title">监看</b>
@@ -161,6 +191,34 @@ const MONITOR_HTML = `<!doctype html>
 <script>
 const PHASE_NAMES = __PHASE_NAMES__;
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+// ---- 顶部视图切换（自研：监控 / 控制台 / 观战 合一）----
+function showView(name) {
+  for (const b of document.querySelectorAll('.nav-btn')) b.classList.toggle('active', b.dataset.view === name);
+  document.getElementById('view-monitor').classList.toggle('hidden', name !== 'monitor');
+  document.getElementById('view-console').classList.toggle('hidden', name !== 'console');
+  document.getElementById('view-watch').classList.toggle('hidden', name !== 'watch');
+  if (name === 'console') {
+    const f = document.getElementById('console-frame');
+    if (f.src === 'about:blank' || !f.src) f.src = '/console';
+  }
+  // 观战 iframe 只在可见时保留，切走时清空以释放 WS（影子客户端会占一条连接）
+  if (name !== 'watch') {
+    const w = document.getElementById('watch-frame');
+    if (w && w.src !== 'about:blank') w.src = 'about:blank';
+  }
+}
+/** 在页内 iframe 打开观战（替代原来的新标签页）。 */
+function watchInPage(url) {
+  document.getElementById('watch-url').value = url;
+  document.getElementById('watch-frame').src = url;
+  showView('watch');
+}
+document.addEventListener('click', (ev) => {
+  const nb = ev.target.closest('.nav-btn');
+  if (nb) { showView(nb.dataset.view); return; }
+  const wb = ev.target.closest('[data-watch-url]');
+  if (wb) { ev.preventDefault(); watchInPage(wb.dataset.watchUrl); return; }
+});
 function seatRow(s, matchLive) {
   if (!s) return '<tr><td colspan="5" style="color:#3a4658">— 空位 —</td></tr>';
   const conn = s.connected ? '<span class="on">在线</span>' : '<span class="off">离线</span>';
@@ -200,10 +258,13 @@ function render(d) {
         const tag = p.isBot ? ' <span class="bot">AI</span>' : '';
         const alive = p.alive ? '' : ' <span class="dead">淘汰</span>';
         // 观战入口（自研）: 「观战」= 影子客户端（全功能视角，不占席位、不影响玩家）；「数据」= 侧栏数据面板。
+        // 观战默认在**页内 iframe**打开（顶部「观战」标签页），不再强制新标签；按 Ctrl/中键仍可新标签打开。
         // 任何座位都可看（含 AI）——方便观察 bot 的商店/装备/摆阵来调甄选数值。
         const watchable = !!p.playerId;
+        const shadowUrl = '/?shadow=' + esc(r.code) + '&as=' + esc(p.playerId);
         const btns = watchable
-          ? '<a class="mon-btn" href="/?shadow=' + esc(r.code) + '&as=' + esc(p.playerId) + '" target="_blank" rel="noopener">观战</a>' +
+          ? '<a class="mon-btn" href="' + shadowUrl + '" data-watch-url="' + shadowUrl + '">观战</a>' +
+            '<a class="mon-btn ghost" href="' + shadowUrl + '" target="_blank" rel="noopener" title="在新标签页打开">新标签</a>' +
             '<button class="mon-btn ghost" data-code="' + esc(r.code) + '" data-pid="' + esc(p.playerId) + '" data-name="' + esc(p.name) + '">数据</button>'
           : '';
         h += '<tr><td>' + esc(p.name) + tag + alive + '</td><td>' + conn +
@@ -302,11 +363,16 @@ function monRenderPrivate(v) {
     '<div class="sec"><h4>盟约</h4><div class="chips">' + (bonds || '<span class="muted">无</span>') + '</div></div>' +
     '<div class="ts">最后更新 ' + new Date().toLocaleTimeString('zh-CN') + '</div>';
 }
-// 事件委托：卡片上的「监看」按钮
+// 事件委托：卡片上的「数据」按钮（只处理 data-code 的 button；观战链接由 data-watch-url 委托处理）
 document.addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.mon-btn');
+  const btn = ev.target.closest('button.mon-btn[data-code]');
   if (btn) { monWatch(btn.dataset.code, btn.dataset.pid, btn.dataset.name); return; }
   if (ev.target.closest('#watch-close')) monClose();
+});
+// 「载入」按钮：把地址栏里的观战 URL 载入 iframe
+document.getElementById('watch-go').addEventListener('click', () => {
+  const u = document.getElementById('watch-url').value.trim();
+  if (u) document.getElementById('watch-frame').src = u;
 });
 </script>
 </body>

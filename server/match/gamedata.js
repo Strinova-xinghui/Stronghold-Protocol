@@ -351,17 +351,37 @@ export class GameData {
   roundCfg(r) {
     const rounds = this.mode.rounds;
     const er = this.extraRounds;
-    // 插入的发育回合：复用模板回合（默认 13）的**时长/时长上限**，但
-    //   ① 清掉 bossTemplates/isBoss（它们不是 BOSS 回合）；
-    //   ② 波次模板从 poolTemplates 里**随机挑一个**（怪组多样性；强度不变，靠 enemyScale 控制难度）。
-    if (er && this.isInsertedRound(r)) {
-      const tpl = rounds && typeof rounds === 'object' && rounds[String(er.templateRound)] && typeof rounds[String(er.templateRound)] === 'object' ? rounds[String(er.templateRound)] : null;
-      if (tpl) {
+    const has = (k) => !!(rounds && typeof rounds === 'object' && rounds[String(k)] && typeof rounds[String(k)] === 'object');
+    if (er) {
+      // ⚠️ 顺延后的 BOSS / 隐藏 BOSS 回合**必须复用官方对应回合的配置**（关键：`bossTemplates` 在里面）。
+      // 官方 data/ 的 rounds 表只到 15，r=18/19 直接查表会得 null → buildBossWave 拿不到模板
+      // → 空波次（表现为「小怪轮且完全没有怪」，BOSS 不出现）。2026-10-08 线上事故，必修。
+      const baseBoss = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : 14;
+      const baseHidden = Number.isInteger(this.mode.hiddenRound) && this.mode.hiddenRound > 0 ? this.mode.hiddenRound : null;
+      if (r === this.hiddenRound && baseHidden != null && has(baseHidden)) {
+        return { ...rounds[String(baseHidden)], isBoss: true, isHidden: true };
+      }
+      if (r === this.bossRound && has(baseBoss)) {
+        return { ...rounds[String(baseBoss)], isBoss: true, isHidden: false };
+      }
+      // 插入的发育回合：复用模板回合（默认 13）的**时长/时长上限**，但
+      //   ① 清掉 bossTemplates/isBoss（它们不是 BOSS 回合）；
+      //   ② 波次模板从 poolTemplates 里**随机挑一个**（怪组多样性；强度不变，靠 enemyScale 控制难度）。
+      if (this.isInsertedRound(r) && has(er.templateRound)) {
+        const tpl = rounds[String(er.templateRound)];
         const mixed = this._mixTemplateFor(r, tpl);
         return { ...tpl, template: mixed, isBoss: false, isHidden: false, bossTemplates: null, bossOvertimeAfter: null };
       }
     }
-    return rounds && typeof rounds === 'object' && rounds[String(r)] && typeof rounds[String(r)] === 'object' ? rounds[String(r)] : null;
+    if (has(r)) return rounds[String(r)];
+    // 兜底（防「查表为空 → 空波次」再次发生）：任何超出官方表的回合，只要规则开着，就用模板回合的
+    // 普通波次顶上——宁可多打一轮小怪，也绝不出现「一个怪都没有」的空回合。
+    if (er && has(er.templateRound)) {
+      const tpl = rounds[String(er.templateRound)];
+      const mixed = this._mixTemplateFor(r, tpl);
+      return { ...tpl, template: mixed, isBoss: false, isHidden: false, bossTemplates: null, bossOvertimeAfter: null };
+    }
+    return null;
   }
 
   /**

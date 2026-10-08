@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { getData } from '../server/data.js';
 import { GameData } from '../server/match/gamedata.js';
+import { buildNormalWave, buildBossWave } from '../server/match/waves.js';
 import { resetCustomRules, CUSTOM_RULES_PATH } from '../server/match/customRules.js';
 
 const DATA = getData({ quiet: true });
@@ -160,6 +161,101 @@ describe('回合编排 · 不影响非插入回合', () => {
       assert.ok(Math.abs(gd.enemyScale(r).hpMul - 0.8 * Math.pow(1.2, k)) < 1e-6, `第 ${r} 回合 = 官方值`);
     }
     assert.equal(gd.bossRound, 14, 'BOSS 仍是 14');
+  });
+});
+
+describe('回合编排 · 绝不允许空波次（2026-10-08 线上事故回归）', () => {
+  // 事故：顺延后的 BOSS 回合（18）直接查 rounds 表得 null → buildBossWave 拿不到 bossTemplates
+  // → 空波次（完全没怪，BOSS 不出现）。第 17 回合正常、18 回合无怪，与线上回报一致。
+  const WAVES = { buildNormalWave, buildBossWave };
+
+  test('第 13–19 回合每回合都有怪（普通波次或 BOSS 波次）', async () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    const rng = () => 0.5;
+    const factions = [{}, {}, {}];
+    for (let r = 13; r <= 19; r++) {
+      const isBoss = r === gd.bossRound || r === gd.hiddenRound;
+      let n = 0;
+      if (isBoss) {
+        const w = WAVES.buildBossWave(gd, rng, factions, r, { bossId: 'boss_1', solo: false });
+        n = (w.spawns || []).length;
+      } else {
+        const w = WAVES.buildNormalWave(gd, rng, factions, r);
+        n = (w.spawns || []).length;
+      }
+      assert.ok(n > 0, `第 ${r} 回合必须有怪（实际 ${n}；isBoss=${isBoss}，template=${gd.roundCfg(r)?.template}，bossTemplates=${!!gd.roundCfg(r)?.bossTemplates}）`);
+    }
+  });
+
+  test('顺延后的 BOSS 回合带 bossTemplates（第 18 回合）', () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    assert.equal(gd.bossRound, 18);
+    const rc = gd.roundCfg(18);
+    assert.ok(rc, 'roundCfg(18) 不能为 null');
+    assert.ok(rc.bossTemplates && Object.keys(rc.bossTemplates).length > 0, 'BOSS 模板必须存在');
+    assert.equal(rc.isBoss, true);
+  });
+
+  test('顺延后的隐藏 BOSS 回合带 bossTemplates（第 19 回合）', () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    assert.equal(gd.hiddenRound, 19);
+    const rc = gd.roundCfg(19);
+    assert.ok(rc, 'roundCfg(19) 不能为 null');
+    assert.ok(rc.bossTemplates && Object.keys(rc.bossTemplates).length > 0, '隐藏 BOSS 模板必须存在');
+  });
+
+  test('隐秘核心（19 回合）：模板里含真实 hiddenBossId，且能生成怪', () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    const rc = gd.roundCfg(19);
+    assert.equal(rc.isHidden, true, '标记为隐藏 BOSS 回合');
+    // 官方隐藏 BOSS 的模板键（boss_8/9/10 → act1autochess_h08_*）：必须真的在模板表里
+    const keys = Object.keys(rc.bossTemplates);
+    assert.ok(keys.length > 0, '有隐藏 BOSS 模板键');
+    let total = 0;
+    for (const k of keys) {
+      const w = buildBossWave(gd, () => 0.5, [{}, {}, {}], 19, { bossId: k, solo: false });
+      const n = (w.spawns || []).length;
+      assert.ok(n > 0, `hiddenBossId=${k} 必须能生成怪（实际 ${n}）`);
+      assert.ok(/h08/.test(w.templateId || ''), `第 19 回合应使用 h08 隐藏 BOSS 模板（实际 ${w.templateId}）`);
+      total += n;
+    }
+    assert.ok(total > 0, '所有隐藏 BOSS 模板合计有怪');
+  });
+
+  test('隐秘核心：官方第 15 回合的模板与第 19 回合一致（顺延不改内容）', () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    const official = gd.mode.rounds['15'];
+    const shifted = gd.roundCfg(19);
+    assert.deepEqual(shifted.bossTemplates, official.bossTemplates, '隐藏 BOSS 模板逐一相同');
+    assert.equal(shifted.levelMaxPlayTime, official.levelMaxPlayTime, '时长相同');
+  });
+
+  test('count 变化时 BOSS/隐藏回合始终有怪（1..6 全试）', () => {
+    const rng = () => 0.5;
+    const factions = [{}, {}, {}];
+    for (const count of [1, 2, 3, 4, 5, 6]) {
+      writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, count, curve: 'stretchShape' } });
+      const gd = gdOf();
+      for (const r of [gd.bossRound, gd.hiddenRound].filter((x) => x != null)) {
+        const w = WAVES.buildBossWave(gd, rng, factions, r, { bossId: 'boss_1', solo: false });
+        assert.ok((w.spawns || []).length > 0, `count=${count} 第 ${r} 回合必须有怪（实际 ${(w.spawns || []).length}）`);
+      }
+    }
+  });
+
+  test('每个插入回合也都有怪（14–17）', () => {
+    writeCfg({ ...BASE, extraRounds: { ...BASE.extraRounds, curve: 'stretchShape' } });
+    const gd = gdOf();
+    const rng = () => 0.5;
+    for (const r of [14, 15, 16, 17]) {
+      const w = WAVES.buildNormalWave(gd, rng, [{}, {}, {}], r);
+      assert.ok((w.spawns || []).length > 0, `第 ${r} 回合必须有怪（实际 ${(w.spawns || []).length}）`);
+    }
   });
 });
 
