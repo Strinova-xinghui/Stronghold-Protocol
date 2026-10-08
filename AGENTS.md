@@ -163,6 +163,14 @@
 - **已知边界**：负债无个人上限（总和 < 0 才清算，高血队友兜底 = 设计）；hold 倒计时 + 负债叠加 = 无限时长的整活局（设计意图）；最终攻势个人 LP 冻结（只扣 teamLp），血池倍率按进入时负债锁定；普通波次倍率在每场战斗 spec 生成时锁定（回合内不变）。
 - **三处 clamp 修复（2026-10-07 提交 c97e39e，用户反馈「看不到负债」）**：① `Match.publicView` 的 `lp: Math.max(0, ps.lp)` → `ps.lp`（**根因**：服务端广播就截断，队友面板永远看不到负血）；② `gameLogic.normalizeResult` 的 `Math.max(0, teamLp)` → `teamLp`（结算画面显示真实负债）；③ `teamPanel.rowLp` 的 `pending = Math.min(lp, …)` 在 lp<0 时算出负数预告 → `lp < 0 ? 0 : …`。验证：`node tools/verify-debt-ui.mjs <port>`（5/5）+ 单测新增「负血广播」断言（publicView lp=-17 不被 clamp、debt.net>0）**16/16**。
 
+### 规则控制台（/console，2026-10-08 自研追加）
+
+- **能力**：浏览器打开 `http://<主机>:24500/console` 即可**用表单改全部外置规则**——干员三选一（rewardOffer）、装备甄选（itemOffer）、休整期负债（prepDebt）、回合抽奖（roundLottery）。改完点「保存并热更生效」立即生效（写 `config/custom-rules.json` + 清 mtime 缓存，**无需重启**，对局中玩家也生效）。
+- **页面**（`public/console.html`，约 500 行，零依赖原生 JS）：5 个标签页 = 四组规则的专用表单 + 「原始 JSON」页（直接编辑全文）。表单含开关、数值、下拉；三选一的候选位规则与抽奖的回合表可**动态增删行**。顶部状态胶囊实时显示「生效中：三选一 / 装备甄选 / …」或「全部关闭（原版行为）」。
+- **服务端**（`server/index.js` 约 60 行 + `customRules.js` 加 `saveCustomRules`）：`GET /console` 出页面、`GET /console/api` 读配置（返回原始 config + 解析后的 rules + summary）、`POST /console/api` 写配置。**全站唯一的 POST 接口**——`handleRequest` 顶部原本只放行 GET/HEAD，加了 `consoleApiPath && method==='POST'` 的例外。
+- **安全（三点）**：① **仅限内网来源**（复用 `isPrivateAddress`，与 `/lan/room` 同口径；外网返回 404）——该页面能改规则，不对外开放；② **写盘前校验**：`saveCustomRules` 先跑 `normalize`，非对象/数组/null 直接抛错拒绝；③ **原子写**：写 `.tmp` 再 `renameSync`，避免写一半崩溃留下坏配置。非法内容一律 400，**磁盘保持上一次的好配置**（已验证）。
+- **踩坑**：`log` 在 `createServer` 闭包内（L956）而我的函数在模块顶层——初版直接调 `log.info` 导致写盘成功但响应 400（"log is not defined"）。修法：把 log 作为参数传进去。**教训：模块顶层函数拿不到闭包变量，写盘类副作用要放在 try 内且日志调用不能让它误报失败。**
+- **验证**：`node tools/verify-console-api.mjs <port>`（**13/13**：GET 读回、POST 改 rolls/choices/cap 生效、**独立读盘确认真落盘**、关规则→rules 变 null、非法 JSON/数组/null 全被 400 拒、拒绝后磁盘未写坏、恢复原配置）+ `node tools/verify-console-ui.mjs <port>`（**12/12**：标题/5 标签/状态胶囊/候选位与回合表渲染、真实改值保存→提示成功→API 确认、还原、原始 JSON 页、0 JS 错误）+ 回归 抽奖 12/12·甄选 6/6·物品 5/5·负债 16/16·lobby 67/67。
 ### 回合抽奖（roundLottery，2026-10-08 自研追加，用户需求）
 
 - **需求**：第 3/6/10 回合给玩家送装备抽奖（复用凯瑟琳「定向投放」的商店升级机制）；**两轮独立 5 选 1**；池按回合过滤（3 回合全阶混池、6 回合去 T1、10 回合去 T1/T2）；**参数全外置热改**（指定哪些回合、几选几）。
