@@ -32,12 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -102,7 +102,29 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt ? out : OFF;
+  // ---- 回合抽奖（roundLottery，自研 2026-10-08）：指定回合给所有活人送装备抽奖，复用凯瑟琳「定向投放」的
+  //      商店栏 pick-one 面板（pushItemOffer）。每回合推 `rolls` 个独立 offer（各 `choices` 选 1）= 多轮独立抽奖。
+  //      装备池 = 当前商店等级可出的全部装备（choices.json pool_equip_kathe 语义），可再按回合设 minTier 剔除低阶。
+  const rl = raw.roundLottery && typeof raw.roundLottery === 'object' ? raw.roundLottery : null;
+  if (rl && rl.enabled) {
+    const rolls = Math.max(1, Math.min(10, Math.trunc(numOr(rl.rolls, 2))));
+    const choices = Math.max(1, Math.min(6, Math.trunc(numOr(rl.choices, 5))));
+    // 回合表：{ round: 3, minTier: 1 } —— minTier = 该回合抽奖的最低装备阶（1 = 全阶混池，3 = 只出 T3+）
+    const src = Array.isArray(rl.rounds) ? rl.rounds : [];
+    const rounds = [];
+    for (const r of src) {
+      const round = Math.trunc(numOr(typeof r === 'object' && r ? r.round : r, 0));
+      if (!(round >= 1)) continue;
+      const minTier = Math.max(1, Math.min(6, Math.trunc(numOr(r && r.minTier, 1))));
+      // maxTier：默认 6（全阶，抽奖是奖励不该被个人商店等级卡住）；'shopLevel' = 按该玩家当前商店等级
+      const rawMax = r && r.maxTier;
+      const maxTier = rawMax === 'shopLevel' ? 'shopLevel' : Math.max(1, Math.min(6, Math.trunc(numOr(rawMax, 6))));
+      rounds.push(Object.freeze({ round, minTier, maxTier }));
+    }
+    if (rounds.length) out.roundLottery = Object.freeze({ enabled: true, rolls, choices, rounds: Object.freeze(rounds), label: typeof rl.label === 'string' && rl.label ? rl.label : '军备抽奖' });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery ? out : OFF;
 }
 
 /**

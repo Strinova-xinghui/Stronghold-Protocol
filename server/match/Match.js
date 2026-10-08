@@ -1927,6 +1927,10 @@ export class Match {
       this.dispatch(ps, 'onPrepStart', { round: this.round });
       ps.recompute();
     }
+    // 回合抽奖（自研 2026-10-08）：指定回合给每个活人送 `rolls` 轮独立 `choices` 选 1 装备（复用凯瑟琳的
+    // pick-one 面板 = pushItemOffer；多轮靠 offers 队列排队，客户端显示「+N」）。放在 onPrepStart 之后，
+    // 此时本回合的免费/奖励都已发放，抽奖面板排在它们后面。
+    this._grantRoundLottery(alive);
     // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime
     const secs = this.soloUntimed ? null : this.gd.prepTime(this.round);
     this._prepWaiters = new Set();      // 新回合重置等待投票（自研）
@@ -2052,6 +2056,62 @@ export class Match {
     if (net > 0) mul = 1 + rule.k * net / this._debtAvgHp;
     else if (net < 0) mul = 1 + rule.k2 * net / this._debtAvgHp;
     return Math.min(rule.cap, Math.max(rule.floor, mul));
+  }
+
+  // ---- 回合抽奖（roundLottery，自研 2026-10-08） ----------------------------------------------------
+
+  /**
+   * 回合抽奖：本回合在配置表里时，给每个活人玩家推 `rolls` 轮独立装备抽奖（各 `choices` 选 1）。
+   * 装备池 = 当前商店等级可出的全部装备（choices.json `pool_equip_kathe` 语义：shopEligible + maxTier=shopLevel），
+   * 再按该回合配置的 `minTier` 剔除低阶（第 6 回合去 T1、第 10 回合去 T1/T2 …）。
+   * 复用凯瑟琳「定向投放」的 pick-one 面板（pushItemOffer），多轮靠 offers 队列排队——**零改动** pickReward 与客户端。
+   * @param {any[]} alive 本回合活人玩家
+   */
+  _grantRoundLottery(alive) {
+    const rl = this._lotteryRule;
+    if (!rl) return;
+    const entry = rl.rounds.find((r) => r.round === this.round);
+    if (!entry) return;
+    for (const ps of alive) {
+      for (let i = 0; i < rl.rolls; i++) {
+        const ids = this._rollLotteryItems(rl.choices, entry.minTier, ps, entry.maxTier);
+        if (ids.length) ps.pushItemOffer(ids, { source: 'lottery', label: rl.label });
+      }
+    }
+  }
+
+  /** 当前生效的回合抽奖规则（custom-rules.json roundLottery，mtime 热更）。 */
+  get _lotteryRule() {
+    try { return getCustomRules({ log: this.log }).roundLottery || null; } catch { return null; }
+  }
+
+  /**
+   * 抽 `choices` 件不重复的装备：池 = `minTier` 到 `maxTier` 阶的全部可出装备（shopItemsByTier）。
+   * 注意 `maxTier` **默认 6（全部阶）而非玩家商店等级**——抽奖是奖励，不该被「玩家还没升级商店」卡住；
+   * 想按个人等级限制就在配置里给该回合设 maxTier。
+   * @param {number} choices 抽几件（面板槽数）
+   * @param {number} minTier 最低阶（含）
+   * @param {any} ps 目标玩家（读 maxTier='shopLevel' 时用其商店等级）
+   * @param {number|string} maxTier 最高阶（含）；'shopLevel' = 该玩家当前商店等级
+   * @returns {string[]} 装备 id 列表（可能少于 choices，池太小时）
+   */
+  _rollLotteryItems(choices, minTier, ps, maxTier = 6) {
+    const hi = maxTier === 'shopLevel'
+      ? Math.max(1, Math.min(6, Number.isInteger(ps?.shop?.level) ? ps.shop.level : 6))
+      : Math.max(1, Math.min(6, Math.trunc(Number(maxTier)) || 6));
+    const lo = Math.max(1, Math.min(hi, Math.trunc(Number(minTier)) || 1));
+    const pool = [];
+    for (let t = lo; t <= hi; t++) for (const id of this.gd.shopItemsByTier[t] || []) pool.push(id);
+    const out = [];
+    const seen = new Set();
+    const rng = this.rngMeta;
+    for (let guard = 0; out.length < choices && guard < choices * 20 && pool.length; guard++) {
+      const id = pool[Math.floor(rng() * pool.length)];
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
   }
 
   // ---- 休整期等待投票（自研，2026-10-07） ------------------------------------------------------------
