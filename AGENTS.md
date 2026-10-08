@@ -166,18 +166,24 @@
 ### 规则控制台（/console，2026-10-08 自研追加）
 
 - **能力**：浏览器打开 `http://<主机>:24500/console` 即可**用表单改全部外置规则**——干员三选一（rewardOffer）、装备甄选（itemOffer）、休整期负债（prepDebt）、回合抽奖（roundLottery）。改完点「保存并热更生效」立即生效（写 `config/custom-rules.json` + 清 mtime 缓存，**无需重启**，对局中玩家也生效）。
-- **页面**（`public/console.html`，约 500 行，零依赖原生 JS）：5 个标签页 = 四组规则的专用表单 + 「原始 JSON」页（直接编辑全文）。表单含开关、数值、下拉；三选一的候选位规则与抽奖的回合表可**动态增删行**。顶部状态胶囊实时显示「生效中：三选一 / 装备甄选 / …」或「全部关闭（原版行为）」。
-- **服务端**（`server/index.js` 约 60 行 + `customRules.js` 加 `saveCustomRules`）：`GET /console` 出页面、`GET /console/api` 读配置（返回原始 config + 解析后的 rules + summary）、`POST /console/api` 写配置。**全站唯一的 POST 接口**——`handleRequest` 顶部原本只放行 GET/HEAD，加了 `consoleApiPath && method==='POST'` 的例外。
-- **安全（三点）**：① **仅限内网来源**（复用 `isPrivateAddress`，与 `/lan/room` 同口径；外网返回 404）——该页面能改规则，不对外开放；② **写盘前校验**：`saveCustomRules` 先跑 `normalize`，非对象/数组/null 直接抛错拒绝；③ **原子写**：写 `.tmp` 再 `renameSync`，避免写一半崩溃留下坏配置。非法内容一律 400，**磁盘保持上一次的好配置**（已验证）。
-- **踩坑**：`log` 在 `createServer` 闭包内（L956）而我的函数在模块顶层——初版直接调 `log.info` 导致写盘成功但响应 400（"log is not defined"）。修法：把 log 作为参数传进去。**教训：模块顶层函数拿不到闭包变量，写盘类副作用要放在 try 内且日志调用不能让它误报失败。**
-- **验证**：`node tools/verify-console-api.mjs <port>`（**13/13**：GET 读回、POST 改 rolls/choices/cap 生效、**独立读盘确认真落盘**、关规则→rules 变 null、非法 JSON/数组/null 全被 400 拒、拒绝后磁盘未写坏、恢复原配置）+ `node tools/verify-console-ui.mjs <port>`（**12/12**：标题/5 标签/状态胶囊/候选位与回合表渲染、真实改值保存→提示成功→API 确认、还原、原始 JSON 页、0 JS 错误）+ 回归 抽奖 12/12·甄选 6/6·物品 5/5·负债 16/16·lobby 67/67。
+- **页面**（`public/console.html`，零依赖原生 JS）：6 个标签页 = 五组规则表单（三选一/装备甄选/负债/抽奖/回合编排）+「原始 JSON」；候选位、抽奖回合表可动态增删行；顶部状态胶囊实时显示生效清单。
+- **服务端**（`server/index.js` + `customRules.js` 的 `saveCustomRules`）：`GET /console` 出页面、`GET/POST /console/api` 读写。**全站唯一 POST**（`handleRequest` 顶部加例外）。
+- **安全**：① 仅内网来源（复用 `isPrivateAddress`，外网 404）；② 写盘前 `normalize` 校验（非对象/数组/null 拒绝）；③ 原子写（`.tmp` + `renameSync`）。非法内容一律 400 且**磁盘保持上一次的好配置**。
+- **踩坑**：`log` 在 `createServer` 闭包内而函数在模块顶层 → 初版 `log.info` 导致写盘成功但响应 400（"log is not defined"）；改为传参。
+- **验证**：`verify-console-api.mjs`（**13/13**：读写往返/独立读盘确认/关规则/非法拒绝/拒绝后未写坏/恢复）+ `verify-console-ui.mjs`（**14/14**：6 标签/表单渲染/真实改值保存/API 确认/原始 JSON/0 JS 错误）+ 回归全绿。
 ### 回合抽奖（roundLottery，2026-10-08 自研追加，用户需求）
 
-- **需求**：第 3/6/10 回合给玩家送装备抽奖（复用凯瑟琳「定向投放」的商店升级机制）；**两轮独立 5 选 1**；池按回合过滤（3 回合全阶混池、6 回合去 T1、10 回合去 T1/T2）；**参数全外置热改**（指定哪些回合、几选几）。
-- **实现**：① `customRules.js` 加 `roundLottery` 解析（enabled/rolls/choices/label/includeBots/rounds[{round,minTier,maxTier}]）；② `Match._grantRoundLottery(alive)` 在 `enterPrep`（onPrepStart 后）对每个活人推 `rolls` 个独立 offer；③ `Match._rollLotteryItems` 从 `gd.shopItemsByTier[minTier..maxTier]` 抽不重复 N 件。
-- **零改动复用**：直接调 `ps.pushItemOffer(ids, {source:"lottery", label})` = 凯瑟琳 pick-one 面板；**多轮靠 offers 队列排队**（客户端自动显示「之后还有 N 项」）⇒ 无需改 pickReward/客户端。未领取的由 `endPrep()` 清空。
-- **两个踩坑**：① 池上限默认 6（全阶）而非玩家商店等级——初版按个人等级，导致第 6/10 回合（minTier=2/3）在等级 1 时池为空、一件不发；要限制就填 `maxTier:"shopLevel"`。② 默认不给 AI 发（`includeBots:false`，用户定「大不了不给 AI 发」）；开 true 时 AI 走 bot.js takeOffers 自动领取（实测可清空队列）。
-- **验证**：`node --test tools/round-lottery.test.mjs` **12/12**（回合命中/未命中/关闭/rolls/池过滤 minTier 1·2·3/maxTier=shopLevel/槽内不重复/领取后排队顶替/AI 默认不发+开时也发）+ golden 全绿 + 回归 甄选 6/6·物品 5/5·负债 16/16·pool 10/10；线上截图确认「军备抽奖」5 选 1 + 「之后还有 1 项」。
+- **需求**：第 3/6/10 回合送装备抽奖（复用凯瑟琳「定向投放」面板）；两轮独立 5 选 1；池按回合过滤（3 回合全阶、6 去 T1、10 去 T1T2）；参数全外置。
+- **实现**：`customRules.js` 解析 `roundLottery`；`Match._grantRoundLottery` 在 `enterPrep` 推 `rolls` 个独立 offer；`_rollLotteryItems` 从 `shopItemsByTier[minTier..maxTier]` 抽不重复 N 件。**零改动复用** `pushItemOffer`（多轮靠 offers 队列，客户端自动显示「之后还有 N 项」）。
+- **两个踩坑**：① 池上限默认 6（全阶）而非玩家商店等级——初版按个人等级致第 6/10 回合在等级 1 时池空、一件不发；② 默认不给 AI 发（`includeBots:false`）。
+- **验证**：`round-lottery.test.mjs` **12/12** + golden 全绿；线上截图确认 5 选 1 + 「之后还有 1 项」。
+### 回合编排（extraRounds，2026-10-08 自研追加，用户需求）
+
+- **需求**：延后 BOSS 给玩家更多发育回合。定稿：第 13 回合后插 **4 个发育回合**（14–17），**复用第 13 回合的波次**（不换强度），怪组从同档池随机混排（多样性），**难度曲线「拉伸」**（用户明确「不是接龙而是拉伸」），**BOSS 定在 18、隐藏 BOSS 19**，其他不变；**改 BOSS 轮时间要热生效**（自动重算难度）；参数**全外置**。
+- **实现**：① `customRules.js` 解析 `extraRounds`（insertAfter/count/templateRound/curve/4 个公式常数/poolTemplates/mixPerRound）；② `gamedata.js` 加**热读 getter**（非构造快照）+ `isInsertedRound`/`templateRoundFor`；③ `roundCfg(r)` 对插入回合复用模板回合配置、清 bossTemplates、从池随机挑波次模板（`_mixTemplateFor`，同回合稳定）；④ `enemyScale(r)` 按 curve 算；⑤ `Match.startRound` 抬 floor、`endPrep` 锁 BOSS。
+- **难度曲线（官方公式反解）**：`hp = curveBase × curveRate^k`、`atk = curveBaseAtk × curveRateAtk^k`，k = config `enemyScale[回合].kHp`（**官方表自带 kHp/kAtk 但代码从不使用**；实测 `0.8×1.2^k` 逐值吻合）。五种：**stretchShape（定稿，形状保持横向拉伸，全程 ≤ 官方）** | stretch（线性重排，前中期略陡）| append | smooth | flat。
+- **热改 BOSS 时间**：全部热读 getter → 改配置立即影响后续回合。两道保护：① `_erFloor`（每进一回合抬高）= BOSS 不落在已过去的回合；② `_erBossAt`（`lockBossRound` 在 endPrep 锁）= 触发后不漂移。**踩坑**：初版 `computed > floor ? computed : floor+1` 在 count=0/floor=14 时算成 15——边界该用 `>=`。
+- **验证**：`extra-rounds.test.mjs` **15/15** + `extra-rounds-hot.test.mjs` **6/6**（推后生效/改小不落过去/触发后锁定/改 count 难度自动重算）+ golden 全绿 + 控制台 UI 14/14。
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。
