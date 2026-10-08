@@ -175,6 +175,22 @@
 - **难度曲线（官方公式反解）**：`hp = curveBase × curveRate^k`、`atk = curveBaseAtk × curveRateAtk^k`，k = config `enemyScale[回合].kHp`（**官方表自带 kHp/kAtk 但代码从不使用**；实测 `0.8×1.2^k` 逐值吻合）。五种：**stretchShape（定稿，形状保持横向拉伸，全程 ≤ 官方）** | stretch（线性重排，前中期略陡）| append | smooth | flat。
 - **热改 BOSS 时间**：全部热读 getter → 改配置立即影响后续回合。两道保护：① `_erFloor`（每进一回合抬高）= BOSS 不落在已过去的回合；② `_erBossAt`（`lockBossRound` 在 endPrep 锁）= 触发后不漂移。**踩坑**：初版 `computed > floor ? computed : floor+1` 在 count=0/floor=14 时算成 15——边界该用 `>=`。
 - **验证**：`extra-rounds.test.mjs` **15/15** + `extra-rounds-hot.test.mjs` **6/6**（推后生效/改小不落过去/触发后锁定/改 count 难度自动重算）+ golden 全绿 + 控制台 UI 14/14。
+
+### ⚠️ 事故：顺延后的 BOSS 回合「完全没有怪」（2026-10-08，已修复）
+
+- **现象（队友回报 + 用户截图）**：第 14–17 回合一切正常，**第 18 回合（应为主 BOSS）完全没怪**，被当作小怪轮，BOSS 不出现，对局无法正常结束。
+- **根因**：`gamedata.roundCfg(r)` 只为**插入的发育回合**做了配置替换，**漏了顺延后的 BOSS/隐藏 BOSS 回合**。官方 `data/config.json` 的 `mode.rounds` 表**只到第 15 回合**，所以 `roundCfg(18)` 返回 `null` → `buildBossWave` 拿不到 `bossTemplates` → `templateId=null`、`spawns=[]` → **空波次**。
+- **为什么测试没抓到**：我第一版验证只断言了 `m.bossWaves.length > 0`（**字段数**），没有断言**字段里的 `spawns.length`**——于是「有 BOSS 战场但一个怪都没有」被误判为通过。**教训：断言要下钻到「真的有内容」，不能只数容器。**
+- **修复（`server/match/gamedata.js` 的 `roundCfg`）**：① `r === hiddenRound` → 复用官方隐藏回合（`mode.hiddenRound`，h08 模板）；② `r === bossRound` → 复用官方主 BOSS 回合（`mode.bossRound`，h07 模板）；③ 插入回合照旧（清 bossTemplates + 混排模板）；④ **兜底**：任何超出官方表的回合，只要规则开着就用模板回合的普通波次顶上——**宁可多打一轮小怪，也绝不出现空回合**。
+- **验证**：`tools/extra-rounds.test.mjs` 新增「绝不允许空波次」5 项（13–19 每回合必须有怪 / BOSS 带 bossTemplates / 隐藏 BOSS 带 bossTemplates / **count 1..6 全试** / 插入回合有怪）→ **22/22**；`tools/verify-hidden-core.mjs`（**18 项全通过**：18 回合用 h07 + 19 回合用 h08 + `isHidden` 标记 + `endPrep(19)` 走隐藏分支 + 模板/时长/滑块与官方第 15 回合逐一相同 + 无空战场）；`tools/verify-boss-waves.mjs`（线上口径 13/13，含 18 回合 9 怪、19 回合 8 怪）。
+- **预防性确认（用户要求）**：**隐秘核心（第 19 回合）已专门验证**——`hiddenBossId=boss_9` 确实在模板表里、用 `act1autochess_h08_02`、10 个怪、`bossOvertimeAfter=150` 与官方一致；并验证 `endPrep(19)` 走 `startFinalAssault(true)` 隐藏分支（而不是主 BOSS 分支）。
+- **部署**：`matches == 0` 时闪断（提交 `7ed8b9d`）。**注意**：这是 `server/` 代码修复，**热更配置无法绕过**，必须重启；事故期间正在进行的对局需要重开。
+
+#### 顺延规则的通用教训（写进 checklist）
+
+1. 官方的**回合索引表**（`mode.rounds`）长度有限（本作到 15），任何「顺延回合」的功能都必须**同时映射 BOSS/隐藏 BOSS 的模板**，不能只映射普通波次。
+2. 验证波次时断言 **`spawns.length`**，不要只数 `bossWaves.length`/`fields`。
+3. 对「超出官方表」的回合加**兜底**，避免任何空回合（静默失败最难发现）。
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。
