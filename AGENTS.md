@@ -163,6 +163,13 @@
 - **已知边界**：负债无个人上限（总和 < 0 才清算，高血队友兜底 = 设计）；hold 倒计时 + 负债叠加 = 无限时长的整活局（设计意图）；最终攻势个人 LP 冻结（只扣 teamLp），血池倍率按进入时负债锁定；普通波次倍率在每场战斗 spec 生成时锁定（回合内不变）。
 - **三处 clamp 修复（2026-10-07 提交 c97e39e，用户反馈「看不到负债」）**：① `Match.publicView` 的 `lp: Math.max(0, ps.lp)` → `ps.lp`（**根因**：服务端广播就截断，队友面板永远看不到负血）；② `gameLogic.normalizeResult` 的 `Math.max(0, teamLp)` → `teamLp`（结算画面显示真实负债）；③ `teamPanel.rowLp` 的 `pending = Math.min(lp, …)` 在 lp<0 时算出负数预告 → `lp < 0 ? 0 : …`。验证：`node tools/verify-debt-ui.mjs <port>`（5/5）+ 单测新增「负血广播」断言（publicView lp=-17 不被 clamp、debt.net>0）**16/16**。
 
+### 回合抽奖（roundLottery，2026-10-08 自研追加，用户需求）
+
+- **需求**：第 3/6/10 回合给玩家送装备抽奖（复用凯瑟琳「定向投放」的商店升级机制）；**两轮独立 5 选 1**；池按回合过滤（3 回合全阶混池、6 回合去 T1、10 回合去 T1/T2）；**参数全外置热改**（指定哪些回合、几选几）。
+- **实现**：① `customRules.js` 加 `roundLottery` 解析（enabled/rolls/choices/label/includeBots/rounds[{round,minTier,maxTier}]）；② `Match._grantRoundLottery(alive)` 在 `enterPrep`（onPrepStart 后）对每个活人推 `rolls` 个独立 offer；③ `Match._rollLotteryItems` 从 `gd.shopItemsByTier[minTier..maxTier]` 抽不重复 N 件。
+- **零改动复用**：直接调 `ps.pushItemOffer(ids, {source:"lottery", label})` = 凯瑟琳 pick-one 面板；**多轮靠 offers 队列排队**（客户端自动显示「之后还有 N 项」）⇒ 无需改 pickReward/客户端。未领取的由 `endPrep()` 清空。
+- **两个踩坑**：① 池上限默认 6（全阶）而非玩家商店等级——初版按个人等级，导致第 6/10 回合（minTier=2/3）在等级 1 时池为空、一件不发；要限制就填 `maxTier:"shopLevel"`。② 默认不给 AI 发（`includeBots:false`，用户定「大不了不给 AI 发」）；开 true 时 AI 走 bot.js takeOffers 自动领取（实测可清空队列）。
+- **验证**：`node --test tools/round-lottery.test.mjs` **12/12**（回合命中/未命中/关闭/rolls/池过滤 minTier 1·2·3/maxTier=shopLevel/槽内不重复/领取后排队顶替/AI 默认不发+开时也发）+ golden 全绿 + 回归 甄选 6/6·物品 5/5·负债 16/16·pool 10/10；线上截图确认「军备抽奖」5 选 1 + 「之后还有 1 项」。
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。
@@ -184,26 +191,17 @@
 
 ### 上游 v0.1.4 同步（2026-10-07，合并提交 e3c17ee）——已上线
 
-- **范围**：基点 19a8908 → v0.1.4（tag=master HEAD=9f93096），33 commit / 66 文件 / +10320−420（大头是新增 golden 测试语料）。**注意：19a8908 在 v0.1.4 之前、v0.1.3 之后**——标题页设置/素材镜像/地形点选/漏怪警报这些 0.1.3 末特性我们早有；本轮真增量是 0.1.4 发布内容。
-- **拿到的玩法修复（按裁定：冲突处玩法一律取官方上游）**：阿戈尔吞噬基础 ATK 改**最终加算**（`atkFinal`，GitHub #165）；**高台按特性**「可以放置于远程位」（#153/#69，崖心/见行者/歌蕾蒂娅普通+精锐+任意模组都可上高台，取代 0.1.3「只精锐歌蕾蒂娅+淡金坠饰」）；5-阿戈尔复活名额给最先倒下的 3 名（#105）；联防阿戈尔吞队友（#140）；**沉睡敌人不可阻挡、不占阻挡位**（#140）；缇缇 S2 每次沉睡脉冲计入特质（#162）；耀骑士临光 S2 撤退+不屈再部署不再丢骑士戒律、伊内丝影哨收回（重启内自重启事件归属）；引星棘刺 S1 自动触发（#124）；盟约概率封顶 100%（#108）；观战按钮发密钥修复（#119）；Q 撤退 X 出售（#114）；结算语音 chess→char 映射（#73 移植修复）；棋盘贴图 WebP（#186）；**golden 结果安全网**（`npm run golden`，`test/golden/*.json`，以后改 sim 可回归验证战斗结果逐字段一致）。
-- **合并方式（方法论升级：不再 tarball+robocopy）**：`git fetch origin --tags` 这次**直连成功**（此前常被墙）——上游对象入库后走**真三方合并**：
-  1. `git merge-tree --write-tree --merge-base=19a8908 HEAD 9f93096` → 合并树 + 权威冲突清单（**7 个真冲突，其中代码只有 2 个**；其余 51 个上游文件全部干净自动合并，含全部 sim 玩法文件）。
-  2. 隔离 worktree（E:\sp-up-sync + junction 复用 node_modules）里 `git read-tree -m -u <合并树>` 物化冲突态 → 手工解 7 处 → `git add -A` → `git write-tree` → `git commit-tree <tree> -p <我们HEAD> -p <9f93096>` 造双亲合并提交。
-  3. 主仓库 `git merge --ff-only <commit>` 落地。**坑**：`read-tree -m -u --reset` 会报「Which one?」——`-m -u` 连用即可，别加 `--reset`。
-  4. **merge-base 必须显式给 19a8908**：默认 merge-base 是 bce1827（tarball 同步没历史，共同祖先太老）→ 假冲突 30+ 个；用对 base 后真实冲突仅 7 个。
-- **7 处冲突的解法（存档备查）**：`shared/constants.js`/`package.json`/`package-lock.json`/`README.md` 版本号保留我们的 `0.1.6-pre-skin`（对外连续、纯展示串，healthz 的 app 字段用它）；`lobby.js` import 行取**并集**（上游 `ERR` + 我们 `RESULT_LIMITS`，ERR 两边都从 constants 导出）；`CHANGELOG.md` 我们的 0.1.5.2/0.1.6-pre-skin 两条在上、上游 0.1.4 条目在下（历史都留）；`docs/DESIGN.md` 上游 §24.7–24.9 在前（接 §24.6）、我们的 §25（6 人）在后。
-- **验证（全在 worktree 里跑完才落地）**：全 JS `node --check` ✓ → `check-missing-imports` ✓ → **核心 2352 个（match/sim/content）通过 2351**（唯一失败=性能测试 0.61ms vs 0.5ms 阈值，**负载抖动**：单独跑合并前后都是 ~0.30ms ✓）→ lobby 72/72 → **golden 6/6**（新安全网直接绿，说明合并没改任何战斗结果）→ 自研甄选 9/9 → UI/render 899/902（**3 个失败与合并前基线逐条相同**=fork 语音/皮肤存量，非本次引入）。落地后线上：verify-shadow 7/7、高台规则测试 8/8 全绿（歌蕾蒂娅普通可上高台/重装被拒）、甄选配置 bondId 未因 bonds.json 更新失效。
-- **裁定记录（用户 2026-10-07）**：「冲突的功能优先，走官方上游而不是第三方分支」——第三方包（fork 0.1.6-pre-skin）与官方上游在**玩法逻辑**上冲突时取官方；我们的自研（皮肤字段/6 人/monitor/影子观战/定向甄选）与上游无逻辑冲突，全部保留。
+- **范围**：19a8908 → v0.1.4（HEAD=9f93096），33 commit / 66 文件。
+- **玩法修复（冲突处一律取官方）**：阿戈尔吞噬基础 ATK 改最终加算；高台按特性「可以放置于远程位」（崖心/见行者/歌蕾蒂娅普通+精锐+任意模组均可）；5-阿戈尔复活名额给最先倒下的 3 名；联防阿戈尔吞队友；沉睡敌人不可阻挡不占阻挡位；缇缇 S2 沉睡脉冲计入特质；耀骑士临光 S2 撤退+不屈不再丢戒律、伊内丝影哨收回；引星棘刺 S1 自动触发；盟约概率封顶 100%；观战按钮发密钥；Q 撤退 X 出售；结算语音 chess→char 映射；棋盘贴图 WebP；**golden 结果安全网**（`npm run golden`）。
+- **合并方法**：`git merge-tree --write-tree --merge-base=19a8908 HEAD 9f93096`（**base 必须显式给，否则假冲突 30+**）→ worktree `read-tree -m -u <tree>` 物化 → 手工解 7 处 → `commit-tree` 双亲提交 → `merge --ff-only`。**坑**：`read-tree -m -u --reset` 报「Which one?」，别加 --reset。
+- **验证**：核心 2351/2352（唯一失败=性能阈值抖动）· lobby 72/72 · golden 6/6 · 甄选 9/9 · UI 899/902（3 个失败与基线逐条相同=fork 存量）。
 
 ### 上游同步方法论（2026-10-06 定稿，下次直接照做）
 
-- **同步流程**：① `api.github.com` 查远程 HEAD（github.com 直连常被墙，codeload/api/jsDelivr 可用）→ ② `codeload.github.com/.../tar.gz/<sha>` 下载精确 commit 的 tarball → ③ 解压后 robocopy 覆盖（**绝不用 /MIR**！）→ ④ `git status` 审查 → 恢复被覆盖的自研文件 → ⑤ 跑关键测试 → 提交。
-- **血的教训（robocopy /MIR 事故）**：`/MIR` 会把上游没有的本地文件全部删除（AGENTS.md、自有脚本、测试工具等 14 个文件被删）。**永远用 `/E`（只增改不删）代替 `/MIR`**；被删文件靠 `git checkout HEAD -- <paths>` 秒回，git 提交纪律再次救场。
-- **自研文件清单（同步后必须逐个验证仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`scripts/register-wake.*`、`scripts/uninstall-task.*`、`scripts/wake-start.ps1`、`tools/test-monitor.mjs`、`tools/test-bond-boost-math.mjs`；`server/index.js`（monitor）、`server/match/pool.js`+`PlayerState.js`+`Match.js`（bondBoost）中的自研代码。
-- **冲突判断**：先从 API 查上游 commit 动了哪些文件；上游没动的文件，自研版本直接 `git show <commit>:<path> > <path>` 恢复即零冲突。本轮上游 4 个 commit（d582925/f6f5ed5/f6794a2/19a8908）均未触碰 server/，恢复无冲突。
-- **验证三件套**：`node --check` 逐文件语法 → `node --test test/match/pool.test.js`（10/10）+ `node tools/test-bond-boost-math.mjs`（PASS）→ 临时端口起服打 `/monitor?json`。
-- **合并/同步后必跑：`node tools/check-missing-imports.mjs`**（扫描「被调用但未导入且未定义」的符号）。**血案（2026-10-06 `voiceKey is not defined`）**：合并 fork 0.1.6 时，`game.js` 取了 fork 的代码（调用 `voiceKey` 3 处：选中/部署/卖人路径），但同一文件我改回了我方 import、`audio.js` 也退回我方版本（不导出该符号）→ 运行时 ReferenceError，表现为「卖不了人」等操作失败。**教训：解决冲突要按「符号依赖」判断，不能按「文件」判断**——取了一侧的代码，就必须补齐它依赖的导入/导出；合并后立刻跑扫描器 + 用无头浏览器走一遍真实操作路径。
-- **目录变更注意**：上游同步曾把 `public/vendor/` 清空（不进 git，靠 postinstall 重建），症状 = 游戏页加载到一半报「游戏脚本加载失败」；修复 = `node tools/vendor.mjs`，无需回退代码。
+- **流程**：`api.github.com` 查远程 HEAD → `codeload.github.com/.../tar.gz/<sha>` 下 tarball → robocopy **`/E`（绝不用 `/MIR`，会删本地文件）** → `git status` 审查恢复自研文件 → 跑测试 → 提交。
+- **自研文件清单（同步后必查仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`register-wake.*`、`uninstall-task.*`、`wake-start.ps1`、`tools/test-monitor.mjs`、`test-bond-boost-math.mjs`；`server/index.js`(monitor)、`pool.js`+`PlayerState.js`+`Match.js`(bondBoost)。
+- **合并后必跑 `node tools/check-missing-imports.mjs`**：血案 2026-10-06 `voiceKey is not defined`——`game.js` 取了 fork 代码（调 `voiceKey`）但 import 取自上游、`audio.js` 不导出该符号 → 运行时 ReferenceError（表现为「卖不了人」）。**教训：解冲突按「符号依赖」判断，不能按「文件」**；合并后立刻跑扫描器 + 无头浏览器走真实操作。
+- **`public/vendor/` 被清空**（不进 git）症状=游戏页加载一半报「脚本加载失败」→ `node tools/vendor.mjs`。
 
 ### 不打扰线上玩家的验证方法论（2026-10-06 定稿，必读）
 
@@ -237,28 +235,10 @@
   - 服务端 `welcome` 的 `maxSeats` 取自 `RESULT_LIMITS.players`（`Lobby` 构造时已写入）——**无需给 Network 加配置项**，老客户端收到多余字段无副作用。
 - **4 人及以下行为不变**：两条缩放系数在 ≤4 人时恒为 1、盟约 ban 用模式自身值 —— 所以**6 人模式的房间里玩 4 人局 = 官方原版**，只是座位板显示 6 格。怕影响 4 人体验的顾虑可以放下。
 
-#### 来源与改动集（第三方包 `D:\Download\Stronghold-Protocol-v0.1.2(gai (2).zip`）
-
-- **来源**：306 MB / 13,312 条目的纯源码快照，基于**上游 v0.1.2**，自带 `docs/6人版与原版的差别.md`，**无 `.git`**。
-- **核心机制**：**不动代码逻辑，只加启动开关 `SP_MAX_SEATS=6`**（不设 = 官方 4 人）。
-- **改动集（16 个既有文件 + 2 个新文件，全是加性小改）**：
-  - 新文件 `server/match/scaling.js`（67 行，三个纯函数 + 常量）、`test/match/seats6.test.js`（188 行，10 个测试）。
-  - `shared/constants.js`：`MAX_SEATS_LIMIT = 6` + `setMaxSeats()`（模块级可变值，默认 4）。
-  - `shared/protocol.js`：`RESULT_LIMITS` 由 `Object.freeze` 改为**可变对象** + `setSeatLimit()`；`room.removeBot` 的 seat 上界由 `MAX_SEATS-1` 改为 `RESULT_LIMITS.players-1`。
-  - `server/index.js`：读 `SP_MAX_SEATS`（仅接受 2–6，非法直接 throw）→ `lobbyOptions.maxSeats`。
-  - `server/lobby.js`：`LOBBY_DEFAULTS.maxSeats`、`Room` 座位数组按 `maxSeats` 分配、`room.state` 携带 `maxSeats`、`Lobby` 构造器 clamp + `setSeatLimit`、`stats()` 加 `maxSeats`。
-  - `server/match/Match.js`：`this.seatCount = players.size`，传给 `drawDisabledBonds` / `SharedPool` / `bossPoolHp`。
-  - `server/match/gamedata.js`：`poolCopies(id, players)`、`bans(difficulty, players)`、`bossPoolHp(id, alive, players)` 三个签名加可选参数（默认 0 ⇒ 原版值）。
-  - `server/match/pool.js`：`drawDisabledBonds(gd, rng, {players})`、`SharedPool(gd, {banned, players})`。
-  - `server/match/finalAssault.js` / `audit.js`：`bossPoolHp` 透传 `players` / `m.seatCount`。
-  - 客户端 4 处：`screens/room.js` 新增 `seatCapacity()`（从 `room.state.maxSeats` 读容量，`normalizeSeats` 用它）、`net.js` 收到 `room.state` 时 `setSeatLimit`、`battle/runner.js` 两处 `slice(0,4)` 改 `RESULT_LIMITS.players`、`ui/gameComponents.js` 座位色 `[162,196,38,280]` → 6 色 `SEAT_HUES`（**前 4 色与原值完全相同**，4 人房配色不变）、`css/screens/room.css` 座位网格 `repeat(4,…)` → `repeat(auto-fit,…)`。
-- **两条数值规则（只在 >4 人时生效，≤4 时每个系数恒为 1）**：
-  1. **共享干员池按人数放大**：`× 人数/4`（5 人 ×1.25、6 人 ×1.5）。按干员单独设定的份数（如缪尔赛思固定 4）属内容设定，**不放大**。
-  2. **领袖血条按战场数放大**：6 人分 **3 个战场**（`b1/b2/b3`，每队 2 人一张图），`× 1.5`；**全队仍共用同一条血条与同一个 LP**。淘汰不会让血条缩水。
-  3. 附带：**>4 人时主/副盟约各少 ban 一个**（绝境 4 人 `core3+addon4` → 6 人 `core2+addon3`）。
-- **移植实证（2026-10-07）**：在 git worktree 副本里打到 **v0.1.6-pre-skin** → **46/46 锚点全中**（唯一要挪的是 `shared/constants.js`，因上游 0.1.3+ 在 `MAX_SEATS` 与 `ROOM_CODE_LEN` 之间插入了 `MAX_SPECTATORS`）；`seats6.test.js` **10/10**、`test/lobby.test.js` **67/67**（含新增的 6 人房间套件）、自研甄选 **9/9**、真实 WS 建房 6 座全通（`maxSeats:6`、第 7 个被 `ROOM_FULL`、`removeBot seat:5` 通过而 `seat:6` 被 `BAD_MSG` 拒、`room.start` 成功）。线上服切换后同样全通。**与我们自研的 monitor / 定向甄选改动零重叠**。
-- **改座位数必须重启**（Node 进程内不可热改）：先 `stop-online.bat` 再开；两套启动器已合并为一个 `start-online.bat`，默认 6 座，共用端口 24500。
-- **无需移植的部分**：字体（我们已有）、`cheats` 作弊层（作者已在包内自行删除，只剩占位文件）、Docker/CI 改动（与 6 人无关）。
+- **来源**：第三方包（306MB 快照，基于上游 v0.1.2，无 .git）。**核心机制**：不动逻辑，只加 `SP_MAX_SEATS=6` 开关（不设=官方 4 人）。
+- **改动集**：新增 `server/match/scaling.js`（3 纯函数）+ `test/match/seats6.test.js`；`shared/constants.js` 加 `MAX_SEATS_LIMIT=6`+`setMaxSeats()`；`shared/protocol.js` 的 `RESULT_LIMITS` 改可变+`setSeatLimit()`；`server/index.js` 读 env→`lobbyOptions.maxSeats`；`lobby.js` 座位数组按 maxSeats；`Match.js` 传 `seatCount`；`gamedata.js` 三个签名加 `players` 参数（默认 0=原版）；客户端 4 处（seatCapacity/net.setSeatLimit/runner slice/座位色 6 色，**前 4 色逐字节相同**）。
+- **两条数值规则（仅 >4 人，≤4 恒 1）**：① 共享干员池 ×人数/4（按干员单独设的份数如缪尔赛思固定 4 **不放大**）；② 领袖血条 ×1.5（6 人 3 战场，全队共用血条与 LP，淘汰不缩水）；③ >4 人主/副盟约各少 ban 一个。
+- **移植实证**：46/46 锚点全中（唯一要挪的是 `shared/constants.js` 因上游插入了 `MAX_SPECTATORS`）· seats6 10/10 · lobby 67/67 · 甄选 9/9 · 真实 WS 建房 6 座全通。
 - **并发协作提醒**：本次移植期间**有另一个会话在同一仓库并行提交**（monitor 实时监看 `00ff41d`、影子观战 `649e726`），双方都改了 `server/index.js` / `server/match/Match.js` / `shared/protocol.js`。实测两者**逻辑上互不干扰**（函数级并存，17 个 6 人钩子点 + 3 个 monitor 符号全在）。**教训：在同一仓库并发提交时，先 `git log` 看有没有别人的新提交，提交前只 `git add` 自己改的文件，绝不 `git add -A`。**
 
 #### 「6 人服玩 4 人」会有影响吗？—— 实测：不会，且这是硬保证（2026-10-07）
