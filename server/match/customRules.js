@@ -121,7 +121,15 @@ function normalize(raw) {
       const maxTier = rawMax === 'shopLevel' ? 'shopLevel' : Math.max(1, Math.min(6, Math.trunc(numOr(rawMax, 6))));
       rounds.push(Object.freeze({ round, minTier, maxTier }));
     }
-    if (rounds.length) out.roundLottery = Object.freeze({ enabled: true, rolls, choices, rounds: Object.freeze(rounds), label: typeof rl.label === 'string' && rl.label ? rl.label : '军备抽奖' });
+    if (rounds.length) out.roundLottery = Object.freeze({
+      enabled: true,
+      rolls,
+      choices,
+      rounds: Object.freeze(rounds),
+      label: typeof rl.label === 'string' && rl.label ? rl.label : '军备抽奖',
+      // 是否也给 AI 座位发（默认 false——AI 不需要，且要替它做选择逻辑；用户 2026-10-08 定）
+      includeBots: rl.includeBots === true,
+    });
   }
 
   return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery ? out : OFF;

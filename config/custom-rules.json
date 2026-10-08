@@ -40,11 +40,12 @@
     "floor": 0.85
   },
   "roundLottery": {
-    "_说明": "回合抽奖（2026-10-08）：指定回合给所有活人送装备抽奖，复用凯瑟琳「定向投放」的商店栏 pick-one 面板。rolls = 该回合推几轮独立抽奖，choices = 每轮几选 1（rolls=2, choices=5 ⇒ 两轮独立 5 选 1）。rounds = 回合表，每项 { round, minTier }：minTier = 该回合装备池的最低阶（1=全阶混池，2=去 T1，3=去 T1/T2…）。池 = 各人当前商店等级可出的装备（shopEligible），再按 minTier 过滤。",
+    "_说明": "回合抽奖（2026-10-08）：指定回合给玩家送装备抽奖，复用凯瑟琳「定向投放」的商店栏 pick-one 面板。rolls = 该回合推几轮独立抽奖，choices = 每轮几选 1（rolls=2, choices=5 ⇒ 两轮独立 5 选 1）。rounds = 回合表，每项 { round, minTier, maxTier? }：minTier = 装备池最低阶（1=全阶混池，2=去 T1，3=去 T1/T2…），maxTier 默认 6（全阶；填 \"shopLevel\" 则按该玩家商店等级限制上限）。includeBots 默认 false = 不给 AI 发。",
     "enabled": true,
     "rolls": 2,
     "choices": 5,
     "label": "军备抽奖",
+    "includeBots": false,
     "rounds": [
       { "round": 3, "minTier": 1 },
       { "round": 6, "minTier": 2 },

@@ -2062,9 +2062,10 @@ export class Match {
 
   /**
    * 回合抽奖：本回合在配置表里时，给每个活人玩家推 `rolls` 轮独立装备抽奖（各 `choices` 选 1）。
-   * 装备池 = 当前商店等级可出的全部装备（choices.json `pool_equip_kathe` 语义：shopEligible + maxTier=shopLevel），
-   * 再按该回合配置的 `minTier` 剔除低阶（第 6 回合去 T1、第 10 回合去 T1/T2 …）。
+   * 装备池 = `minTier`~`maxTier` 阶的全部可出装备（默认 maxTier=6 全阶，抽奖是奖励不该被个人商店等级卡住）。
    * 复用凯瑟琳「定向投放」的 pick-one 面板（pushItemOffer），多轮靠 offers 队列排队——**零改动** pickReward 与客户端。
+   * `includeBots`（配置项，默认 false）：**默认不给 AI 发**（用户 2026-10-08 定：AI 不需要，省得替它做选择逻辑）。
+   * 未领取的 offer 由 `PlayerState.endPrep()` 清空，不会卡住队列。
    * @param {any[]} alive 本回合活人玩家
    */
   _grantRoundLottery(alive) {
@@ -2073,6 +2074,7 @@ export class Match {
     const entry = rl.rounds.find((r) => r.round === this.round);
     if (!entry) return;
     for (const ps of alive) {
+      if (!rl.includeBots && ps.isBot) continue;   // 默认跳过 AI
       for (let i = 0; i < rl.rolls; i++) {
         const ids = this._rollLotteryItems(rl.choices, entry.minTier, ps, entry.maxTier);
         if (ids.length) ps.pushItemOffer(ids, { source: 'lottery', label: rl.label });

@@ -67,6 +67,28 @@ describe('回合抽奖 · 发放', () => {
       assert.equal(ps.offers.filter((o) => o.source === 'lottery').length, 1, 'rolls=1 ⇒ 1 轮');
     }
   });
+
+  test('includeBots 默认 false：AI 座位不发抽奖', () => {
+    writeCfg({ roundLottery: { enabled: true, rolls: 2, choices: 5, rounds: [{ round: 3, minTier: 1 }] } });
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, bots: 1, seed: 61, registry: REG, fake: true });
+    h.start();
+    h.toPrep(3);
+    const m = h.m;
+    const bot = [...m.players.values()].find((p) => p.isBot);
+    assert.ok(bot, '有 AI 座位');
+    assert.equal(bot.offers.filter((o) => o.source === 'lottery').length, 0, 'AI 默认不发');
+    const human = [...m.players.values()].find((p) => !p.isBot);
+    assert.equal(human.offers.filter((o) => o.source === 'lottery').length, 2, '真人照常发 2 轮');
+  });
+
+  test('includeBots=true 时 AI 也发', () => {
+    writeCfg({ roundLottery: { enabled: true, rolls: 1, choices: 5, includeBots: true, rounds: [{ round: 3, minTier: 1 }] } });
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 1, bots: 1, seed: 62, registry: REG, fake: true });
+    h.start();
+    h.toPrep(3);
+    const bot = [...h.m.players.values()].find((p) => p.isBot);
+    assert.equal(bot.offers.filter((o) => o.source === 'lottery').length, 1, 'includeBots=true ⇒ AI 也发');
+  });
 });
 
 describe('回合抽奖 · 池过滤（minTier）', () => {
