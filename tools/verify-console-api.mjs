@@ -48,9 +48,10 @@ check('数组配置 → 400 拒绝', bad2.status === 400 && bad2.body.ok === fal
 const bad3 = await post('null', true);
 check('null 配置 → 400 拒绝', bad3.status === 400, `err=${bad3.body.error}`);
 
-// ⑦ 拒绝后磁盘仍是上一次的好配置
+// ⑦ 拒绝后磁盘仍是上一次成功保存的好配置（对比 off，而不是硬编码值——否则线上/测试服会因残留值不同而假失败）
 const disk2 = JSON.parse(fs.readFileSync('config/custom-rules.json', 'utf8'));
-check('拒绝后磁盘未被写坏', disk2.roundLottery?.rolls === 3, `disk.rolls=${disk2.roundLottery?.rolls}`);
+check('拒绝后磁盘未被写坏', disk2.roundLottery?.rolls === off.roundLottery.rolls && disk2.prepDebt?.enabled === false,
+  `disk.rolls=${disk2.roundLottery?.rolls}（期望 ${off.roundLottery.rolls}）prepDebt.enabled=${disk2.prepDebt?.enabled}`);
 
 // ⑧ 恢复原始配置
 const back = await post(original);
@@ -58,4 +59,6 @@ check('恢复原配置成功', back.body.ok === true && back.body.rules?.prepDeb
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n=== ${results.length - failed.length}/${results.length} 通过 ===`);
-process.exit(failed.length ? 1 : 0);
+// 不用 process.exit：Windows 上 fetch(undici) 的 keep-alive 连接会让 libuv 在退出时抛
+// "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" 噪音。设 exitCode 让它自然退出。
+process.exitCode = failed.length ? 1 : 0;
