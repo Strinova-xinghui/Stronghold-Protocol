@@ -159,7 +159,30 @@
     </div>
   </section>
 
-  <!-- ⑥ 原始 JSON -->
+  <!-- ⑥ 对局节奏 -->
+  <section class="panel" data-panel="pacing">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="pacing"> 对局节奏（pacing）</label></h2>
+      <p class="desc">分项加时，<b>只改时长不改难度</b>。倍率 1 = 官方原值，1.5 = 加时到 1.5 倍。<b>前三项热改立即生效</b>（下一轮次/下一个休整期用新值）。</p>
+      <div class="row">
+        <label class="f">策略轮选倍率 bandDraftMul<input type="number" data-f="pacing.bandDraftMul" min="0.1" max="10" step="0.1"></label>
+        <label class="f">机变倍率 spDraftMul<input type="number" data-f="pacing.spDraftMul" min="0.1" max="10" step="0.1"></label>
+        <label class="f">休整期倍率 prepMul<input type="number" data-f="pacing.prepMul" min="0.1" max="10" step="0.1"></label>
+      </div>
+      <p class="hint">官方原值：策略轮选 30 秒/轮 · 机变首轮 30 秒、后续 16 秒/轮 · 休整期 65–195 秒（随回合）。</p>
+      <div class="sub" style="margin-top:12px">
+        <div class="subhead"><b>对局速度（战斗推进）</b><span class="hint">实现已就绪，默认不启用</span></div>
+        <div class="row">
+          <label class="f">combatSpeed（游戏秒/现实秒）
+            <input type="text" data-f="pacing.combatSpeed" placeholder="留空 = 官方 2×（不启用）">
+          </label>
+        </div>
+        <p class="hint">⚠️ <b>不热改</b>：战斗时间轴按开局速度换算，中途变速会让游戏内时间与现实时间错位（可能出现提前判超时/进度条倒退）。填数字（如 3）后需<b>重开一局</b>生效；留空或 0 = 官方 2×。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ⑦ 原始 JSON -->
   <section class="panel" data-panel="__raw">
     <div class="card">
       <h2>原始 JSON</h2>
@@ -245,6 +268,9 @@ function setStat(d) {
   if (d.rules?.roundLottery) on.push('抽奖');
 
   if (d.rules?.extraRounds) on.push('回合编排');
+
+
+  if (d.rules?.pacing) on.push('对局节奏');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -264,10 +290,11 @@ function ensureShape() {
     mixPerRound: true, poolTemplates: [],
   };
   cfg.extraRounds.poolTemplates = Array.isArray(cfg.extraRounds.poolTemplates) ? cfg.extraRounds.poolTemplates : [];
+  cfg.pacing = cfg.pacing || { enabled: true, bandDraftMul: 1, spDraftMul: 1, prepMul: 1, combatSpeed: null };
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['pacing','对局节奏'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';
@@ -369,6 +396,11 @@ for (const inp of document.querySelectorAll('[data-f]')) {
     const [g, f] = inp.dataset.f.split('.');
     if (f === 'poolTemplates') {                                 // 逗号分隔 → 数组
       cfg[g][f] = inp.value.split(',').map((x) => x.trim()).filter(Boolean);
+      return;
+    }
+    if (f === 'combatSpeed') {                                   // 留空/0/负数 → null（不启用）
+      const n = Number(inp.value);
+      cfg[g][f] = Number.isFinite(n) && n > 0 ? n : null;
       return;
     }
     cfg[g][f] = inp.type === 'checkbox' ? inp.checked : (inp.type === 'number' ? Number(inp.value) : inp.value);

@@ -32,12 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -166,7 +166,22 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds ? out : OFF;
+  // ---- 对局节奏（pacing，自研 2026-10-08）：分项时间倍率，**只加时长、不改难度**。
+  //      bandDraftMul = 策略轮选（BAND_DRAFT）每轮时长倍率（1.5 = 加时到 1.5 倍）
+  //      spDraftMul   = 机变（SP_DRAFT）每轮时长倍率（用户要求与策略轮选一起加）
+  //      prepMul      = 休整期时长倍率
+  //      combatSpeed  = 对局速度（游戏秒/现实秒；默认 2 = 官方强制的 2×）——**默认不启用**，要用时填 >0
+  const pc = raw.pacing && typeof raw.pacing === 'object' ? raw.pacing : null;
+  if (pc && pc.enabled) {
+    const bandDraftMul = Math.max(0.1, Math.min(10, numOr(pc.bandDraftMul, 1)));
+    const spDraftMul = Math.max(0.1, Math.min(10, numOr(pc.spDraftMul, 1)));
+    const prepMul = Math.max(0.1, Math.min(10, numOr(pc.prepMul, 1)));
+    const csRaw = Number(pc.combatSpeed);
+    const combatSpeed = Number.isFinite(csRaw) && csRaw > 0 ? Math.min(csRaw, 200) : null;   // null = 用官方默认
+    out.pacing = Object.freeze({ enabled: true, bandDraftMul, spDraftMul, prepMul, combatSpeed });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing ? out : OFF;
 }
 
 /**

@@ -15,7 +15,7 @@ await page.goto(`http://127.0.0.1:${PORT}/console`, { waitUntil: 'networkidle2',
 await new Promise((r) => setTimeout(r, 1200));
 
 check('页面标题正确', (await page.title()).includes('规则控制台'));
-check('6 个标签页渲染', (await page.$$('.tab')).length === 6);
+check('7 个标签页渲染', (await page.$$('.tab')).length === 7);
 check('状态胶囊显示生效中', /生效中/.test(await page.$eval('#stat', (e) => e.textContent)));
 check('三选一表单有候选位规则', (await page.$$('#roSlots .sub')).length >= 1);
 check('抽奖表单有回合项', (await page.$$('#rlRounds .sub')).length >= 3, `rounds=${(await page.$$('#rlRounds .sub')).length}`);
@@ -24,6 +24,11 @@ await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.t
 await new Promise((r) => setTimeout(r, 300));
 check('回合编排页有 curve 下拉', !!(await page.$('select[data-f="extraRounds.curve"]')));
 check('回合编排页有 count 输入', !!(await page.$('input[data-f="extraRounds.count"]')));
+await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('对局节奏'))?.click());
+await new Promise((r) => setTimeout(r, 300));
+check('对局节奏页有 bandDraftMul', !!(await page.$('input[data-f="pacing.bandDraftMul"]')));
+check('对局节奏页有 spDraftMul', !!(await page.$('input[data-f="pacing.spDraftMul"]')));
+check('对局节奏页有 combatSpeed', !!(await page.$('input[data-f="pacing.combatSpeed"]')));
 
 // 切到抽奖页，改 rolls，保存
 await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('回合抽奖'))?.click());

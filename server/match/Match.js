@@ -267,7 +267,11 @@ export class Match {
     this.BattleClass = typeof opts.BattleClass === 'function' ? opts.BattleClass : Battle;
     this.battleContent = opts.battleContent || 'full';
     this.timerScale = Number.isFinite(opts.timerScale) && opts.timerScale >= 0 ? opts.timerScale : 1;
-    this.gameSpeed = Number.isFinite(opts.combatSpeed) && opts.combatSpeed > 0 ? Math.min(opts.combatSpeed, 200) : GAME_SPEED;
+    // 对局节奏（自研 pacing，热读）：combatSpeed 优先取配置，其次 opts（测试用），最后官方默认 2×。
+    // 构造时定一次（战斗时间轴按它换算，中途变速会让「游戏内时间」与「现实时间」错位 → 不热改）。
+    const _pace = this._pacing;
+    const _cs = Number.isFinite(opts.combatSpeed) && opts.combatSpeed > 0 ? opts.combatSpeed : (_pace?.combatSpeed ?? null);
+    this.gameSpeed = Number.isFinite(_cs) && _cs > 0 ? Math.min(_cs, 200) : GAME_SPEED;
     /** layouts a bot rehearses per prep with the real simulation (bot.js; 0 = heuristic placement only) */
     this.botRehearsal = Number.isInteger(opts.botRehearsal) && opts.botRehearsal >= 0 ? Math.min(opts.botRehearsal, 8) : BOT_REHEARSAL_DEFAULT;
     /** wall-clock budget of one rehearsal slice (scheduleBotPrep) */
@@ -1512,8 +1516,11 @@ export class Match {
     return d.order[d.idx] ?? null;
   }
 
-  /** Real ms of one strategy-draft turn (BAND_TURN_SECONDS × timerScale). */
-  bandTurnMs() { return this.scaled(BAND_TURN_SECONDS * 1000); }
+  /** Real ms of one strategy-draft turn (BAND_TURN_SECONDS × timerScale × pacing.bandDraftMul). */
+  bandTurnMs() {
+    const mul = this._pacing?.bandDraftMul ?? 1;
+    return this.scaled(BAND_TURN_SECONDS * 1000 * mul);
+  }
 
   startDraftTurn() {
     const d = this.draft;
@@ -1766,7 +1773,8 @@ export class Match {
     const token = ++this._turnToken;
     if (!s.untimed) {
       const first = s.idx === 0;
-      const secs = first ? this.gd.timer('spFirst') : this.gd.timer('spTurn');
+      // 机变每轮时长 × pacing.spDraftMul（自研加时，与策略轮选同口径）
+      const secs = (first ? this.gd.timer('spFirst') : this.gd.timer('spTurn')) * (this._pacing?.spDraftMul ?? 1);
       this.setDeadline(secs, () => {
         if (this.phase !== PHASE.SP_DRAFT || token !== this._turnToken) return;
         const ps = this.players.get(this.spTurn());
@@ -1934,8 +1942,8 @@ export class Match {
     // pick-one 面板 = pushItemOffer；多轮靠 offers 队列排队，客户端显示「+N」）。放在 onPrepStart 之后，
     // 此时本回合的免费/奖励都已发放，抽奖面板排在它们后面。
     this._grantRoundLottery(alive);
-    // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime
-    const secs = this.soloUntimed ? null : this.gd.prepTime(this.round);
+    // solo / single-human matches: untimed (soloUntimed); co-op: the round's prepTime（× pacing.prepMul 加时）
+    const secs = this.soloUntimed ? null : this.gd.prepTime(this.round) * (this._pacing?.prepMul ?? 1);
     this._prepWaiters = new Set();      // 新回合重置等待投票（自研）
     this._prepWaitHeldApplied = false;
     this._prepWaitRemainSecs = null;
@@ -2033,6 +2041,14 @@ export class Match {
    */
   get _debtRule() {
     try { return getCustomRules({ log: this.log }).prepDebt || null; } catch { return null; }
+  }
+
+  /**
+   * 对局节奏（custom-rules.json pacing，热读）：bandDraftMul（策略轮选加时）/ prepMul（休整期加时）实时生效；
+   * combatSpeed（对局速度）只在构造时读一次（见构造器——战斗中变速会让时间轴错位）。
+   */
+  get _pacing() {
+    try { return getCustomRules({ log: this.log }).pacing || null; } catch { return null; }
   }
 
   /**
