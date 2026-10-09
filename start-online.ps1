@@ -114,6 +114,8 @@ if (-not $Tunnel) {
               '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
     if ($seatMode -gt 4) { $invite += "`r`n" + "本房是 $seatMode 人模式（最多 $seatMode 名博士）" }
     if ($v6Url) { $invite += "`r`n" + "IPv6直连(手机流量): $v6Url" }
+    if ($rad) { $invite += "`r`n" + "Radmin组网(低延迟): http://$($rad.IPAddress):$chosen" }
+    $invite += "`r`n" + "本机游玩: http://localhost:$chosen"
     Set-Clipboard -Value $invite
     Write-Host '[固定网址已自动复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process "http://localhost:$chosen"
