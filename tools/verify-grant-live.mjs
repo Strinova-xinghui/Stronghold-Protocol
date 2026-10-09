@@ -86,7 +86,7 @@ try {
     await sleep(400);
   }
   const fundsHits = (fundsMsg.match(/✓/g) || []).length;
-  check('发钱成功（含左右队友）', fundsHits >= 2, fundsMsg.slice(0, 100));
+  check('发钱成功（含所有玩家）', fundsHits >= 2, fundsMsg.slice(0, 100));
 
   // ⑥ 独立 API 交叉确认：state 端点仍返回该对局
   const st = await (await fetch(`http://127.0.0.1:${PORT}/console/api/state`)).json();

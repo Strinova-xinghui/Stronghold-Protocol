@@ -224,8 +224,8 @@
 
 ### 实时发放钱（funds，2026-10-09 自研追加，用户需求——发放功能的追加）
 
-- **需求**：同样立即生效的发钱 + 「同时给左右队友发」快捷选项。
-- **实现**：复用同一发放系统（**无新端点**）：`grant.js` 加 `kind:'funds'`（`amount` 1..10000 → `PlayerState.addFunds`，**立即**：addFunds 内部 `dirty()` 标记 + 调用方 `m.flush()` 后客户端数字立即变；`addFunds` 钳制 ≥0 并计入 stats）；**includeNeighbors**：同时给左右队友发同样金额——`m.order` 中的**前后座（环形**，第一个玩家的左队友是最后一个；**按 playerId 去重**：2 人局左右是同一人只发一次）；**已出局的队友跳过并如实标注**（「已出局，跳过」）。控制台发放页加「发钱」子块（金额 + 勾选 + 左右队友名字提示——state API 的 players 顺序就是 m.order 座次，选中玩家前后座算出「左 X · 右 Y」）。
+- **需求**：同样立即生效的发钱 + 「**同时给所有玩家发**」快捷选项（**用户更正：最初说「左右」是打错字，实为所有人**——首版做成了 m.order 前后座环形，已改为全员）。
+- **实现**：复用同一发放系统（**无新端点**）：`grant.js` 加 `kind:'funds'`（`amount` 1..10000 → `PlayerState.addFunds`，**立即**：addFunds 内部 `dirty()` 标记 + 调用方 `m.flush()` 后客户端数字立即变；`addFunds` 钳制 ≥0 并计入 stats）；**includeAll**：同时给对局里**所有玩家**发同样金额（`m.order` 全员；**已出局的跳过并如实标注**「已出局，跳过」）。控制台发放页「发钱」子块（金额 + 勾选 + 全员名字提示——state API 的 players 顺序就是 m.order 座次）。
 - **坑**：① 金额缺失/非法时**别用 `Math.max(1, ...)` 钳制**——NaN→0 会被钳成 1 静默发 1 块，必须先判 `Number.isFinite && ≥1` 再钳制；② 测试构造「已出局」**必须走真实 `eliminate(round)`**（清 shop/offers/funds + recompute）——直接改 `alive=false` 会违反不变量（「eliminated but keeps shop/offers」）。
 - **验证**：`grant.test.mjs` **17/17**（发钱立即/金额钳制/缺金额报错/左右环形/环形边界/2 人去重/已出局跳过，全部真实 Match + invariants）；`verify-grant-live.mjs` **10 项**（发钱含左右队友 e2e）。
 

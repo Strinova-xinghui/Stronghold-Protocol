@@ -243,7 +243,7 @@
         <div class="subhead"><b>发钱</b><span class="hint" id="gFundsInfo"></span></div>
         <div class="row">
           <label class="f">金额<input type="number" id="gFundsN" min="1" max="10000" value="10" style="width:110px"></label>
-          <label class="chk"><input type="checkbox" id="gFundsNb"> 同时给左右队友发</label>
+          <label class="chk"><input type="checkbox" id="gFundsNb"> 同时给所有玩家发</label>
           <span class="grow"></span>
           <button class="primary" id="gGrantFunds">发钱</button>
         </div>
@@ -552,19 +552,13 @@ function renderGrantPlayers() {
   playerSel.value = (room?.players || []).some((p) => p.playerId === prev) ? prev : (room?.players?.[0]?.playerId || '');
   const st = room ? `${room.phaseName} · 第 ${room.round} 回合 · ${room.players.length} 名玩家` : '';
   $('#gState').textContent = st;
-  // 发钱的左右队友提示：state API 的 players 顺序就是 m.order（座次），选中玩家的前后座（环形）；2 人局左右是同一人
+  // 发钱的「所有人」提示：state API 的 players 顺序就是 m.order 座次；勾选后给全员发（已出局跳过）
   const fInfo = $('#gFundsInfo');
   if (!room?.players?.length) { fInfo.textContent = ''; }
   else {
-    const idx = room.players.findIndex((p) => p.playerId === playerSel.value);
-    const n = room.players.length;
-    if (idx < 0 || n < 2) { fInfo.textContent = n <= 1 ? '（1 人局：无左右队友）' : ''; }
-    else {
-      const left = room.players[(idx - 1 + n) % n], right = room.players[(idx + 1) % n];
-      fInfo.textContent = left.playerId === right.playerId
-        ? `勾选后同时给 ${left.name} 发（左右是同一人，只发一次）`
-        : `勾选后同时给 左 ${left.name} · 右 ${right.name} 发`;
-    }
+    const alive = room.players.filter((p) => p.alive !== false);
+    fInfo.textContent = alive.length <= 1 ? '（当前没有其他玩家可发）'
+      : `勾选后同时给 ${alive.length} 名玩家发：${alive.map((p) => p.name).join('、')}`;
   }
 }
 
@@ -611,7 +605,7 @@ async function doGrant(kind) {
     const amount = Math.max(1, Math.min(10000, Math.trunc(Number($('#gFundsN').value)) || 0));
     if (!(amount >= 1)) { gMsg('先填金额（1..10000）。', 'err'); return; }
     grantBody.amount = amount;
-    grantBody.includeNeighbors = $('#gFundsNb').checked === true;
+    grantBody.includeAll = $('#gFundsNb').checked === true;
   } else {
     const sel = kind === 'chess' ? grant.selChess : grant.selItem;
     if (!sel) { gMsg(kind === 'chess' ? '先在列表里点选一个棋子。' : '先在列表里点选一件装备。', 'err'); return; }
