@@ -132,7 +132,7 @@ node tools/check-missing-imports.mjs      # 符号审计
 
 - **frpc**：官方守护进程已装为系统服务 + 樱花启动器开机自启 → 两条固定网址 24 小时有效，无需任何操作。
 - **流量签到（2026-10-09 起自动）**：免费套餐基础 5 GiB/月，**每日签到额外给 1~4 GiB**，断签会直接威胁隧道可用性（曾只剩 1.5 GiB）。已自动化：脚本在 `C:\Users\MK\.dsh\automations\sakurafrp-checkin\`（README 见该目录），**DSH 内置定时**每日 12:00 主签 + 21:00 补签。原理：bsk 驱动真实登录的 Edge + NVIDIA NIM `z-ai/glm-5.3-flash` 解极验九宫格（签到的 `/cgi/v4/user/sign` 只认 SESSION 鉴权，API Key 无效）。
-- **只签大号 `wcw20041220`**（游戏隧道归属账号）。小号 `strinovaxinghui` 已弃用：流量虽按账号计，但小号从未实名（`realname:-1`，大号是 2）、且樱花启动器是**单实例单账号**（mutex 锁，多开只唤出原窗口）、捆绑的 frpc 又拒绝直接运行（`-f`/环境变量只打免责声明，官方 frpc 需单独下载），把流量并到大号不现实。脚本靠**逐个探测「你是哪个账号」**认人 + `config.json` 白名单，所以大号登在哪个 Edge 实例都能签；名单外账号记 `other_account` 跳过，不算失败。
+- **只签大号 `wcw20041220`**（游戏隧道归属账号）。小号 `strinovaxinghui` 已弃用：流量虽按账号计，但小号从未实名（`realname:-1`，大号是 2）、且樱花启动器是**单实例单账号**（mutex 锁，多开只唤出原窗口）、捆绑的 frpc 又拒绝直接运行（`-f`/环境变量只打免责声明，官方 frpc 需单独下载），把流量并到大号不现实。脚本靠**逐个探测「你是哪个账号」**认人 + `config.json` 白名单，所以大号登在哪个 Edge 实例都能签；名单外账号记 `other_account` 跳过，不算失败。小号专用实例 `profiles\alt`（482 MB）已于 2026-10-09 连同目录删除；**但 `HKCU\...\ExtensionInstallForcelist` 策略必须保留** —— 默认 profile 的 BrowserSkill 扩展同样靠它下发（`location=7`），删了会连大号一起坏。
 
 - **游戏服务器**：按需一键启动——**双击 `start-online.bat`**（调 start-online.ps1）：钉死端口 24500（与樱花隧道绑定一致，**绝不静默换端口**，被 Hyper-V 保留区圈走时明确报错）、curl 健康检查、复用已运行的源站、打印全部联机地址；关服 = 关闭弹出的服务器窗口。
 - Cloudflare 临时隧道降级为可选兜底（`-Tunnel` 参数才启动），平时不跑。
