@@ -283,3 +283,44 @@
   - **为什么差点漏掉**：我第一轮只单跑了 `test/lobby.test.js`，**真实覆盖在 `test/lobby-kick.test.js`**（名字不含 lobby 主文件），于是把 5 个失败误判成「并行抖动」。**教训：全量测试的失败清单必须逐条按文件单跑复核，不能凭文件名猜覆盖面。**
   - **防复发**：新增符号审计测试（同文件第 2 个 case）——对 16 个移植文件扫描 `MAX_SEATS` / `setSeatLimit` / `poolCopyMulFor` 等 10 个符号，要求「用到就必须 import 或 define」，已反向验证能抓住该 bug。
 
+## 朋友反馈「换隧道后 3D 和图标加载不出来」的排查结论（2026-10-09 深夜）
+
+> 用户报：朋友在 Cloudflare 临时隧道上「3D 直接加载不出来，各类图标也是」。
+> **结论：两件事被混在一起了，都不是隧道的错，也不是「换隧道」引起的。**
+
+### 结论 1：3D 棋盘本来就没启用 —— 与本机/隧道无关，樱花线也一样
+
+- **根因**：3D 棋盘需要**官方客户端素材**（`public/assets/local/**` + `data/local-assets.json`），而本机当初是 `node tools/setup.mjs --no-local` 装的，**从未提取过**。
+- **硬证据**：`data/local-assets.json` 实际内容 = `{"version":1,"source":"none","count":0,"groups":{}}` —— **`count:0`**；`public/assets/local/` 目录不存在。
+- **代码链**（`public/js/render/app.js` L418–423 → `board3d/load.js` L78–83 `boardArtListed`）：
+  `boardArtListed()` 读 manifest 取 `PACK_IMAGES.D = ['map/autochess','TX_autochessi_D']` 的 URL；`groups` 为空 ⇒ 返回 `false` ⇒ `threePromise = null` ⇒ **`three.module.js` 从不下载** ⇒ 走 2D 棋盘。
+- **浏览器实测证实**：隧道页加载 246 个请求，**没有一个请求 `/vendor/three.module.js`**（文件本身存在、200、662 KB，是**没有去请求**）。控制台无相关报错。
+- **注意**：2D 棋盘本身是**透视投影**的（斜视网格 + 立体箱子/闸门观感），容易被误认成「3D 坏了」。朋友看到的平面网格 = 正常 2D 降级，不是加载失败。
+- **要真 3D**：`node tools/setup.mjs --local`（需本机装明日方舟客户端 + Python 3.8+），或从同版本整合包复制 `public/assets/local` 与 `data/local-assets.json`。⚠️ 3D 素材体积很大（`assets/spine` 就 302 MB），**在 200–280 KB/s 的隧道上不要指望**，仅局域网/樱花线可用。
+
+### 结论 2：图标「加载不出来」= 隧道带宽 + 延迟，不是 404
+
+- **实测**：隧道上并发 30 个真实图标 → **30/30 全 200**；并发 20 → 20/20；冷加载 246 请求仅 2 失败（1 个是浏览器扩展噪音 `chrome-extension://invalid`，1 个是外部 Google Fonts CDN `fonts.gstatic.com` 被 `ERR_CONNECTION_RESET`，**都不经过我们的服务器**）。
+- **真正的瓶颈是吞吐**（同文件对照，本机直连 vs 隧道）：
+  | 路径 | 速度 | 3 MB 音频耗时 |
+  | --- | --- | --- |
+  | 本机直连 `127.0.0.1:24500` | **≈ 70 MB/s** | 0.05 s |
+  | 隧道（不走代理，等于朋友真实路径） | **≈ 200–280 KB/s** | 10.8 / 14.9 / 13.9 s |
+- 单个图标平均 2.1–2.7 s，最慢 10–13 s。浏览器渲染首屏要几百个资源 ⇒ 表现为「图标一个个慢慢冒出来、3D 永远转不完」。
+- **隧道日志里的真实错误**（`.cache\tunnel.log`，17 条 ERR）：`Incoming request ended abruptly: context canceled` ×14、`stream canceled by remote` ×2、`failed to accept QUIC stream: timeout` ×1 —— 即**慢导致客户端/边缘主动放弃**，与「资源 404」是两回事。
+- **不可调**：加 `--ha-connections 4` 无改善（quick tunnel 忽略该参数，仍只 `Registered` 1 次）；协议已是 `quic`。**这是 quick tunnel 的固有带宽上限**，无法在客户端调优。
+
+### 结论 3：真正的当务之急是樱花线断了（朋友被迫用慢隧道）
+
+- 排查时发现 **`frpc` 进程未运行**（`SakuraFrpService` 服务在跑，但隧道进程没起来）⇒ `frp-way.com:17913` 与 `frp-cup.com:30756` **均返回 000**。
+- **流量只剩 522 MB**：`state.json` 最近记录 `traffic:[1033872220, 1581294414]` = **已用 0.963 GB / 上限 1.473 GB**。
+- 两个域名 TCP 端口**可达**（DNS 与端口都通），说明是**服务端/隧道进程侧**的问题，不是网络不通。
+- ⇒ **先让用户打开樱花启动器确认隧道恢复**（或等签到补充流量）；固定网址恢复后，朋友的带宽问题自然消失（樱花实测 TTFB 230–262 ms、connect 54–73 ms，远优于隧道）。
+- **长效解法**：10-11 学生认证解锁后迁 Azure VM（公网 IP 直连，彻底摆脱 5 GiB/月与跨洋隧道）。
+
+### 方法论提醒（本次踩到的坑）
+
+- **测隧道必须去掉 `-x http://127.0.0.1:7897`**：走 Clash 代理测出的速度（85 KB/s）与真实路径（200–280 KB/s）差一倍以上。朋友的浏览器**不走代理**，用 `--noproxy '*'` 或直接不指定代理才是对的。
+- **「HTTP 000」不一定是宕机**：`curl` 遇自签证书返回 000（需 `-sk`）；本次 `frp-way` 的 000 则是真的隧道进程没跑（TCP 端口可达但 TLS 握手收不到响应）。两者症状相同、根因不同，要分开验证。
+- **验证「3D 是否启用」看网络请求，不看观感**：2D 棋盘的透视画法极像 3D，唯一硬判据是有没有请求 `three.module.js`。
+

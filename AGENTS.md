@@ -147,6 +147,8 @@ node tools/check-missing-imports.mjs      # 符号审计
   - **实测证据（2026-10-09）**：① `cloudflared 2026.9.3` 预检全 PASS、边缘 IP 是**真实地址** `198.41.200.53`（**不是** fake-ip 198.18.x），location=lax01；② HTTP 首页 `200 / 6304 字节`、`<title>` 正确；③ `/healthz` 穿透返回真实 JSON；④ **WebSocket 全链路通过**（用仓库自带 `test/helpers/wsClient.js` 的 `TestClient`：connect → hello → `room.create` → `room.state` 全成功；隧道 3846ms vs 本机直连 26ms，符合跨洋中继预期）；⑤ Windows PowerShell 5.1 实跑退出码 0、无乱码。
   - **⚠️ 关键前提（历史踩坑已被规则绕过）**：Clash/Mihomo 的 **TUN + fake-ip 会掐断 cloudflared**，但本机已在 mihomo 配置里加了直连规则 **`PROCESS-NAME,cloudflared.exe,DIRECT`**（见 `clash-verge.yaml`；另有 `Merge.yaml` / `m0gurPPZFZSw.yaml` / `mO2aKuM93e1B.yaml` 三处同源规则）。**这条规则必须保留**，否则隧道会像 2026-10-05 那样连不上（症状：日志里 edge IP 变成 `198.18.x`）。
   - **注意**：隧道是跨洋中继（lax01 = 洛杉矶），延迟明显高于樱花国内节点，**只作兜底**；日常优先用固定网址。**2026-10-09 用户决定：不再作为「可选开关」，而是内建为 `start-online.bat` 的默认行为**（后备隐藏能源随开服一起拉起，省得流量耗尽时手忙脚乱）；不想要时 `-NoTunnel` 关掉。
+  - **⚠️ 隧道带宽硬上限 ≈ 200–280 KB/s（2026-10-09 实测）**：本机直连同文件 ≈ 70 MB/s，隧道慢 250 倍。单个图标 2–3 s、3 MB 音频 10–15 s，浏览器首屏几百个资源 ⇒ 表现为「图标慢慢冒出来、画面转不完」。`--ha-connections` 调不动（quick tunnel 忽略），是固有上限。**隧道只适合应急进游戏，不适合长期玩**；排查细节见 [NOTES.md](NOTES.md) 末尾「朋友反馈换隧道后 3D 和图标加载不出来」。
+  - **⚠️ 3D 棋盘本机从未启用（与隧道无关）**：`data/local-assets.json` 是 `{"source":"none","count":0}`、`public/assets/local/` 不存在 ⇒ `boardArtListed()` 返回 false ⇒ **不请求 `three.module.js`** ⇒ 走 2D 棋盘。2D 棋盘自带透视投影，容易被误认为「3D 坏了」。要真 3D 需 `node tools/setup.mjs --local`（需本机官方客户端 + Python 3.8+）。
 - 已放弃计划任务开机自启方案（用户选择按需启动）；`scripts/install-service-windows.ps1` 仍在仓库里，未来想改回自启可直接用：`-Port 24500 -AllowPublicNetwork`。
 - 手动起服备用：`$env:PORT=24500; npm start`。
 
