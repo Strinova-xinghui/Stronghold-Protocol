@@ -1,12 +1,14 @@
-﻿# 卫戍协议：盟约 —— 一键公网开服脚本（Cloudflare 临时隧道）
-# 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 24500] [-MaxSeats 6] [-Tunnel]
+﻿# 卫戍协议：盟约 —— 一键公网开服脚本（樱花固定网址 + Cloudflare 临时隧道兜底）
+# 用法：powershell -ExecutionPolicy Bypass -File start-online.ps1 [-Port 24500] [-MaxSeats 6] [-NoTunnel]
+# 默认**同时**起 Cloudflare 临时隧道（零流量配额，兜底隐藏能源），隧道地址与固定网址一起进剪贴板。
+# 只想要樱花固定网址、不起隧道（省内存/不想暴露临时地址）：加 -NoTunnel。
 # 前提：已 npm install && node tools/setup.mjs --no-local；Clash 若开 TUN 需给 cloudflared.exe 加直连规则
 # 注意：本文件必须保存为 UTF-8 带 BOM，否则 Windows PowerShell 5.1 会解析失败（中文变乱码）
 #
 # 座位数默认 6（房间 6 个座位）。**4 人及以下玩时规则与数值逐字节等同官方原版**——所有缩放的唯一输入是
 # 「实际入座人数」(Match.seatCount)，房间容量从不进入对局引擎（见 docs/DESIGN.md §25 与 AGENTS.md）。
 # 想开一个严格只能坐 4 人的服（例如要向外人证明「就是官方」）：加 -MaxSeats 4。
-param([int]$Port = 24500, [int]$MaxSeats = 6, [switch]$Tunnel)
+param([int]$Port = 24500, [int]$MaxSeats = 6, [switch]$NoTunnel)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
@@ -83,8 +85,9 @@ if ($alreadyRunning) {
     Write-Host "[ok] 服务器已启动（后台最小化窗口，$seatNote），本机地址 http://localhost:$chosen（定向甄选按 config/custom-rules.json，监控 /monitor）" -ForegroundColor Green
 }
 
-# 3. Cloudflare 隧道：默认跳过（樱花 frp 已提供两条固定网址）。需要兜底隧道时加 -Tunnel 参数
-if (-not $Tunnel) {
+# 3. Cloudflare 隧道：**默认启用**（零流量配额的后备隐藏能源，樱花流量耗尽时的唯一入口）。
+#    只想要樱花固定网址、不起隧道：加 -NoTunnel。
+if ($NoTunnel) {
     Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force
     Write-Host ''
     Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
@@ -122,7 +125,7 @@ if (-not $Tunnel) {
     exit 0
 }
 
-# 3b.（可选兜底）起 cloudflared 临时隧道，日志写 .cache\tunnel.log（地址在 stderr 里）
+# 3b. 起 cloudflared 临时隧道，日志写 .cache\tunnel.log（地址在 stderr 里）
 Start-Sleep -Seconds 1
 $cf = Join-Path ${env:ProgramFiles(x86)} 'cloudflared\cloudflared.exe'
 if (-not (Test-Path $cf)) { $cf = 'cloudflared' }
@@ -130,6 +133,26 @@ $cacheDir = Join-Path $root '.cache'
 New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 $tlog = Join-Path $cacheDir 'tunnel.log'
 $olog = Join-Path $cacheDir 'tunnel-out.log'
+# 先清掉上一次的隧道进程与旧日志：临时隧道地址每次都会变，
+# 不清日志会让下面的轮询读到「上一次的旧地址」，打印出一个已经失效的链接（实测踩坑）。
+$oldCf = Get-Process cloudflared -ErrorAction SilentlyContinue
+if ($oldCf) {
+    Write-Host "[i] 发现 $($oldCf.Count) 个遗留 cloudflared，先清理（临时隧道地址本来每次都会变）" -ForegroundColor DarkGray
+    $oldCf | Stop-Process -Force -ErrorAction SilentlyContinue
+    # 等进程真正退出再删日志：进程未退时文件仍被占用，Remove-Item 会静默失败，
+    # 残留的旧日志就会被下面的轮询读到、打印出已失效的旧地址。
+    for ($w = 0; $w -lt 10; $w++) {
+        if (-not (Get-Process cloudflared -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 500
+    }
+}
+Remove-Item $tlog, $olog -Force -ErrorAction SilentlyContinue
+# 删除必须成功：否则宁可报错，也不能把旧地址当成新地址发出去
+if (Test-Path $tlog) {
+    Write-Host "[!] 旧的隧道日志删不掉（$tlog 被占用）。请手动关闭所有 cloudflared 后重试。" -ForegroundColor Red
+    Write-Host '    继续下去会把上一次的旧地址当成新地址打印出来（已失效，朋友打不开）。' -ForegroundColor Red
+    exit 1
+}
 Start-Process -FilePath $cf -ArgumentList 'tunnel', "--url", "http://localhost:$chosen" `
     -WindowStyle Hidden -RedirectStandardError $tlog -RedirectStandardOutput $olog
 
@@ -186,6 +209,19 @@ if ($url) {
     Write-Host '[完整邀请（隧道+固定网址+APK）已复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process $url
 } else {
-    Write-Host "隧道地址获取失败。排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）？2) 日志: $tlog" -ForegroundColor Red
-    exit 1
+    # 隧道失败 ≠ 开服失败：服务器已经起来了，樱花固定网址仍然可用，降级提示而不是直接报错退出。
+    Write-Host ''
+    Write-Host '==================== 联机地址（发给朋友） ====================' -ForegroundColor Green
+    Write-Host '  [隧道未建立] Cloudflare 临时隧道没起来，但服务器本身正常。' -ForegroundColor Yellow
+    Write-Host '  排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）' -ForegroundColor Yellow
+    Write-Host "        2) 日志: $tlog" -ForegroundColor Yellow
+    Write-Host '  [樱花frp] 固定网址（浏览器: https://frp-way.com:17913 · APK: http://frp-cup.com:30756）' -ForegroundColor Cyan
+    Write-Host "本机游玩: http://localhost:$chosen" -ForegroundColor Green
+    Write-Host '=============================================================' -ForegroundColor Green
+    Set-Clipboard -Value ('浏览器(电脑/iOS/安卓): https://frp-way.com:17913' + "`r`n" +
+                          '安卓APK: http://frp-cup.com:30756（延迟较高）' + "`r`n" +
+                          '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）')
+    Write-Host '[固定网址已复制到剪贴板]' -ForegroundColor Green
+    Start-Process "http://localhost:$chosen"
+    exit 0
 }
