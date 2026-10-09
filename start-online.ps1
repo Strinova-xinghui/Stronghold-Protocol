@@ -170,11 +170,18 @@ if ($url) {
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
     Write-Host '关服: 关闭弹出的服务器窗口，或任务管理器结束 node.exe。服务器窗口可最小化，别关。'
-    # 临时隧道地址自动进剪贴板（与无隧道分支行为一致）：Ctrl+V 直接发朋友
-    $inviteT = "临时兜底隧道（本次有效，重启会变）: $url" + "`r`n" +
-               "本机游玩: http://localhost:$chosen"
+    # 完整邀请文案自动进剪贴板：临时隧道（今晚主力）+ 固定网址（备用）+ APK + 座位数，一次粘贴全给朋友
+    $inviteT = "浏览器(电脑/iOS/安卓): $url" + "`r`n" +
+               "   ↑ 临时兜底隧道（本次有效，重启会变）" + "`r`n" +
+               '固定网址(备用): https://frp-way.com:17913' + "`r`n" +
+               '安卓APK: http://frp-cup.com:30756（延迟较高）' + "`r`n" +
+               '下载APK: https://github.com/Paper-Yuan/Stronghold-Protocol/releases （v0.1.4）'
+    if ($seatMode -gt 4) { $inviteT += "`r`n" + "本房是 $seatMode 人模式（最多 $seatMode 名博士）" }
+    if ($v6b) { $inviteT += "`r`n" + "IPv6直连(手机流量): http://[$($v6b.IPAddress)]:$chosen" }
+    if ($rad) { $inviteT += "`r`n" + "Radmin组网(低延迟): http://$($rad.IPAddress):$chosen" }
+    $inviteT += "`r`n" + "本机游玩: http://localhost:$chosen"
     Set-Clipboard -Value $inviteT
-    Write-Host '[临时隧道地址已复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
+    Write-Host '[完整邀请（隧道+固定网址+APK）已复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process $url
 } else {
     Write-Host "隧道地址获取失败。排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）？2) 日志: $tlog" -ForegroundColor Red
