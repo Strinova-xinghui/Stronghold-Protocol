@@ -102,6 +102,7 @@ node tools/check-missing-imports.mjs      # 符号审计
 
 - **开服**：双击 `start-online.bat`——**唯一的启动入口，默认开 6 座房**（4 人及以下玩时等同官方，所以不必再分两个脚本）。要严格 4 座：`-MaxSeats 4`。`SP_BOND_BOOST` 在脚本里**已注释停用**（朋友反馈全格加成太高，改由「定向甄选」按 `config/custom-rules.json` 生效）；想恢复取消注释即可。所有打印地址以 frp-way.com:17913 为主力。
 - **关服**：双击 `stop-online.bat` —— 只停 24500 上的游戏服务器（先 curl 验身份防误杀），不动 frpc/其他程序；有 SYSTEM 残留时自动 taskkill 兜底并提示。
+- **流量耗尽兜底**：双击 **`start-fallback-tunnel.bat`** —— 起 Cloudflare 临时隧道（零流量配额），把打印的 `https://xxx.trycloudflare.com` 发给朋友。已开服时会复用现有服务器，**不打断在线玩家**。详见下方「✅ 流量耗尽兜底」。
 - **主力地址已切换**：`https://frp-way.com:17913`（#218 新节点，自动 HTTPS）——因合肥 #83 节点故障退役；APK 明文线 `http://frp-cup.com:30756`（日本 #74）不变；剪贴板文案与脚本打印已同步。
 - 关服脚本若提示「被守护进程复活」，说明还有别的自启机制在拉 node，按提示排查计划任务。
 ## 4. 和朋友一起玩（2026-10-05 实测：Cloudflare 临时隧道已打通）
@@ -137,7 +138,14 @@ node tools/check-missing-imports.mjs      # 符号审计
 - **顺带托管导弹包线图后端（2026-10-09 评估）**：同作者的 `missile-backend`（FastAPI + numpy 计算服务，Docker 镜像）**Azure Functions 不合适** —— 进程内单例状态（`JobStore`/`ResultCache`/`TokenBucket`）被多实例拆散、HTTP 触发 230 秒硬上限、新推荐的 Flex Consumption 不支持容器；**与卫戍协议共用这台 VM 才是最优解**（零新增成本、单实例、无冷启动）。⚠️ 但三种免费规格**都只有 1 GiB 内存**，两个服务同时常驻很可能顶上限 ⇒ 加 swap 或错峰启动。完整评估见 `E:\missile-backend\docs\AZURE-DEPLOY.md`。
 - **游戏服务器**：按需一键启动——**双击 `start-online.bat`**（调 start-online.ps1）：钉死端口 24500（与樱花隧道绑定一致，**绝不静默换端口**，被 Hyper-V 保留区圈走时明确报错）、curl 健康检查、复用已运行的源站、打印全部联机地址；关服 = 关闭弹出的服务器窗口。
 - **云服务器迁移预案（2026-10-09 调研定稿，待学生认证解锁后执行）**：用户 GitHub 学生认证已于 **2026-10-08 上午批准**，进入 **72 小时等待期**，**解锁时刻 ≈ 10-11 11:24–11:54（北京时间）**。这个时刻是**两路独立证据交叉锁定**的（GitHub 网页本身只给日期、无时刻，`relative-time` 元素为空）：① 学校邮箱（stumail.sztu.edu.cn，Coremail，`totime` 属性是**毫秒级 Unix 时间戳**）里 10-08 那封 `[GitHub Education] 😢 @Strinova-xinghui`（"We need more information demonstrating your academic affiliation."）时间戳 `1791429836000` = **10-08 11:23:56**，用户口径「失败到通过中间不到半小时」⇒ 通过 ≈ 11:24–11:54；② 邮件链佐证——紧随其后的 `[GitHub] A third-party OAuth application (Microsoft-Corporation)` = 11:49:08、`[GitHub] An email address (wcw20041220@outlook.com) was added` = 11:53:50，正是通过后立刻绑定微软账号的动作，把通过时刻夹在 **11:24–11:49**。**关键认知：GitHub 批准学生包不发邮件**（全邮箱翻遍只有那 4 封 GitHub 邮件，无批准信），批准信要等 72h 权益到账才发——所以「没收到批准邮件」不等于没通过。判定"是否已解锁"只需看 benefits 页文案从 `Awaiting Benefits` 变成可领取。**方案与成本核对详见 [docs/CLOUD-HOSTING.md](docs/CLOUD-HOSTING.md) 方案三**。要点：① 免费额度含 **750 小时/月**的 B1s / B2pts v2(Arm) / B2ats v2(AMD) 三种 VM（750h ≈ 31.25 天 > 一月，**可 24/7 常驻不额外扣额度**），但**磁盘不免费**——🩹 **更正**：此前写的「P6 64 GiB ≈ $0.73/月」是**错的**，`$0.728` 是 `P6 LRS Disk Mount`（挂载计费项）单价；磁盘本体实测（东亚，Retail Prices API）：`P6 LRS` 64 GiB Premium = **$11.2272/月 ≈ $134.73/年**（❌ **超出 $100 额度**）、`E4 LRS` 32 GiB Standard SSD = **$2.40/月 ≈ $28.80/年**（✅ 推荐）、`S4 LRS` 32 GiB HDD = $1.536/月。**做法：系统盘保持默认 30 GiB、类型选 Standard SSD（E4）**，一年约 $28.8，$100 额度绰绰有余；② 推荐 **B2ats_v2（2 核 1 GiB，x86）** + **东亚/东南亚**区域；③ 本项目纯 JS 无原生模块，Arm/x86 均可；④ **迁完即可退役樱花隧道与整套签到自动化**（有了公网 IP，不再受 5 GiB/月 限制）——这是比每天签到更根本的解法；⑤ 明文 `http://<公网IP>:24500` 直接可用，**没有自签证书问题，安卓 APK 可直连**（原先要专门开海外明文线）。
-- Cloudflare 临时隧道降级为可选兜底（`-Tunnel` 参数才启动），平时不跑。
+- **✅ 流量耗尽兜底：Cloudflare 临时隧道已实测可用（2026-10-09 端到端验证通过）**。樱花免费套餐基础仅 5 GiB/月（签到补 1~4 GiB），**一旦耗尽，固定网址 `frp-way.com:17913` / `frp-cup.com:30756` 立刻失效**。此时无需改任何代码，直接用兜底隧道：
+  - **一键**：双击 **`start-fallback-tunnel.bat`**（= `start-online.ps1 -Tunnel`）。
+  - **命令行**：`powershell -ExecutionPolicy Bypass -File start-online.ps1 -Tunnel`。
+  - **已开服时也能用**：脚本检测到 24500 已在跑会**跳过启动、直接复用**（实测输出「[ok] 游戏服务器已在端口 24500 运行（6 人房），跳过启动」），**不用关服、不打断在线玩家**。
+  - **零流量配额**：Cloudflare quick tunnel 无需账号、不计樱花流量。地址形如 `https://xxx.trycloudflare.com`，**每次重启都会变**，需重新发给朋友；地址会自动进剪贴板（无隧道分支与隧道分支**都已补上** `Set-Clipboard`）。
+  - **实测证据（2026-10-09）**：① `cloudflared 2026.9.3` 预检全 PASS、边缘 IP 是**真实地址** `198.41.200.53`（**不是** fake-ip 198.18.x），location=lax01；② HTTP 首页 `200 / 6304 字节`、`<title>` 正确；③ `/healthz` 穿透返回真实 JSON；④ **WebSocket 全链路通过**（用仓库自带 `test/helpers/wsClient.js` 的 `TestClient`：connect → hello → `room.create` → `room.state` 全成功；隧道 3846ms vs 本机直连 26ms，符合跨洋中继预期）；⑤ Windows PowerShell 5.1 实跑退出码 0、无乱码。
+  - **⚠️ 关键前提（历史踩坑已被规则绕过）**：Clash/Mihomo 的 **TUN + fake-ip 会掐断 cloudflared**，但本机已在 mihomo 配置里加了直连规则 **`PROCESS-NAME,cloudflared.exe,DIRECT`**（见 `clash-verge.yaml`；另有 `Merge.yaml` / `m0gurPPZFZSw.yaml` / `mO2aKuM93e1B.yaml` 三处同源规则）。**这条规则必须保留**，否则隧道会像 2026-10-05 那样连不上（症状：日志里 edge IP 变成 `198.18.x`）。
+  - **注意**：隧道是跨洋中继（lax01 = 洛杉矶），延迟明显高于樱花国内节点，**只作兜底**；流量恢复后应切回固定网址。原「降级为可选兜底、平时不跑」的定位不变。
 - 已放弃计划任务开机自启方案（用户选择按需启动）；`scripts/install-service-windows.ps1` 仍在仓库里，未来想改回自启可直接用：`-Port 24500 -AllowPublicNetwork`。
 - 手动起服备用：`$env:PORT=24500; npm start`。
 

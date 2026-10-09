@@ -170,6 +170,11 @@ if ($url) {
     Write-Host '=============================================================' -ForegroundColor Green
     Write-Host "本机游玩: http://localhost:$chosen"
     Write-Host '关服: 关闭弹出的服务器窗口，或任务管理器结束 node.exe。服务器窗口可最小化，别关。'
+    # 临时隧道地址自动进剪贴板（与无隧道分支行为一致）：Ctrl+V 直接发朋友
+    $inviteT = "临时兜底隧道（本次有效，重启会变）: $url" + "`r`n" +
+               "本机游玩: http://localhost:$chosen"
+    Set-Clipboard -Value $inviteT
+    Write-Host '[临时隧道地址已复制到剪贴板，Ctrl+V 直接发给朋友]' -ForegroundColor Green
     Start-Process $url
 } else {
     Write-Host "隧道地址获取失败。排查: 1) Clash TUN 是否接管了流量（日志 edge IP 为 198.18.x 即中招）？2) 日志: $tlog" -ForegroundColor Red
