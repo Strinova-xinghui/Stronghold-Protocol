@@ -7,6 +7,8 @@
 // fromPool: false —— GM 发放不走共享卡池（不抽干卡池，盟友搜索不受影响）。玩家已拥有 2 张同干员时 GM 发第 3 张
 // 仍会按游戏规则自动合成精锐（completesChessMerge → _mergeChess）——这是自然行为。
 // 整备区（手牌+暂存）满 → acquireChess/acquireItem 返回 null 并给玩家发实时 toast（「整备区已满」）——结果里如实回报。
+// 发钱（2026-10-09 追加）：kind 'funds'，amount 1..10000 → PlayerState.addFunds（立即，dirty 标记；调用方 flush 后
+// 客户端数字立即变）；includeNeighbors 同时给左右队友（m.order 前后座，环形去重）发同样金额，已出局跳过并标注。
 // onGain 实时广播：发放后玩家的客户端立即看到新棋子/装备（与商店购买同一条 dispatch 链）。
 
 /**
@@ -22,7 +24,36 @@ export function applyGrants(m, ps, grants) {
   const gd = m.gd;
   const list = (Array.isArray(grants) ? grants : []).slice(0, 20);
   for (const g of list) {
-    const kind = g && (g.kind === 'chess' || g.kind === 'item') ? g.kind : null;
+    const kind = g && (g.kind === 'chess' || g.kind === 'item' || g.kind === 'funds') ? g.kind : null;
+    // 发钱（2026-10-09 追加）：金额 = amount（1..10000），立即 addFunds（dirty 标记 + 调用方 flush 后客户端数字立即变）。
+    // includeNeighbors: 同时给左右队友发同样金额——m.order 中的前后座（环形 + 按 playerId 去重：2 人局左右是同一人）；
+    // 已出局的队友跳过并如实标注。
+    if (kind === 'funds') {
+      const rawAmount = Math.trunc(Number(g?.amount));
+      if (!Number.isFinite(rawAmount) || rawAmount < 1) { out.push({ ok: false, kind, id: '', name: '', granted: [], error: '缺少金额（amount 1..10000）' }); continue; }
+      const amount = Math.max(1, Math.min(10000, rawAmount));
+      const recipients = [ps];
+      if (g?.includeNeighbors === true) {
+        const order = Array.isArray(m.order) ? m.order : [];
+        const idx = order.indexOf(ps);
+        const n = order.length;
+        const seen = new Set([ps.playerId]);
+        if (n > 1 && idx >= 0) {
+          for (const x of [order[(idx - 1 + n) % n], order[(idx + 1) % n]]) {
+            if (!x || seen.has(x.playerId)) continue;
+            seen.add(x.playerId);
+            if (x.alive === false) { out.push({ ok: false, kind, id: x.playerId, name: x.name || x.playerId, granted: [], error: '已出局，跳过' }); continue; }
+            recipients.push(x);
+          }
+        }
+      }
+      for (const r of recipients) {
+        r.addFunds(amount, { reason: 'gm' });
+        out.push({ ok: true, kind, id: r.playerId, name: r.name || r.playerId, granted: [`+${amount}`], error: null });
+        m.log.info?.(`[console] 已为 ${r.name || r.playerId} 发放资金 ${amount}`);
+      }
+      continue;
+    }
     const id = g && typeof g.id === 'string' ? g.id : '';
     const elite = g?.elite === true;
     const count = Math.max(1, Math.min(10, Math.trunc(Number(g?.count)) || 1));

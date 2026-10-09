@@ -136,6 +136,86 @@ describe('applyGrants：装备', () => {
   });
 });
 
+describe('applyGrants：发钱（2026-10-09 追加）', () => {
+  test('发钱立即到账（funds 立即增加）', () => {
+    const { h, m, ps } = setup();
+    const before = ps.funds;
+    const res = applyGrants(m, ps, [{ kind: 'funds', amount: 30 }]);
+    assert.equal(res[0].ok, true, res[0].error || '');
+    assert.equal(ps.funds, before + 30, `发钱后 funds 应为 ${before + 30}，实际 ${ps.funds}`);
+    h.invariants();
+  });
+
+  test('金额钳制：上限 10000、缺金额报错', () => {
+    const { h, m, ps } = setup();
+    const before = ps.funds;
+    applyGrants(m, ps, [{ kind: 'funds', amount: 999999 }]);
+    assert.ok(ps.funds - before <= 10000, `金额应钳制到 ≤10000，实际 +${ps.funds - before}`);
+    const res2 = applyGrants(m, ps, [{ kind: 'funds' }]);
+    assert.equal(res2[0].ok, false);
+    assert.match(res2[0].error, /缺少金额/);
+  });
+
+  test('includeNeighbors：同时给左右队友发（环形，含边界座位）', () => {
+    const hh = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 3, seed: 7, fake: true }).start();
+    hh.toPrep(1);
+    const m = hh.m;
+    const players = m.order;
+    assert.equal(players.length, 3);
+    const mid = players[1];
+    const before = players.map((p) => p.funds);
+    const res = applyGrants(m, mid, [{ kind: 'funds', amount: 20, includeNeighbors: true }]);
+    assert.equal(res.length, 3, `应发 3 人（自己 + 左 + 右），实际 ${res.length}`);
+    assert.ok(res.every((r) => r.ok), res.filter((r) => !r.ok).map((r) => r.error).join(';'));
+    for (let i = 0; i < 3; i++) assert.equal(players[i].funds, before[i] + 20, `players[${i}] 未 +20`);
+    hh.invariants();
+  });
+
+  test('环形边界：第一个玩家的左队友是最后一个', () => {
+    const hh = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 3, seed: 7, fake: true }).start();
+    hh.toPrep(1);
+    const m = hh.m;
+    const players = m.order;
+    const first = players[0];
+    const res = applyGrants(m, first, [{ kind: 'funds', amount: 10, includeNeighbors: true }]);
+    assert.equal(res.length, 3);
+    assert.equal(res[1].id, players[2].playerId, '第一个玩家的左队友（环形）应是最后一个');
+    assert.equal(res[2].id, players[1].playerId);
+  });
+
+  test('2 人局：左右是同一人，只发一次（去重）', () => {
+    const hh = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 2, seed: 7, fake: true }).start();
+    hh.toPrep(1);
+    const m = hh.m;
+    const players = m.order;
+    assert.equal(players.length, 2);
+    const before = players.map((p) => p.funds);
+    const res = applyGrants(m, players[0], [{ kind: 'funds', amount: 10, includeNeighbors: true }]);
+    assert.equal(res.length, 2, `左右是同一人应去重为 2 人，实际 ${res.length}`);
+    assert.equal(players[1].funds, before[1] + 10, '同一队友只发一次');
+    assert.equal(players[0].funds, before[0] + 10);
+    hh.invariants();
+  });
+
+  test('已出局的队友跳过并标注', () => {
+    const hh = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 3, seed: 7, fake: true }).start();
+    hh.toPrep(1);
+    const m = hh.m;
+    const players = m.order;
+    players[2].eliminate(0); // 真实淘汰路径（清 shop/offers/funds，alive=false）——直接改 alive 会违反不变量
+    const before = players.map((p) => p.funds);
+    const res = applyGrants(m, players[0], [{ kind: 'funds', amount: 15, includeNeighbors: true }]);
+    assert.equal(res.length, 3);
+    const skipped = res.find((r) => r.id === players[2].playerId);
+    assert.equal(skipped.ok, false);
+    assert.match(skipped.error, /已出局/);
+    assert.equal(players[2].funds, 0, '已出局不应拿到钱');
+    assert.equal(players[0].funds, before[0] + 15);
+    assert.equal(players[1].funds, before[1] + 15);
+    hh.invariants();
+  });
+});
+
 describe('applyGrants：边界', () => {
   test('整备区（手牌10+暂存5）满 → 发放失败且不静默', () => {
     const { h, m, ps } = setup();

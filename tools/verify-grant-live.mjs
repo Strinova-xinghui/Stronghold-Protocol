@@ -73,7 +73,22 @@ try {
   }
   check('发放装备成功（进阶）', /已发放/.test(itemMsg), itemMsg.slice(0, 80));
 
-  // ⑤ 独立 API 交叉确认：state 端点仍返回该对局
+  // ⑤ 发钱：金额 + 勾「同时给左右队友发」→ 每个收件人一条 ✓
+  await page.click('#gFundsN', { clickCount: 3 }).catch(() => {});
+  await page.evaluate(() => { const i = document.querySelector('#gFundsN'); i.value = '25'; });
+  await page.click('#gFundsNb');                               // 同时给左右队友
+  await sleep(200);
+  await page.click('#gGrantFunds');
+  let fundsMsg = '';
+  for (let i = 0; i < 10; i++) {
+    fundsMsg = await page.$eval('#gMsg', (e) => e.textContent).catch(() => '');
+    if (/已发放|发放失败/.test(fundsMsg)) break;
+    await sleep(400);
+  }
+  const fundsHits = (fundsMsg.match(/✓/g) || []).length;
+  check('发钱成功（含左右队友）', fundsHits >= 2, fundsMsg.slice(0, 100));
+
+  // ⑥ 独立 API 交叉确认：state 端点仍返回该对局
   const st = await (await fetch(`http://127.0.0.1:${PORT}/console/api/state`)).json();
   check('state API 交叉确认对局仍在', st.ok && st.rooms.length >= 1, `${st.rooms?.length} 房`);
 

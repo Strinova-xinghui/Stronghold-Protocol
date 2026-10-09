@@ -210,7 +210,7 @@
   <section class="panel" data-panel="__grant">
     <div class="card">
       <h2>实时发放 · 棋子 / 装备</h2>
-      <p class="desc">为进行中对局里的指定玩家添加任意棋子（可选<b>精锐</b>，直接给 `_b` 形态，Lv7 属性）与装备（可选<b>进阶</b>，直接给升级后形态）。走游戏自己的获得管线——发放后玩家客户端<b>立即看到</b>；玩家已有 2 张同干员时发第 3 张会按规则自动合成精锐。<b>不消耗共享卡池</b>。整备区满时发放失败并给玩家实时提示。</p>
+      <p class="desc">为进行中对局里的指定玩家添加任意棋子（可选<b>精锐</b>，直接给 `_b` 形态，Lv7 属性）、装备（可选<b>进阶</b>，直接给升级后形态）与<b>资金</b>（立即到账）。走游戏自己的获得管线——发放后玩家客户端<b>立即看到</b>；玩家已有 2 张同干员时发第 3 张会按规则自动合成精锐。<b>不消耗共享卡池</b>。整备区满时发放失败并给玩家实时提示。</p>
       <div class="row">
         <button id="gRefresh">刷新对局与玩家</button>
         <label class="f">对局 roomCode<select id="gRoom" style="width:170px"><option value="">（先刷新）</option></select></label>
@@ -238,6 +238,15 @@
           <button class="primary" id="gGrantItem">发放装备</button>
         </div>
         <div class="glist" id="gItemList"></div>
+      </div>
+      <div class="sub">
+        <div class="subhead"><b>发钱</b><span class="hint" id="gFundsInfo"></span></div>
+        <div class="row">
+          <label class="f">金额<input type="number" id="gFundsN" min="1" max="10000" value="10" style="width:110px"></label>
+          <label class="chk"><input type="checkbox" id="gFundsNb"> 同时给左右队友发</label>
+          <span class="grow"></span>
+          <button class="primary" id="gGrantFunds">发钱</button>
+        </div>
       </div>
       <div class="row" style="margin-top:10px"><span class="msg info" id="gMsg">选择对局与玩家后发放；发放立即生效（onGain 实时广播）。</span></div>
     </div>
@@ -543,6 +552,20 @@ function renderGrantPlayers() {
   playerSel.value = (room?.players || []).some((p) => p.playerId === prev) ? prev : (room?.players?.[0]?.playerId || '');
   const st = room ? `${room.phaseName} · 第 ${room.round} 回合 · ${room.players.length} 名玩家` : '';
   $('#gState').textContent = st;
+  // 发钱的左右队友提示：state API 的 players 顺序就是 m.order（座次），选中玩家的前后座（环形）；2 人局左右是同一人
+  const fInfo = $('#gFundsInfo');
+  if (!room?.players?.length) { fInfo.textContent = ''; }
+  else {
+    const idx = room.players.findIndex((p) => p.playerId === playerSel.value);
+    const n = room.players.length;
+    if (idx < 0 || n < 2) { fInfo.textContent = n <= 1 ? '（1 人局：无左右队友）' : ''; }
+    else {
+      const left = room.players[(idx - 1 + n) % n], right = room.players[(idx + 1) % n];
+      fInfo.textContent = left.playerId === right.playerId
+        ? `勾选后同时给 ${left.name} 发（左右是同一人，只发一次）`
+        : `勾选后同时给 左 ${left.name} · 右 ${right.name} 发`;
+    }
+  }
 }
 
 /** 过滤 + 渲染棋子/装备选择列表（搜索：名字/职业/效果/阶数，大小写不敏感子串）。 */
@@ -579,22 +602,31 @@ function renderGrantList(kind) {
   if (list.length > 200) box.append(el('div', { class: 'gempty', text: `仅显示前 200 项（共 ${list.length}），请细化搜索` }));
 }
 
-/** 发放：POST /console/api/grant → 结果逐条回报。 */
+/** 发放：POST /console/api/grant → 结果逐条回报。发钱（funds）不需要点选卡片，走金额 + 左右队友勾选。 */
 async function doGrant(kind) {
   const roomCode = $('#gRoom').value, playerId = $('#gPlayer').value;
   if (!roomCode || !playerId) { gMsg('先选择对局与玩家（没有进行中对局时先开局）。', 'err'); return; }
-  const sel = kind === 'chess' ? grant.selChess : grant.selItem;
-  if (!sel) { gMsg(kind === 'chess' ? '先在列表里点选一个棋子。' : '先在列表里点选一件装备。', 'err'); return; }
-  const elite = $(kind === 'chess' ? '#gChessElite' : '#gItemElite').checked;
-  const count = Math.max(1, Math.min(10, Math.trunc(Number($(kind === 'chess' ? '#gChessN' : '#gItemN').value)) || 1));
-  if (kind === 'chess' && elite) {
-    const rec = grant.chess.find((r) => r.id === sel);
-    if (rec && rec.isGolden) { gMsg('选中的已经是精锐形态，无需再勾选。', 'info'); }
+  const grantBody = { kind };
+  if (kind === 'funds') {
+    const amount = Math.max(1, Math.min(10000, Math.trunc(Number($('#gFundsN').value)) || 0));
+    if (!(amount >= 1)) { gMsg('先填金额（1..10000）。', 'err'); return; }
+    grantBody.amount = amount;
+    grantBody.includeNeighbors = $('#gFundsNb').checked === true;
+  } else {
+    const sel = kind === 'chess' ? grant.selChess : grant.selItem;
+    if (!sel) { gMsg(kind === 'chess' ? '先在列表里点选一个棋子。' : '先在列表里点选一件装备。', 'err'); return; }
+    grantBody.id = sel;
+    grantBody.elite = $(kind === 'chess' ? '#gChessElite' : '#gItemElite').checked;
+    grantBody.count = Math.max(1, Math.min(10, Math.trunc(Number($(kind === 'chess' ? '#gChessN' : '#gItemN').value)) || 1));
+    if (kind === 'chess' && grantBody.elite) {
+      const rec = grant.chess.find((r) => r.id === sel);
+      if (rec && rec.isGolden) { gMsg('选中的已经是精锐形态，无需再勾选。', 'info'); }
+    }
   }
   gMsg('发放中…', 'info');
   try {
     const r = await fetch('/console/api/grant', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ roomCode, playerId, grants: [{ kind, id: sel, elite, count }] }) });
+      body: JSON.stringify({ roomCode, playerId, grants: [grantBody] }) });
     const d = await r.json();
     if (!d.ok && !d.results) throw new Error(d.error || '发放失败');
     const parts = (d.results || []).map((x) => x.ok ? `✓ ${x.name} ×${x.granted.length}${x.error ? `（${x.error}）` : ''}` : `✗ ${x.name}：${x.error}`);
@@ -608,10 +640,12 @@ async function doGrant(kind) {
 
 $('#gRefresh').addEventListener('click', () => loadGrant(true));
 $('#gRoom').addEventListener('change', renderGrantPlayers);
+$('#gPlayer').addEventListener('change', renderGrantPlayers);
 $('#gChessQ').addEventListener('input', () => renderGrantList('chess'));
 $('#gItemQ').addEventListener('input', () => renderGrantList('item'));
 $('#gGrantChess').addEventListener('click', () => doGrant('chess'));
 $('#gGrantItem').addEventListener('click', () => doGrant('item'));
+$('#gGrantFunds').addEventListener('click', () => doGrant('funds'));
 
 // 切到发放页时懒加载数据（不拖慢控制台首屏）
 const _switchTab = switchTab;
