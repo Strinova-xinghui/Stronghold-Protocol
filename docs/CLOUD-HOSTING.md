@@ -179,6 +179,25 @@ curl -s localhost:24500/healthz          # 应返回 {"ok":true,...}
 
 > 素材约 271 MB/人：100 GB 出站 ≈ 约 **370 人次/月**，正常开黑远用不到。
 
+### 顺带托管：导弹包线图后端（2026-10-09 评估结论）
+
+同一位作者还有一个 `missile-backend`（FastAPI + numpy 的计算服务，Docker 镜像，需挂 2.8 MB 只读数据目录）。
+它的 Azure 选型评估结论是：**Azure Functions 不合适**（进程内单例状态 `JobStore`/`ResultCache`/`TokenBucket`
+会被多实例拆散；HTTP 触发有 **230 秒**硬上限；新推荐的 Flex Consumption **不支持容器**），
+而**与卫戍协议共用这台 VM 才是最优解** —— 零新增成本、单实例、状态问题天然消失、无冷启动。
+
+完整评估见该仓的 `docs/AZURE-DEPLOY.md`。
+
+> ⚠️ **但内存要提前规划**：免费三种规格**都只有 1 GiB**。
+> 卫戍协议 Node 服约 200–400 MB，missile-backend 还要加载 numpy + 168 个 `.blk`。
+> 两者同时常驻**很可能顶到上限**。建议：① 加 1–2 GiB swap（`fallocate` + `mkswap`）；
+> ② 或让两者按需错峰启动（不玩导弹时 `docker stop`，反之亦然）；
+> ③ 真不够就只保一个常驻，另一个用 `--restart no` 手动拉起。
+>
+> 另一个更彻底的顾虑：missile-backend 是 **AGPL-3.0-only**，卫戍协议是 GPL-3.0-or-later ——
+> 两者在同一台机器上各自独立运行（不互相链接代码）**不构成衍生作品**，许可上没问题；
+> 但如果未来把它们的代码混进同一个仓库/镜像，就要注意 AGPL 的传染性。
+
 ---
 
 ## 运维与特性对照
