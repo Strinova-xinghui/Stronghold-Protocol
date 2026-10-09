@@ -216,8 +216,11 @@
 - **授予路径 = 游戏自己的获得管线**：`PlayerState.acquireChess` / `acquireItem`（商店/奖励/效果同一条）。**精锐 = 直接给 `_b` 棋子 id**（isGolden 跳过合并分支，Lv7 属性直接生效）；**进阶装备 = 直接给 items.json 的 goldenId**。`fromPool: false`——GM 发放不消耗共享卡池。玩家已有 2 张同干员时发第 3 张仍按游戏规则自动合成精锐（自然行为）。
 - **关键接线（踩过坑）**：① **发放不是客户端动作，没人替它 flush**——`applyGrants` 后必须 `m.flush()`，否则 `m.private`/`m.public` 只在 `_privDirty` 队列里，客户端看不到（flush 只在客户端动作后/guard/战斗循环每 30 tick 触发）；`acquireChess`/`acquireItem` 内部 `recompute()` → `dirty()` → `markPrivate` 已就位。② **playerId 是字符串**（lobby.js typedef）——处理器别用 `Number.isInteger` 校验，数字也接受统一按字符串比较。
 - **整备区满**：手牌 10 + 暂存 5 = 15 格；满时 `acquireChess`/`acquireItem` 返回 null 并给玩家发实时 toast（「整备区已满」），结果如实回报（部分发放也标出）。玩家掉线时发放照常入账，下次 `_resync` 拿到。
-- **验证**：`tools/grant.test.mjs` **11/11**（普通/精锐直发/elite 标志/count=3/自动合成/装备+进阶/装备自动合成/无效 id/整备区满不静默/缺字段+截断，全部经真实 Match + invariants）；`tools/verify-grant-live.mjs`（无头浏览器真实发放端到端）；`verify-console-ui.mjs` 更新为 9 标签 + 发放页 7 项。
-- **教训（再次踩实）**：**回归测试必须逐个单独运行**——一次 `node --test` 跑全部会互相写 `custom-rules.json`，20 个假失败（分开跑全绿 103/103）。**且更阴**：合并跑时**晚启动的子进程会把先跑测试留下的裸测试配置（无 `_说明` 键的默认结构）当成自己的 `original`**，退出时把裸配置「还原」进去——之后每个单独跑的测试又把裸配置当 original 传下去，裸配置永久残留。**线上 mtime 热更会把裸配置实时加载**（部分规则静默退回默认）——跑完测试必须 `git status` 查这个文件，脏了立即 `git restore`。
+- **验证**：`tools/grant.test.mjs` **11/11**（普通/精锐直发/elite 标志/count=3/自动合成/装备+进阶/装备自动合成/无效 id/整备区满不静默/缺字段+截断，全部经真实 Match + invariants）；`tools/verify-grant-live.mjs` **9/9**（无头浏览器真实发放端到端：live-match 建局 → 选房/选人 → 点选 → 精锐「隐现」×1 + 进阶「维式重锤」×1 发放成功）；`verify-console-ui.mjs` 27 项（9 标签 + 发放页）。
+- **⚠️ 新坑 1：HTML 解析器吞元素**——`<label>文字<select>…<option></option></label>` **少写 `</select>`** 时，解析器把后面直到下一个 `</select>` 之间的**全部内容都吞进 select 并丢弃非 option 子元素**（span#gState、整个棋子 subhead 连 #gChessInfo 全部从 DOM 消失，JS 报 `Cannot set properties of null`）——**且无 pageerror**（错误被 loadGrant 的 try/catch 吃进 gMsg）。控件相互嵌套时每个开标签都必须闭合。
+- **⚠️ 新坑 2：TABS 数组与面板 HTML 是两处**——只加 `<section data-panel>` 不加 `TABS` 数组项 = 标签不渲染、页面**不可达**；且无头验证里 `page.$` 对 `display:none` 的隐藏元素**照样能找到**（其余检查假通过）——可达性检查要数 `.tab` 数量。
+- **验证脚本坑**：`page.$` 找得到隐藏元素（假通过）；懒加载（chess.json ~1.6MB fetch）要**轮询等列表渲染**（固定 sleep 2.5s 不够）；发放成功后**不要在 doGrant 里自动 loadGrant()**——刷新会覆盖结果消息（轮询竞态假失败）；点选后先断言 `.sel` 类再生效。
+- **教训（再次踩实）**：**回归测试必须逐个单独运行**——一次 `node --test` 跑全部会互相写 `custom-rules.json`，20 个假失败（分开跑全绿 103/103）。**且更阴**：合并跑时**晚启动的子进程会把先跑测试留下的裸测试配置（无 `_说明` 键的默认结构）当成自己的 `original`**，退出时把裸配置「还原」进去——之后每个单独跑的测试又把裸配置当 original 传下去，裸配置永久残留。**线上 mtime 热更会把裸配置实时加载**（部分规则静默退回默认）——跑完测试必须 `git status` 查这个文件，脏了立即 `git restore`（本次线上被裸配置加载过一次，restore 后热更回七组）。
 
 ### 版本基点与公开 fork（2026-10-07）
 

@@ -37,13 +37,15 @@ try {
   const players = await page.$$eval('#gPlayer option', (els) => els.map((e) => e.value).filter(Boolean));
   check('玩家选择器已填充', players.length >= 1, `实际 ${players.length}`);
 
-  // ③ 棋子：搜索 → 点选第一张 → 勾精锐 → 发放
+  // ③ 棋子：搜索 → 点选第一张（先验 .sel 生效）→ 勾精锐 → 发放
   const chessCards = await page.$$('#gChessList .gcard');
   check('棋子列表已渲染', chessCards.length > 0, `实际 ${chessCards.length}`);
   await page.evaluate(() => { const i = document.querySelector('#gChessQ'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await sleep(500);
+  await page.evaluate(() => document.querySelector('#gChessList .gcard')?.click());
   await sleep(400);
-  await page.click('#gChessList .gcard');                     // 点第一张
-  await sleep(300);
+  const selOk = await page.$eval('#gChessList .gcard.sel', () => true).catch(() => false);
+  check('点选后 .sel 生效', !!selOk);
   await page.click('#gChessElite');                            // 精锐状态
   await sleep(200);
   await page.click('#gGrantChess');
@@ -51,15 +53,15 @@ try {
   for (let i = 0; i < 10; i++) {
     grantMsg = await page.$eval('#gMsg', (e) => e.textContent).catch(() => '');
     if (/已发放|发放失败/.test(grantMsg)) break;
-    await sleep(800);
+    await sleep(400);
   }
   check('发放棋子成功（精锐）', /已发放.*✓/.test(grantMsg) || /已发放/.test(grantMsg), grantMsg.slice(0, 80));
 
   // ④ 装备：搜索 → 点选 → 勾进阶 → 发放
   await page.evaluate(() => { const i = document.querySelector('#gItemQ'); i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); });
+  await sleep(500);
+  await page.evaluate(() => document.querySelector('#gItemList .gcard')?.click());
   await sleep(400);
-  await page.click('#gItemList .gcard');
-  await sleep(300);
   await page.click('#gItemElite');                             // 进阶形态
   await sleep(200);
   await page.click('#gGrantItem');
@@ -67,7 +69,7 @@ try {
   for (let i = 0; i < 10; i++) {
     itemMsg = await page.$eval('#gMsg', (e) => e.textContent).catch(() => '');
     if (/已发放|发放失败/.test(itemMsg)) break;
-    await sleep(800);
+    await sleep(400);
   }
   check('发放装备成功（进阶）', /已发放/.test(itemMsg), itemMsg.slice(0, 80));
 

@@ -1,5 +1,6 @@
 // 控制台页面 UI 验证：加载 → 表单渲染 → 改值保存 → 状态更新 → 无 JS 错误
 import puppeteer from 'puppeteer-core';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PORT = process.argv[2] || '24599';
 const results = [];
 const check = (n, ok, d = '') => { results.push({ n, ok }); console.log(`${ok ? '✓' : '✗'} ${n}${d ? ' — ' + d : ''}`); };
@@ -62,14 +63,21 @@ await new Promise((r) => setTimeout(r, 300));
 const raw = await page.$eval('#raw', (e) => e.value);
 check('原始 JSON 页显示完整配置', /"rewardOffer"/.test(raw) && /"roundLottery"/.test(raw), `${raw.length} 字符`);
 
-// 发放页（自研 2026-10-09）：标签渲染 + 懒加载棋子/装备目录
+// 发放页（自研 2026-10-09）：标签渲染 + 懒加载棋子/装备目录（chess.json 约 1.6MB，轮询等列表渲染）
 await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('发放'))?.click());
-await new Promise((r) => setTimeout(r, 2500));
+let chessCards = [], itemCards = [];
+for (let i = 0; i < 20 && (!chessCards.length || !itemCards.length); i++) {
+  chessCards = await page.$$('#gChessList .gcard').catch(() => []);
+  itemCards = await page.$$('#gItemList .gcard').catch(() => []);
+  if (!chessCards.length || !itemCards.length) await sleep(1000);
+}
 check('发放页有刷新按钮', !!(await page.$('#gRefresh')));
 check('发放页有对局选择器', !!(await page.$('#gRoom')));
 check('发放页有玩家选择器', !!(await page.$('#gPlayer')));
-check('发放页棋子列表已渲染', (await page.$$('#gChessList .gcard')).length > 0, `实际 ${(await page.$$('#gChessList .gcard')).length}`);
-check('发放页装备列表已渲染', (await page.$$('#gItemList .gcard')).length > 0, `实际 ${(await page.$$('#gItemList .gcard')).length}`);
+check('发放页棋子列表已渲染', chessCards.length > 0, `实际 ${chessCards.length}`);
+check('发放页装备列表已渲染', itemCards.length > 0, `实际 ${itemCards.length}`);
+const gMsgText = await page.$eval('#gMsg', (e) => e.textContent).catch(() => '');
+check('发放页数据载入提示', /已载入|没有进行中/.test(gMsgText), gMsgText.slice(0, 60));
 check('发放页有精锐/进阶勾选', !!(await page.$('#gChessElite')) && !!(await page.$('#gItemElite')));
 check('发放页有数量输入', !!(await page.$('#gChessN')) && !!(await page.$('#gItemN')));
 
