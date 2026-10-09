@@ -209,6 +209,16 @@
 - **验证**：`tools/band-search.test.mjs` **10/10**（名字/效果/描述/盟约/大小写/空查询/缺字段不炸/回退）；`tools/verify-band-search.mjs` **14/14**（无头浏览器走真实路径：标题→独立模拟→房间→简报→选策略，输入「华法」→ 40/40 → 1/40、乱关键词空态、清空复原、零页面错误）。**踩坑**：选择器 `[class*="mode-card"]` 会先匹配到**容器** `.mode-cards`（文本同时含「独立模拟」和「同盟模拟」）→ 点容器无效——要按 `button.mode-card` 根类精确选卡片。
 - **键盘安全**：`shortcutFor`（gameLogic.js）对 INPUT/TEXTAREA 目标直接返回 null——搜索框内打字不会误触 R/F/D/Q/X/空格 快捷键（验证过代码路径）。
 
+### 实时发放棋子/装备（/console/api/grant，2026-10-09 自研追加，用户需求）
+
+- **需求**：控制台中实时为指定玩家添加任意角色棋子（可选**精锐**状态）和装备（可选**进阶**）。
+- **实现**：① 核心授予在 **`server/match/grant.js` `applyGrants(m, ps, grants)`**（零 HTTP 依赖，harness 可单测）；② `server/index.js` 加两个端点：`GET /console/api/state`（进行中对局+玩家，选择器用）+ `POST /console/api/grant`（发放；POST 放行白名单已扩展）——**仅内网**；③ 控制台第 9 个标签页「发放棋子/装备」（对局/玩家选择器 + 棋子/装备搜索列表（复用策略搜索的过滤思路）+ 精锐/进阶勾选 + 数量 1–10 + 逐条结果回报，切到本页懒加载 `/data/chess.json`+`/data/items.json`）。
+- **授予路径 = 游戏自己的获得管线**：`PlayerState.acquireChess` / `acquireItem`（商店/奖励/效果同一条）。**精锐 = 直接给 `_b` 棋子 id**（isGolden 跳过合并分支，Lv7 属性直接生效）；**进阶装备 = 直接给 items.json 的 goldenId**。`fromPool: false`——GM 发放不消耗共享卡池。玩家已有 2 张同干员时发第 3 张仍按游戏规则自动合成精锐（自然行为）。
+- **关键接线（踩过坑）**：① **发放不是客户端动作，没人替它 flush**——`applyGrants` 后必须 `m.flush()`，否则 `m.private`/`m.public` 只在 `_privDirty` 队列里，客户端看不到（flush 只在客户端动作后/guard/战斗循环每 30 tick 触发）；`acquireChess`/`acquireItem` 内部 `recompute()` → `dirty()` → `markPrivate` 已就位。② **playerId 是字符串**（lobby.js typedef）——处理器别用 `Number.isInteger` 校验，数字也接受统一按字符串比较。
+- **整备区满**：手牌 10 + 暂存 5 = 15 格；满时 `acquireChess`/`acquireItem` 返回 null 并给玩家发实时 toast（「整备区已满」），结果如实回报（部分发放也标出）。玩家掉线时发放照常入账，下次 `_resync` 拿到。
+- **验证**：`tools/grant.test.mjs` **11/11**（普通/精锐直发/elite 标志/count=3/自动合成/装备+进阶/装备自动合成/无效 id/整备区满不静默/缺字段+截断，全部经真实 Match + invariants）；`tools/verify-grant-live.mjs`（无头浏览器真实发放端到端）；`verify-console-ui.mjs` 更新为 9 标签 + 发放页 7 项。
+- **教训（再次踩实）**：**回归测试必须逐个单独运行**——一次 `node --test` 跑全部会互相写 `custom-rules.json`，20 个假失败（分开跑全绿 103/103）。**且更阴**：合并跑时**晚启动的子进程会把先跑测试留下的裸测试配置（无 `_说明` 键的默认结构）当成自己的 `original`**，退出时把裸配置「还原」进去——之后每个单独跑的测试又把裸配置当 original 传下去，裸配置永久残留。**线上 mtime 热更会把裸配置实时加载**（部分规则静默退回默认）——跑完测试必须 `git status` 查这个文件，脏了立即 `git restore`。
+
 ### 版本基点与公开 fork（2026-10-07）
 
 - **基点写明**：README「简介」+ 新增「本仓库的追加能力（基于上游 v0.1.4）」一节——基点 = 上游 `sganggs/Stronghold-Protocol` **v0.1.4**（tag=master HEAD=`9f93096`，合并提交 `e3c17ee`），并列出自研能力清单（6 人联机/monitor 监看+影子观战/监控面板/定向甄选/中日配音热切换/皮肤/一键开服/四国语音管线/IPv6 双栈）；冲突裁定（玩法取官方）也写在 README。提交 `41ef8fb`。

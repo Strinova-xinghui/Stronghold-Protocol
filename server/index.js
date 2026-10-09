@@ -44,6 +44,7 @@ import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
 import { PROTOCOL_VERSION, APP_VERSION, PHASE, PHASE_NAMES, MAX_SEATS_LIMIT } from '../shared/constants.js';
 import { getCustomRules, saveCustomRules, CUSTOM_RULES_PATH } from './match/customRules.js';
+import { applyGrants } from './match/grant.js';
 import { MEDIA_PREFIX, AUDIO_EXTS } from '../shared/media.js';
 
 /**
@@ -710,6 +711,66 @@ function consoleApiRead() {
   return { ok: true, path: 'config/custom-rules.json', config, rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' };
 }
 
+/** 发放页的状态（控制台自研 2026-10-09）：进行中的对局与其玩家（房间/玩家选择器用）。仅内网。 */
+function consoleApiState(lobby) {
+  const rooms = [];
+  for (const r of lobby.rooms.values()) {
+    const m = r.match;
+    if (!m || m.disposed || m.ended) continue;
+    rooms.push({
+      code: r.code, mode: r.mode, difficulty: r.difficulty,
+      phaseName: PHASE_NAMES[m.phase] || m.phase, round: m.round,
+      players: (m.order || []).map((ps) => ({
+        playerId: ps.playerId, name: ps.name, isBot: !!ps.isBot,
+        connected: ps.isBot || (ps.connected && !ps.left), alive: ps.alive,
+        lp: Math.max(0, Math.round(ps.lp) || 0),
+      })),
+    });
+  }
+  return { ok: true, rooms };
+}
+
+/** 读取一个 JSON 请求体（发放接口用；>64KB 拒绝）。 */
+async function readGrantBody(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > 64 * 1024) { req.destroy(); throw new Error('请求过大（>64KB）'); }
+    chunks.push(c);
+  }
+  const raw = Buffer.concat(chunks).toString('utf8');
+  return JSON.parse(raw);
+}
+
+/** 实时发放（控制台自研 2026-10-09）：为指定玩家的进行中对局添加棋子（可选精锐）/装备（可选进阶）。仅内网。
+ *  核心授予在 server/match/grant.js applyGrants（可单测）；这里做 HTTP 管道 + roomCode/playerId 查找。 */
+async function consoleApiGrant(req, res, log, lobby) {
+  let body = null;
+  try { body = await readGrantBody(req); } catch (e) { sendJson(req, res, 400, { ok: false, error: '请求体无效：' + e.message }); return; }
+  const roomCode = typeof body?.roomCode === 'string' ? body.roomCode : '';
+  // playerId 是字符串（lobby.js typedef；harness 用 p_0 之类）——数字也接受，统一按字符串比较
+  const playerId = (typeof body?.playerId === 'string' || typeof body?.playerId === 'number') && body.playerId !== '' ? String(body.playerId) : null;
+  if (!roomCode || !playerId || !Array.isArray(body?.grants) || !body.grants.length) {
+    sendJson(req, res, 400, { ok: false, error: '缺少 roomCode / playerId / grants' }); return;
+  }
+  const room = lobby.rooms.get(roomCode);
+  const m = room && room.match;
+  if (!room || !m || m.disposed || m.ended) { sendJson(req, res, 404, { ok: false, error: '对局不存在或已结束' }); return; }
+  const ps = (m.order || []).find((p) => p.playerId === playerId);
+  if (!ps) { sendJson(req, res, 404, { ok: false, error: '该玩家不在此对局中' }); return; }
+  try {
+    const results = applyGrants(m, ps, body.grants);
+    // 发放不是客户端动作，没人替它 flush——立即把新 m.private/m.public 推给客户端（acquireChess/acquireItem
+    // 已 markPrivate，flush 负责真正发送；掉线玩家下次 _resync 也会拿到）
+    try { m.flush(); } catch { /* disposed */ }
+    sendJson(req, res, 200, { ok: results.some((r) => r.ok), results });
+  } catch (e) {
+    log.error?.('[console] 发放失败', e);
+    sendJson(req, res, 500, { ok: false, error: '发放失败：' + e.message });
+  }
+}
+
 /** 写入配置（控制台用）。非法内容拒绝落盘；成功即热更（清 mtime 缓存，无需重启）。 */
 async function consoleApiWrite(req, res, log) {
   let raw = '';
@@ -1100,8 +1161,8 @@ export async function startServer(opts = {}) {
     if (url.length > MAX_URL_LENGTH) { sendError(req, res, 414, '请求地址过长 · URI too long'); return; }
     const parts = splitUrl(url);
     if (!parts) { sendError(req, res, 400, '请求地址无效 · Bad request'); return; }
-    // 规则控制台（自研 2026-10-08）的写接口是全站唯一的 POST：放行它，其余仍只收 GET/HEAD。
-    const consoleApiPath = parts.rawPath === '/console/api';
+    // 规则控制台（自研 2026-10-08）的写接口是全站唯一的 POST：放行它（含 2026-10-09 的发放接口），其余仍只收 GET/HEAD。
+    const consoleApiPath = parts.rawPath === '/console/api' || parts.rawPath === '/console/api/grant';
     if (req.method !== 'GET' && req.method !== 'HEAD' && !(consoleApiPath && req.method === 'POST')) {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
@@ -1129,14 +1190,27 @@ export async function startServer(opts = {}) {
       res.end(html);
       return;
     }
-    // 规则控制台（自研 2026-10-08）：把 config/custom-rules.json 的全部外置开关做成网页表单。
-    // 仅允许内网来源（与 /lan/room 同口径）——该页面能改规则参数，不对外开放。
-    if (parts.rawPath === '/console' || parts.rawPath === '/console/api') {
+    // 规则控制台（自研 2026-10-08）：把 config/custom-rules.json 的全部外置开关做成网页表单；
+    // /console/api/state + /console/api/grant（2026-10-09）：实时发放棋子/装备。
+    // 仅允许内网来源（与 /lan/room 同口径）——该页面能改规则参数、发放棋子，不对外开放。
+    if (parts.rawPath === '/console' || parts.rawPath === '/console/api' || parts.rawPath === '/console/api/state' || parts.rawPath === '/console/api/grant') {
       if (!isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, '未找到 · Not found'); return; }
       if (parts.rawPath === '/console/api') {
         if (req.method === 'POST') { await consoleApiWrite(req, res, log); return; }
         if (req.method === 'GET' || req.method === 'HEAD') { sendJson(req, res, 200, consoleApiRead()); return; }
         res.setHeader('Allow', 'GET, HEAD, POST');
+        sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
+        return;
+      }
+      if (parts.rawPath === '/console/api/state') {
+        if (req.method === 'GET' || req.method === 'HEAD') { sendJson(req, res, 200, consoleApiState(lobby)); return; }
+        res.setHeader('Allow', 'GET, HEAD');
+        sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
+        return;
+      }
+      if (parts.rawPath === '/console/api/grant') {
+        if (req.method === 'POST') { await consoleApiGrant(req, res, log, lobby); return; }
+        res.setHeader('Allow', 'POST');
         sendError(req, res, 405, '不支持的请求方法 · Method not allowed');
         return;
       }

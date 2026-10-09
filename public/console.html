@@ -49,6 +49,16 @@
   code { background:#0f1116; padding:1px 5px; border-radius:4px; font-size:12px; }
   .hint { color:var(--dim); font-size:12px; }
   details summary { cursor:pointer; color:var(--acc); font-size:12.5px; }
+  /* 发放棋子/装备（自研 2026-10-09） */
+  .glist { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:7px; max-height:260px; overflow:auto; padding:2px; }
+  .gcard { display:flex; flex-direction:column; gap:3px; padding:8px 10px; background:#0f1116; border:1px solid var(--line); border-radius:8px; cursor:pointer; text-align:left; }
+  .gcard:hover { border-color:var(--acc); }
+  .gcard.sel { border-color:var(--acc); background:#16233a; box-shadow:0 0 0 1px var(--acc); }
+  .gcard b { font-size:13px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gcard span { font-size:11.5px; color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .gcard .tg { font-size:11px; padding:1px 7px; border-radius:999px; background:#223047; color:#9db4d0; align-self:flex-start; }
+  .gcard .tg.gold { background:#3a2e14; color:#ffd479; }
+  .gempty { color:var(--dim); text-align:center; padding:18px 0; font-size:12.5px; grid-column:1 / -1; }
 </style>
 </head>
 <body>
@@ -196,7 +206,43 @@
       <p class="hint">层数折算：<code>layerMul = min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))</code>，layerSum = 全场活人的盟约层数总和（主 BOSS 开打时取值，隐秘核心沿用）。默认 <code>layerK=0.0005</code> ⇒ 每 200 层 +10% 血量；<code>layerFloor</code> 可把官方水位以内的层数免计；<code>layerCap=5</code> 封顶防爆炸。</p>
     </div>
   </section>
-  <!-- ⑧ 原始 JSON -->
+  <!-- ⑧ 发放棋子/装备（自研 2026-10-09：实时为指定玩家添加，无需重启） -->
+  <section class="panel" data-panel="__grant">
+    <div class="card">
+      <h2>实时发放 · 棋子 / 装备</h2>
+      <p class="desc">为进行中对局里的指定玩家添加任意棋子（可选<b>精锐</b>，直接给 `_b` 形态，Lv7 属性）与装备（可选<b>进阶</b>，直接给升级后形态）。走游戏自己的获得管线——发放后玩家客户端<b>立即看到</b>；玩家已有 2 张同干员时发第 3 张会按规则自动合成精锐。<b>不消耗共享卡池</b>。整备区满时发放失败并给玩家实时提示。</p>
+      <div class="row">
+        <button id="gRefresh">刷新对局与玩家</button>
+        <label class="f">对局 roomCode<select id="gRoom" style="width:170px"><option value="">（先刷新）</option></select></label>
+        <label class="f">玩家 playerId<select id="gPlayer" style="width:170px"><option value="">（先选对局）</option></label>
+        <span class="hint" id="gState"></span>
+      </div>
+      <div class="sub" style="margin-top:10px">
+        <div class="subhead"><b>棋子</b><span class="hint" id="gChessInfo"></span></div>
+        <div class="row">
+          <label class="f">搜索<input type="text" id="gChessQ" placeholder="名字 / 职业 / 阶数" style="width:170px"></label>
+          <label class="chk"><input type="checkbox" id="gChessElite"> 精锐状态</label>
+          <label class="f">数量<input type="number" id="gChessN" min="1" max="10" value="1"></label>
+          <span class="grow"></span>
+          <button class="primary" id="gGrantChess">发放棋子</button>
+        </div>
+        <div class="glist" id="gChessList"></div>
+      </div>
+      <div class="sub">
+        <div class="subhead"><b>装备</b><span class="hint" id="gItemInfo"></span></div>
+        <div class="row">
+          <label class="f">搜索<input type="text" id="gItemQ" placeholder="名字 / 效果 / 阶数" style="width:170px"></label>
+          <label class="chk"><input type="checkbox" id="gItemElite"> 进阶形态</label>
+          <label class="f">数量<input type="number" id="gItemN" min="1" max="10" value="1"></label>
+          <span class="grow"></span>
+          <button class="primary" id="gGrantItem">发放装备</button>
+        </div>
+        <div class="glist" id="gItemList"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><span class="msg info" id="gMsg">选择对局与玩家后发放；发放立即生效（onGain 实时广播）。</span></div>
+    </div>
+  </section>
+  <!-- ⑨ 原始 JSON -->
   <section class="panel" data-panel="__raw">
     <div class="card">
       <h2>原始 JSON</h2>
@@ -436,6 +482,140 @@ $('#rlAdd').addEventListener('click', () => {
 $('#rawFromForm').addEventListener('click', () => { $('#raw').value = JSON.stringify(cfg, null, 2); });
 $('#reload').addEventListener('click', load);
 $('#save').addEventListener('click', save);
+
+// ---------------- 发放棋子/装备（自研 2026-10-09：实时为指定玩家添加） ----------------
+const PROFESSIONS = { VANGUARD:'先锋', GUARD:'近卫', DEFENDER:'重装', SNIPER:'狙击', CASTER:'术师', MEDIC:'医疗', SUPPORTER:'辅助', SPECIALIST:'特种', TOKEN:'召唤物' };
+const grant = { rooms: [], chess: [], items: [], selChess: null, selItem: null, loaded: false };
+
+function gMsg(t, cls) { const m = $('#gMsg'); m.textContent = t; m.className = 'msg ' + (cls || 'info'); }
+
+/** 载入发放数据：进行中对局/玩家（/console/api/state）+ 棋子/装备目录（/data/*.json，只取需要的字段）。 */
+async function loadGrant(force) {
+  gMsg('载入中…', 'info');
+  try {
+    const st = await (await fetch('/console/api/state', { cache: 'no-store' })).json();
+    if (!st.ok) throw new Error(st.error || '读取对局失败');
+    grant.rooms = st.rooms || [];
+    if (!grant.loaded || force) {
+      const [chessRaw, itemsRaw] = await Promise.all([
+        fetch('/data/chess.json', { cache: 'force-cache' }).then((r) => r.json()),
+        fetch('/data/items.json', { cache: 'force-cache' }).then((r) => r.json()),
+      ]);
+      grant.chess = Object.entries(chessRaw || {}).filter(([id, r]) => r && id.startsWith('chess_char_'))
+        .map(([id, r]) => ({ id, name: r.name || id, tier: r.tier ?? 1, prof: r.profession || '', isGolden: !!r.isGolden }));
+      grant.items = Object.entries(itemsRaw || {}).filter(([id, r]) => r && r.itemType === 'EQUIP')
+        .map(([id, r]) => ({ id, name: r.name || id, tier: r.tier ?? 1, eff: r.effectName || '', desc: r.desc || '', isGolden: !!r.isGolden, goldenId: r.goldenId || null }));
+      grant.loaded = true;
+    }
+    $('#gChessInfo').textContent = `共 ${grant.chess.length} 个棋子`;
+    $('#gItemInfo').textContent = `共 ${grant.items.length} 件装备`;
+    renderGrantRooms();
+    renderGrantList('chess');
+    renderGrantList('item');
+    const totalPlayers = grant.rooms.reduce((n, r) => n + r.players.length, 0);
+    gMsg(grant.rooms.length ? `已载入 ${grant.rooms.length} 个进行中的对局（${totalPlayers} 名玩家）。` : '当前没有进行中的对局——开局后点「刷新对局与玩家」。', grant.rooms.length ? 'ok' : 'info');
+  } catch (e) {
+    gMsg('载入失败：' + e.message, 'err');
+  }
+}
+
+function renderGrantRooms() {
+  const roomSel = $('#gRoom'), playerSel = $('#gPlayer');
+  const prevRoom = roomSel.value;
+  roomSel.textContent = '';
+  for (const r of grant.rooms) {
+    roomSel.append(el('option', { value: r.code, text: `${r.code} · ${r.difficulty} · ${r.phaseName} R${r.round}` }));
+  }
+  if (!grant.rooms.length) roomSel.append(el('option', { value: '', text: '（无进行中对局）' }));
+  roomSel.value = grant.rooms.some((r) => r.code === prevRoom) ? prevRoom : (grant.rooms[0]?.code || '');
+  renderGrantPlayers();
+}
+function renderGrantPlayers() {
+  const roomSel = $('#gRoom'), playerSel = $('#gPlayer');
+  const room = grant.rooms.find((r) => r.code === roomSel.value);
+  const prev = playerSel.value;
+  playerSel.textContent = '';
+  for (const p of (room?.players || [])) {
+    const tag = p.isBot ? 'AI' : p.alive === false ? '已出局' : p.connected ? '' : '掉线';
+    playerSel.append(el('option', { value: p.playerId, text: `${p.name}${tag ? '（' + tag + '）' : ''} · LP ${p.lp}` }));
+  }
+  if (!room?.players?.length) playerSel.append(el('option', { value: '', text: '（此对局没有玩家）' }));
+  playerSel.value = (room?.players || []).some((p) => p.playerId === prev) ? prev : (room?.players?.[0]?.playerId || '');
+  const st = room ? `${room.phaseName} · 第 ${room.round} 回合 · ${room.players.length} 名玩家` : '';
+  $('#gState').textContent = st;
+}
+
+/** 过滤 + 渲染棋子/装备选择列表（搜索：名字/职业/效果/阶数，大小写不敏感子串）。 */
+function grantMatches(list, q, fields) {
+  if (!q) return list;
+  return list.filter((r) => fields(r).toLowerCase().includes(q));
+}
+function renderGrantList(kind) {
+  const box = $(kind === 'chess' ? '#gChessList' : '#gItemList');
+  const q = ($(kind === 'chess' ? '#gChessQ' : '#gItemQ').value || '').trim().toLowerCase();
+  const sel = kind === 'chess' ? grant.selChess : grant.selItem;
+  const list = kind === 'chess'
+    ? grantMatches(grant.chess, q, (r) => `${r.name} ${PROFESSIONS[r.prof] || r.prof} ${r.prof} ${r.tier}阶 ${r.id}`)
+    : grantMatches(grant.items, q, (r) => `${r.name} ${r.eff} ${r.desc} ${r.tier}阶 ${r.id}`);
+  box.textContent = '';
+  if (!list.length) { box.append(el('div', { class: 'gempty', text: '没有匹配项，试试其他关键词' })); return; }
+  for (const r of list.slice(0, 200)) {
+    const card = el('button', { type: 'button', class: 'gcard' + (sel === r.id ? ' sel' : ''), title: `${r.name}${r.isGolden ? '（精锐/进阶）' : ''}` });
+    card.append(el('b', { text: r.name }));
+    if (kind === 'chess') {
+      card.append(el('span', { class: 'tg', text: `${r.tier}阶 · ${PROFESSIONS[r.prof] || r.prof}` }));
+      if (r.isGolden) card.append(el('span', { class: 'tg gold', text: '精锐' }));
+    } else {
+      card.append(el('span', { class: 'tg', text: `${r.tier}阶 · ${r.eff}` }));
+      if (r.isGolden) card.append(el('span', { class: 'tg gold', text: '进阶' }));
+      else if (r.goldenId) card.append(el('span', { class: 'hint', text: '可进阶' }));
+    }
+    card.addEventListener('click', () => {
+      if (kind === 'chess') grant.selChess = r.id; else grant.selItem = r.id;
+      renderGrantList(kind);
+    });
+    box.append(card);
+  }
+  if (list.length > 200) box.append(el('div', { class: 'gempty', text: `仅显示前 200 项（共 ${list.length}），请细化搜索` }));
+}
+
+/** 发放：POST /console/api/grant → 结果逐条回报。 */
+async function doGrant(kind) {
+  const roomCode = $('#gRoom').value, playerId = $('#gPlayer').value;
+  if (!roomCode || !playerId) { gMsg('先选择对局与玩家（没有进行中对局时先开局）。', 'err'); return; }
+  const sel = kind === 'chess' ? grant.selChess : grant.selItem;
+  if (!sel) { gMsg(kind === 'chess' ? '先在列表里点选一个棋子。' : '先在列表里点选一件装备。', 'err'); return; }
+  const elite = $(kind === 'chess' ? '#gChessElite' : '#gItemElite').checked;
+  const count = Math.max(1, Math.min(10, Math.trunc(Number($(kind === 'chess' ? '#gChessN' : '#gItemN').value)) || 1));
+  if (kind === 'chess' && elite) {
+    const rec = grant.chess.find((r) => r.id === sel);
+    if (rec && rec.isGolden) { gMsg('选中的已经是精锐形态，无需再勾选。', 'info'); }
+  }
+  gMsg('发放中…', 'info');
+  try {
+    const r = await fetch('/console/api/grant', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roomCode, playerId, grants: [{ kind, id: sel, elite, count }] }) });
+    const d = await r.json();
+    if (!d.ok && !d.results) throw new Error(d.error || '发放失败');
+    const parts = (d.results || []).map((x) => x.ok ? `✓ ${x.name} ×${x.granted.length}${x.error ? `（${x.error}）` : ''}` : `✗ ${x.name}：${x.error}`);
+    const anyOk = (d.results || []).some((x) => x.ok);
+    gMsg(`${anyOk ? '已发放' : '发放失败'}：${parts.join('；')}`, anyOk ? 'ok' : 'err');
+    loadGrant(); // 刷新对局状态（LP 等会因合成等变化）
+  } catch (e) {
+    gMsg('发放失败：' + e.message, 'err');
+  }
+}
+
+$('#gRefresh').addEventListener('click', () => loadGrant(true));
+$('#gRoom').addEventListener('change', renderGrantPlayers);
+$('#gChessQ').addEventListener('input', () => renderGrantList('chess'));
+$('#gItemQ').addEventListener('input', () => renderGrantList('item'));
+$('#gGrantChess').addEventListener('click', () => doGrant('chess'));
+$('#gGrantItem').addEventListener('click', () => doGrant('item'));
+
+// 切到发放页时懒加载数据（不拖慢控制台首屏）
+const _switchTab = switchTab;
+switchTab = function (k) { _switchTab(k); if (k === '__grant') loadGrant(); };
 
 switchTab('rewardOffer');
 load();
