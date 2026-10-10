@@ -149,6 +149,7 @@ node tools/check-missing-imports.mjs      # 符号审计
   - **注意**：隧道是跨洋中继（lax01 = 洛杉矶），延迟明显高于樱花国内节点，**只作兜底**；日常优先用固定网址。**2026-10-09 用户决定：不再作为「可选开关」，而是内建为 `start-online.bat` 的默认行为**（后备隐藏能源随开服一起拉起，省得流量耗尽时手忙脚乱）；不想要时 `-NoTunnel` 关掉。
   - **⚠️ 隧道带宽硬上限 ≈ 200–280 KB/s（2026-10-09 实测）**：本机直连同文件 ≈ 70 MB/s，隧道慢 250 倍。单个图标 2–3 s、3 MB 音频 10–15 s，浏览器首屏几百个资源 ⇒ 表现为「图标慢慢冒出来、画面转不完」。`--ha-connections` 调不动（quick tunnel 忽略），是固有上限。**隧道只适合应急进游戏，不适合长期玩**；排查细节见 [NOTES.md](NOTES.md) 末尾「朋友反馈换隧道后 3D 和图标加载不出来」。
   - **⚠️ 3D 棋盘本机从未启用（与隧道无关）**：`data/local-assets.json` 是 `{"source":"none","count":0}`、`public/assets/local/` 不存在 ⇒ `boardArtListed()` 返回 false ⇒ **不请求 `three.module.js`** ⇒ 走 2D 棋盘。2D 棋盘自带透视投影，容易被误认为「3D 坏了」。要真 3D 需 `node tools/setup.mjs --local`（需本机官方客户端 + Python 3.8+）。
+  - **⚠️ 慢网玩家会静默降级为「简化视图」（2026-10-10 已修）**：`ui/fieldHost.js` 用 `LOAD_TIMEOUT_MS` 给渲染引擎设加载预算，超时/抛错（含 WebGL 初始化失败）就**静默**换成 `ui/fallbackField.js` 的 DOM 视图 —— 表现为**纯平格子 + 圆形头像 + 文字「阻」徽章**，右下角常驻 **`SIMPLIFIED VIEW`**，进对局时弹一次 toast。**判定：看右下角有没有 `SIMPLIFIED VIEW`，或看 DOM 里有没有 `canvas`**（fallback 视图没有 canvas）。修复：① 预算 12000 → **30000**；② `main.js` 进房间时新增 `warmRenderEngine()`（预热 `render/app.js` 模块图 + `ensurePixi()`），把 ~1.6 MB 脚本下载移出对局关键路径。**纯客户端改动，改完刷新页面即可，无需重启服务器、不打断在线对局。** 排查细节见 [NOTES.md](NOTES.md) 末节。
 - 已放弃计划任务开机自启方案（用户选择按需启动）；`scripts/install-service-windows.ps1` 仍在仓库里，未来想改回自启可直接用：`-Port 24500 -AllowPublicNetwork`。
 - 手动起服备用：`$env:PORT=24500; npm start`。
 

@@ -14,7 +14,13 @@ import { data } from '../data.js';
 import { audio } from '../audio.js';
 import { settingsStore } from './settings.js';
 
-const LOAD_TIMEOUT_MS = 12000;
+// The render engine's mount budget. The engine pulls ~1.6 MB of scripts (vendor pixi 456 KB + pixi-spine 362 KB +
+// the render/* module waterfall, 28 modules / 775 KB raw) and only then builds its scene. On a fast link that is a
+// blink; over a 樱花隧道 / 跨洋中继 it is several seconds per file, and a budget that is too tight made the engine
+// "unavailable" for slow players — they got the DOM view (the flat board, round avatars and the `SIMPLIFIED VIEW`
+// badge) without knowing why. main.js warms these scripts when the player is in a room, so the match usually finds
+// them cached; this stays the hard ceiling for a cold cache.
+const LOAD_TIMEOUT_MS = 30000;
 const METHODS = ['setStage', 'setCamera', 'setPrep', 'enterBattle', 'pushSnapshot', 'pushEvents', 'highlightTiles', 'on', 'resize', 'destroy'];
 // direction-step hooks (ui/facingWheel.js): optional — the wheel falls back to the engine's dev hooks when absent;
 // setPen (enemy preview pen list), prepField ({ kind, side, mirror } of the Final Assault prep), stripesUnder (the view

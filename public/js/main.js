@@ -236,7 +236,7 @@ function wireNet() {
   store.subscribe((s, prev) => {
     if (s.session.entered && !prev.session.entered) schedulePendingJoin();
     // in a room (co-op or solo, also a resumed one) a match is near: its data starts downloading
-    if (s.room && !prev.room) warmGameData();
+    if (s.room && !prev.room) { warmGameData(); warmRenderEngine(); }
   });
 }
 
@@ -251,6 +251,24 @@ function warmGameData() {
   const go = () => { data.loadAll(GAME_FILES).catch(() => {}); };
   if (typeof globalThis.requestIdleCallback === 'function') globalThis.requestIdleCallback(go, { timeout: 2500 });
   else setTimeout(go, 600);
+}
+
+/**
+ * Warm the field render engine once a match is near (same trigger as warmGameData). ui/fieldHost.js mounts the engine
+ * with a LOAD_TIMEOUT_MS budget; the engine needs ~1.6 MB of scripts before it can build anything (vendor pixi +
+ * pixi-spine + the render/* module waterfall), and on a slow link those did not arrive in time — the mount then fell
+ * back to the DOM view (a flat board with round avatars and a `SIMPLIFIED VIEW` badge) with only a console warning.
+ * Pulling them here moves that download off the critical path: the match screen then finds them in the HTTP cache.
+ * Idempotent — the module registry and the browser cache both keep what this fetches, and a failure is harmless
+ * (the mount's own import retries).
+ */
+function warmRenderEngine() {
+  // Importing the engine's module graph (app.js → 27 more) resolves the waterfall off the match path; calling its
+  // own ensurePixi() then really loads the two vendor scripts, so the match finds globalThis.PIXI ready instead of
+  // starting that download at mount time. Both are idempotent and a failure is harmless (the mount retries).
+  import('./render/app.js')
+    .then((m) => m.ensurePixi?.())
+    .catch(() => {});
 }
 
 // ---- UI chrome (the connection banner lives in ui/connBanner.js) -----------------------------------
