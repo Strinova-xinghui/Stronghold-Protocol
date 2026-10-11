@@ -4,6 +4,12 @@
 
 若已通过 GitHub 学生认证，**Azure for Students 是延迟最低、最稳定的选择**（见方案三）。
 
+> ✅ **2026-10-11 12:02 权益已解锁** —— benefits 页文案由 `Awaiting Benefits` 变为
+> `Verified (benefits available) on October 08, 2026`、`Congratulations! Your academic benefits,
+> including Partner offers, are now available.`、`Your benefits will expire on October 08, 2028.`。
+> 与先前**两路证据交叉锁定的预测（10-11 11:24–11:54 解锁）吻合**。
+> 证据截图：`.cache/github-benefits-unlocked-2026-10-11.png`。**现在可以开始执行方案三了。**
+
 ---
 
 ## 方案一：Hugging Face Spaces 部署（最推荐 · 16G 内存免休眠）
