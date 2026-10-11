@@ -149,7 +149,7 @@ node tools/check-missing-imports.mjs      # 符号审计
   - **🩹 SSH banner 被掐 = Mihomo TUN 劫持**：`Find-NetRoute 20.89.110.22` 显示默认路由指向 `Mihomo` 网卡（NextHop 198.18.0.2），SSH 流量全被代理接管（TCP 通、banner 不回）。**解法：退出 Clash 立即恢复直连**（当前采用）；长期方案 = mihomo 加 `IP-CIDR,20.89.110.22/32,DIRECT,no-resolve` 规则（clash 配置是 `D:\Clash Verge` 便携版、无 external-controller，需改 profile 文件后手动重载；配置文件定位未完成，全盘搜被取消）。**注意：朋友的连接不经过房主 Clash**，退出 Clash 只影响房主自己的 SSH/上网。
   - **NSG 已放行**：`MyVM-nsg` = 22/80/443（建 VM 向导自带）+ **24500（`game24500` 规则，经 ARM API 追加）**。NSG 追加规则也可用 ARM `PUT …/securityRules/game24500`。
   - **⚠️ 遗留：素材缺 1197/6904**（`public/assets` 美术/音频，游戏可跑但缺图缺声，占位图兜底）。direct 与 mirror 两种模式都补不动（疑似清单中部分文件在源上就不存在，需查 `tools/fetch-assets.mjs` 的清单与 URL 拼装）。**替代方案：从本机 `E:\卫戍协议\public\assets`（素材齐全）用 scp 增量上传缺失文件**。
-  - **樱花隧道与签到自动化暂未退役**（已具备退役条件，等用户确认后再动）：签到定时任务仍每日跑；`start-online.bat` 本地服保留作备用房。
+  - **✅ 樱花已退役（2026-10-11 15:45，用户确认）**：① DSH 签到定时任务 ×2 已删；② `sakurafrp-checkin` 脚本已归档至 `C:\Users\MK\.dsh\automations\_retired-sakurafrp-checkin-2026-10-11.zip`；③ `SakuraFrpService` 已 Stopped、启动器 `.lnk` 已删（服务 StartType 仍 Auto 需管理员改 Disabled，但无进程不建隧道）；④ 实测 `frp-end.com:15810` 断、云服正常。复活法：解压归档 + 双击 `C:\tools\sakurafrp\SakuraLauncher.exe`。`start-online.bat` 本地备用服保留；Cloudflare 临时隧道兜底能力不变（`start-online.bat` 默认仍带）。
 - **✅ 流量耗尽兜底：Cloudflare 临时隧道已实测可用（2026-10-09 端到端验证通过）**。樱花免费套餐基础仅 5 GiB/月（签到补 1~4 GiB），**一旦耗尽，固定网址 `frp-way.com:17913` / `frp-cup.com:30756` 立刻失效**。**该兜底现已内建为开服默认行为**（不必等到耗尽才准备），所以流量告急时地址早已在剪贴板里：
   - **一键**：双击 **`start-online.bat`** —— **默认就带隧道**（2026-10-09 起后备隐藏能源内建为默认行为，`start-fallback-tunnel.bat` 已删除）。
   - **只要固定网址、不起隧道**：`start-online.bat -NoTunnel`（省 ~50 MB 内存，也不暴露临时地址）。
