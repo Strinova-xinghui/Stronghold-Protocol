@@ -96,24 +96,36 @@ Standard SSD（`E4`）即可 —— 一年 $28.80，$100 额度绰绰有余。**
 
 本项目磁盘需求很小（游戏素材 271 MB + `node_modules` 86 MB），30 GiB 完全够用，无需扩到 64 GiB。
 
-三种免费规格（**内存都只有 1 GiB**）：
+三种免费规格（**内存都只有 1 GiB**）—— 下表「东亚可用性」一列是 **2026-10-11 用 ARM SKU API 实测**（`Microsoft.Compute/skus?$filter=location eq 'eastasia'`，订阅 `2f3db136-813f-4432-8c19-69cf2efba2fa`），**比门户 UI 可靠**：
 
-| 规格 | vCPU | 内存 | 架构 | 建议 |
-| --- | --- | --- | --- | --- |
-| **Standard_B2ats_v2** | 2 | 1 GiB | x86 (AMD) | ✅ **首选**：2 核，x86 无任何兼容顾虑 |
-| Standard_B2pts_v2 | 2 | 1 GiB | Arm | 备选：本项目纯 JS，Arm 可跑 |
-| Standard_B1s | 1 | 1 GiB | x86 | 兜底：够用但偏紧 |
+| 规格 | vCPU | 内存 | 架构 | 东亚可用性 | 建议 |
+| --- | --- | --- | --- | --- | --- |
+| **Standard_B2ats_v2** | 2 | 1 GiB | x86 (AMD) | ✅ **无限制**，3 个可用区 | ✅ **首选**：2 核，x86 无兼容顾虑 |
+| Standard_B2pts_v2 | 2 | 1 GiB | Arm64 | ✅ 无限制，**仅 zone 1** | 备选：本项目纯 JS，Arm 可跑 |
+| Standard_B1s | 1 | 1 GiB | x86 | ❌ **`NotAvailableForSubscription`** | 🩹 **东亚建不了**，见下 |
+
+> 🩹 **更正（2026-10-11）**：本文档此前把 `B1s` 列为可用兜底规格，**在东亚区实际不可用**。
+> ARM API 返回它带两条限制 `Location / NotAvailableForSubscription`（`eastasia`）与
+> `Zone / NotAvailableForSubscription`。`Standard_B2s`（2 核 4 GiB）同样被限制。
+> **东亚区只能选 `B2ats_v2`（x86，首选）或 `B2pts_v2`（Arm）** —— 两者都是 2 核 1 GiB。
+>
+> 另外：先前担心的「学生订阅通常只允许约 5 个区域」**在本订阅上不成立** ——
+> 门户区域下拉框里**有 `(Asia Pacific) East Asia` 且已实测可选中**，ARM API 也确认
+> 东亚有 **1189 个可用规格**。区域限制不是本订阅的阻塞项。
 
 本项目依赖全是纯 JS（`ws` / `pixi.js` / `three` / `preact`，**无原生 `.node` 模块**），Arm 与 x86 都能跑；仓库 `Dockerfile` 用的 `node:22-alpine` 也是多架构镜像。
 
 ### 建 VM（门户，约 10 分钟）
 
 1. 用 GitHub 学生认证开通 [Azure for Students](https://azure.microsoft.com/en-us/free/students/)（点 **Activate**，从 GitHub Student Pack 入口或学校邮箱进）。
+   > ✅ **2026-10-11 实测：订阅已开通** —— 名称 `Azure for Students`，ID
+   > `2f3db136-813f-4432-8c19-69cf2efba2fa`，状态「可用」，角色「所有者」。
 2. 门户 → **创建虚拟机**：
    - **订阅**：Azure for Students
-   - **区域**：**东亚（香港）** 或 **东南亚（新加坡）** —— 到国内延迟最低
+   - **区域**：**东亚（香港）** 或 **东南亚（新加坡）** —— 到国内延迟最低（已实测东亚可选）
    - **映像**：Ubuntu Server 24.04 LTS (x64)
    - **大小**：**Standard_B2ats_v2**（2 vCPU / 1 GiB）—— 点「查看全部大小」搜 `B2ats`
+     （⚠️ **别选 `B1s`，东亚区不可用**；默认的 `Standard_D2s_v3` 也报 `NotAvailableForSubscription`）
    - **身份验证**：SSH 公钥（门户可代生成，**记得下载私钥**）
    - **入站端口**：SSH(22) + HTTP(80) + HTTPS(443)；游戏端口 24500 建好后在 NSG 补
    - **磁盘**：保持默认 **30 GiB**，但**磁盘类型选 Standard SSD（E4 档，约 $2.40/月）**，不要选 Premium SSD。**切勿扩到 64 GiB Premium（P6 = $11.23/月 = $134.73/年，会超出 $100 额度）**
