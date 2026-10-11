@@ -60,6 +60,13 @@ Render 支持通过仓库根目录的 `render.yaml` 实现 Blueprint（一键基
 
 ## 方案三：Azure for Students 云服务器（延迟最低 · 需学生认证）
 
+> ✅ **2026-10-11 已按本方案执行完成，游戏服已上线 24/7 公网可玩**：`http://20.89.110.22:24500`
+> （`MyVM` @ **Japan East**，`B2ats_v2`，systemd 常驻，实测 TTFB 0.20–0.24s 与樱花国内节点持平）。
+> **实际部署与本方案有三处偏差，以下文为准**：① 区域不是东亚而是 **Japan East**（订阅区域白名单
+> `sys.regionrestriction` 不含香港/新加坡，详见 [AGENTS.md](../AGENTS.md) 迁移执行记录）；
+> ② SSH 私钥在 `E:\keys\MyVM_key.pem`；③ 年成本实为 **$72.6**（磁盘 $28.8 + 公网 IP $43.8）。
+> **⚠️ 建任何 Azure 资源前先查订阅允许区域（门户下拉框不按策略过滤，East Asia 可选但部署被拒）。**
+
 已通过 **GitHub 学生认证** 后可开通 [Azure for Students](https://azure.microsoft.com/en-us/free/students/)：**$100 额度 + 一批 12 个月免费服务**，免绑信用卡。相比 HF Spaces / Render 的容器方案，它是**一台真正的 VM**：不休眠、无冷启动、延迟最低，还能彻底摆脱樱花 frp 隧道。
 
 ### 免费额度的真相（2026-10-09 按官方页面核实）
