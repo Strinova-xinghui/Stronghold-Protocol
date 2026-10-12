@@ -35,8 +35,8 @@ await new Promise((r) => setTimeout(r, 300));
 check('BOSS 血量页有 mul', !!(await page.$('input[data-f="bossHp.mul"]')));
 check('BOSS 血量页有 layerK', !!(await page.$('input[data-f="bossHp.layerK"]')));
 
-// 切到抽奖页，改 rolls，保存
-await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('回合抽奖'))?.click());
+// 切到抽奖页，改 rolls，保存（标签 2026-10-12 改名为「指定回合发装备 · 抽奖」，兼容两种）
+await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('回合抽奖') || t.textContent.includes('指定回合发装备'))?.click());
 await new Promise((r) => setTimeout(r, 300));
 const rollsInput = await page.$('input[data-f="roundLottery.rolls"]');
 check('抽奖页可见且含 rolls 输入', !!rollsInput && await rollsInput.isIntersectingViewport().catch(() => true));

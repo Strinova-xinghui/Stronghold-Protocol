@@ -101,5 +101,9 @@
     "layerK": 0.01,
     "layerFloor": 0,
     "layerCap": 7
+  },
+  "grant": {
+    "_说明": "GM 实时发放总开关（2026-10-12 补）：/console「发放棋子/装备/发钱」面板的闸。enabled=false 时发放接口一律 403——原版没有任何 GM 发放能力，全关 = 原汁原味才彻底成立。",
+    "enabled": true
   }
 }

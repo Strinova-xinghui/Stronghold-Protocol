@@ -746,6 +746,9 @@ async function readGrantBody(req) {
 /** 实时发放（控制台自研 2026-10-09）：为指定玩家的进行中对局添加棋子（可选精锐）/装备（可选进阶）。仅内网。
  *  核心授予在 server/match/grant.js applyGrants（可单测）；这里做 HTTP 管道 + roomCode/playerId 查找。 */
 async function consoleApiGrant(req, res, log, lobby) {
+  // 总开关（自研 2026-10-12）：grant.enabled=false 时一律 403——原版没有 GM 发放能力，全关=原汁原味。
+  const grantRules = getCustomRules({ log });
+  if (!grantRules.grant) { sendJson(req, res, 403, { ok: false, error: 'GM 实时发放已禁用（控制台 grant 开关已关闭）' }); return; }
   let body = null;
   try { body = await readGrantBody(req); } catch (e) { sendJson(req, res, 400, { ok: false, error: '请求体无效：' + e.message }); return; }
   const roomCode = typeof body?.roomCode === 'string' ? body.roomCode : '';
@@ -803,6 +806,7 @@ async function consoleApiWrite(req, res, log) {
 
 
     if (rules.bossHp) on.push('BOSS 血量');
+    if (rules.grant) on.push('GM 发放');
     log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
     sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? `生效中：${on.join(' / ')}` : '全部关闭（原版行为）' });
   } catch (e) {

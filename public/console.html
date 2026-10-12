@@ -118,7 +118,7 @@
   <!-- ④ 回合抽奖 -->
   <section class="panel" data-panel="roundLottery">
     <div class="card">
-      <h2><label class="chk"><input type="checkbox" data-en="roundLottery"> 回合抽奖（roundLottery）</label></h2>
+      <h2><label class="chk"><input type="checkbox" data-en="roundLottery"> 指定回合发装备 · 抽奖（roundLottery）</label></h2>
       <p class="desc">指定回合给玩家送装备抽奖（复用凯瑟琳「定向投放」面板）。rolls = 推几轮独立抽奖，choices = 每轮几选 1。</p>
       <div class="row">
         <label class="f">轮数 rolls<input type="number" data-f="roundLottery.rolls" min="1" max="10"></label>
@@ -209,8 +209,8 @@
   <!-- ⑧ 发放棋子/装备（自研 2026-10-09：实时为指定玩家添加，无需重启） -->
   <section class="panel" data-panel="__grant">
     <div class="card">
-      <h2>实时发放 · 棋子 / 装备</h2>
-      <p class="desc">为进行中对局里的指定玩家添加任意棋子（可选<b>精锐</b>，直接给 `_b` 形态，Lv7 属性）、装备（可选<b>进阶</b>，直接给升级后形态）与<b>资金</b>（立即到账）。走游戏自己的获得管线——发放后玩家客户端<b>立即看到</b>；玩家已有 2 张同干员时发第 3 张会按规则自动合成精锐。<b>不消耗共享卡池</b>。整备区满时发放失败并给玩家实时提示。</p>
+      <h2><label class="chk"><input type="checkbox" data-en="grant"> GM 实时发放（grant）</label></h2>
+      <p class="desc">为进行中对局里的指定玩家添加任意棋子（可选<b>精锐</b>，直接给 `_b` 形态，Lv7 属性）、装备（可选<b>进阶</b>，直接给升级后形态）与<b>资金</b>（立即到账）。走游戏自己的获得管线——发放后玩家客户端<b>立即看到</b>；玩家已有 2 张同干员时发第 3 张会按规则自动合成精锐。<b>不消耗共享卡池</b>。整备区满时发放失败并给玩家实时提示。<b>关掉 = 原版没有任何 GM 发放能力。</b></p>
       <div class="row">
         <button id="gRefresh">刷新对局与玩家</button>
         <label class="f">对局 roomCode<select id="gRoom" style="width:170px"><option value="">（先刷新）</option></select></label>
@@ -344,6 +344,7 @@ function setStat(d) {
 
 
   if (d.rules?.bossHp) on.push('BOSS 血量');
+  if (d.rules?.grant) on.push('GM 发放');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -365,10 +366,11 @@ function ensureShape() {
   cfg.extraRounds.poolTemplates = Array.isArray(cfg.extraRounds.poolTemplates) ? cfg.extraRounds.poolTemplates : [];
   cfg.pacing = cfg.pacing || { enabled: true, bandDraftMul: 1, spDraftMul: 1, prepMul: 1, combatSpeed: null };
   cfg.bossHp = cfg.bossHp || { enabled: true, mul: 1, layerK: 0.0005, layerFloor: 0, layerCap: 5 };
+  cfg.grant = cfg.grant || { enabled: true };
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','回合抽奖'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['__grant','发放棋子/装备'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';
@@ -394,6 +396,7 @@ function renderAll() {
   }
   renderSlots();
   renderRounds();
+  syncGrantUI();
   if (activeTab === '__raw') $('#raw').value = JSON.stringify(cfg, null, 2);
   renderTabs();
 }
@@ -464,6 +467,12 @@ function selField(label, val, opts, set) {
 // ---------------- 事件绑定 ----------------
 for (const cb of document.querySelectorAll('[data-en]')) {
   cb.addEventListener('change', () => { cfg[cb.dataset.en].enabled = cb.checked; });
+}
+/** grant 开关注销联动：关掉 = 原版没有 GM 发放，三个发放按钮一起灰化。 */
+function syncGrantUI() {
+  const on = cfg.grant?.enabled !== false;
+  for (const id of ['#gGrantChess', '#gGrantItem', '#gGrantFunds']) $(id).disabled = !on;
+  if (!on) gMsg('GM 实时发放已关闭（原版行为）。打开开关并保存后才能发放。', 'info');
 }
 for (const inp of document.querySelectorAll('[data-f]')) {
   inp.addEventListener('change', () => {

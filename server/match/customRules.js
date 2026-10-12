@@ -32,12 +32,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -197,7 +197,13 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp ? out : OFF;
+  // ---- GM 实时发放（grant，自研 2026-10-09 上线 / 2026-10-12 补总开关）：/console「发放棋子/装备/发钱」的总闸。
+  //      enabled=false 时 /console/api/grant 一律 403 拒绝——原版没有任何 GM 发放能力，
+  //      关掉它「全关 = 原汁原味」才彻底成立。面板在 __grant（特殊面板，开关在 h2 里）。
+  const gr = raw.grant && typeof raw.grant === 'object' ? raw.grant : null;
+  if (gr && gr.enabled) out.grant = Object.freeze({ enabled: true });
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant ? out : OFF;
 }
 
 /**
