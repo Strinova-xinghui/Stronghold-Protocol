@@ -383,8 +383,9 @@ describe('room: copy the invite without navigator.clipboard (LAN over http, iOS)
     const ta = {
       style: {}, value: '',
       setAttribute(k) { calls.push(['attr', k]); },
+      focus() { document.activeElement = ta; },
       select() { calls.push(['select']); },
-      setSelectionRange(a, b) { calls.push(['range', a, b]); },
+      setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; calls.push(['range', a, b]); },
       remove() { calls.push(['remove']); },
     };
     const saved = { document: globalThis.document, secure: globalThis.isSecureContext, nav: Object.getOwnPropertyDescriptor(globalThis, 'navigator') };
@@ -412,7 +413,8 @@ describe('the title footer on a phone', () => {
     assert.match(css.slice(css.indexOf('.title-foot {')), /font-size: max\(\.13rem, 10px\)/, 'the disclaimer: a bare .13rem is 4.3 px when the root is 33 px');
     assert.match(css, /\.title-foot \.micro \{ font-size: max\(\.12rem, 10px\); \}/, 'the version label keeps one too');
     const title = read('public/js/screens/title.js');
-    assert.match(title, /title-foot__credit">B 站 纸鸢安好 · UID 99201674 · 安卓端适配参考 B 站 @Ausevay</, 'the credit line: name, UID and the @Ausevay acknowledgement');
+    // 0.2.5 起 credit 行包了 N_（i18n 扫描登记；B 站 ID 为专名，英文包里同样原文）——DOM 输出与字面一致
+    assert.match(title, /title-foot__credit">\$\{N_\('B 站 纸鸢安好 · UID 99201674 · 安卓端适配参考 B 站 @Ausevay'\)\}</, 'the credit line: name, UID and the @Ausevay acknowledgement');
     assert.ok(!/<a\b[^>]*class="title-foot/.test(title) && !/title-foot__credit[^>]*href/.test(title), 'no anchors in the footer');
   });
 });

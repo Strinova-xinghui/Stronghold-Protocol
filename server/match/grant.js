@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n.js';
 // grant.js — 控制台实时发放（自研 2026-10-09）：为指定玩家的进行中对局添加任意棋子（可选精锐）与装备（可选进阶）。
 // 核心在这里（无 HTTP 依赖，node --test 经 test/match/harness.js 直接单测）；server/index.js 的 /console/api/grant
 // 只做 HTTP 管道（roomCode/playerId 查找）后调 applyGrants。
@@ -21,7 +22,7 @@
  */
 export function applyGrants(m, ps, grants) {
   const out = [];
-  if (!m || !ps) return [{ ok: false, kind: null, id: '', name: '', granted: [], error: '对局或玩家不存在' }];
+  if (!m || !ps) return [{ ok: false, kind: null, id: '', name: '', granted: [], error: t('对局或玩家不存在') }];
   const gd = m.gd;
   const list = (Array.isArray(grants) ? grants : []).slice(0, 20);
   for (const g of list) {
@@ -31,7 +32,7 @@ export function applyGrants(m, ps, grants) {
     // includeAll: 同时给对局里**所有玩家**发同样金额（m.order 全员；已出局的跳过并如实标注）。
     if (kind === 'funds') {
       const rawAmount = Math.trunc(Number(g?.amount));
-      if (!Number.isFinite(rawAmount) || rawAmount < 1) { out.push({ ok: false, kind, id: '', name: '', granted: [], error: '缺少金额（amount 1..10000）' }); continue; }
+      if (!Number.isFinite(rawAmount) || rawAmount < 1) { out.push({ ok: false, kind, id: '', name: '', granted: [], error: t('缺少金额（amount 1..10000）') }); continue; }
       const amount = Math.max(1, Math.min(10000, rawAmount));
       const recipients = [ps];
       if (g?.includeAll === true) {
@@ -40,7 +41,7 @@ export function applyGrants(m, ps, grants) {
         for (const x of order) {
           if (!x || seen.has(x.playerId)) continue;
           seen.add(x.playerId);
-          if (x.alive === false) { out.push({ ok: false, kind, id: x.playerId, name: x.name || x.playerId, granted: [], error: '已出局，跳过' }); continue; }
+          if (x.alive === false) { out.push({ ok: false, kind, id: x.playerId, name: x.name || x.playerId, granted: [], error: t('已出局，跳过') }); continue; }
           recipients.push(x);
         }
       }
@@ -54,22 +55,22 @@ export function applyGrants(m, ps, grants) {
     const id = g && typeof g.id === 'string' ? g.id : '';
     const elite = g?.elite === true;
     const count = Math.max(1, Math.min(10, Math.trunc(Number(g?.count)) || 1));
-    if (!kind || !id) { out.push({ ok: false, kind, id, name: id, granted: [], error: '缺少 kind/id' }); continue; }
+    if (!kind || !id) { out.push({ ok: false, kind, id, name: id, granted: [], error: t('缺少 kind/id') }); continue; }
     let target = id;
     if (kind === 'chess') {
       const rec = gd.chess(id);
-      if (!rec) { out.push({ ok: false, kind, id, name: id, granted: [], error: '没有这个棋子' }); continue; }
+      if (!rec) { out.push({ ok: false, kind, id, name: id, granted: [], error: t('没有这个棋子') }); continue; }
       if (elite) {
         const golden = gd.goldenIdOf(id);
-        if (!golden) { out.push({ ok: false, kind, id, name: rec.name || id, granted: [], error: '该干员没有精锐形态' }); continue; }
+        if (!golden) { out.push({ ok: false, kind, id, name: rec.name || id, granted: [], error: t('该干员没有精锐形态') }); continue; }
         target = golden;
       }
     } else {
       const rec = gd.item(id);
-      if (!rec) { out.push({ ok: false, kind, id, name: id, granted: [], error: '没有这个装备' }); continue; }
+      if (!rec) { out.push({ ok: false, kind, id, name: id, granted: [], error: t('没有这个装备') }); continue; }
       if (elite) {
         const golden = rec.goldenId && gd.item(rec.goldenId) ? rec.goldenId : null;
-        if (!golden) { out.push({ ok: false, kind, id, name: rec.name || id, granted: [], error: '该装备没有进阶形态' }); continue; }
+        if (!golden) { out.push({ ok: false, kind, id, name: rec.name || id, granted: [], error: t('该装备没有进阶形态') }); continue; }
         target = golden;
       }
     }
@@ -79,14 +80,14 @@ export function applyGrants(m, ps, grants) {
       const piece = kind === 'chess'
         ? ps.acquireChess(target, { source: 'gm', fromPool: false })
         : ps.acquireItem(target, { source: 'gm' });
-      if (!piece) { fail = '整备区已满'; break; }
+      if (!piece) { fail = t('整备区已满'); break; }
       grantedIds.push(piece.id);
     }
     out.push({
       ok: grantedIds.length > 0, kind, id: target,
       name: (gd.chess(target) || gd.item(target))?.name || target,
       granted: grantedIds,
-      error: grantedIds.length ? (fail ? `部分发放：${fail}` : null) : (fail || '发放失败'),
+      error: grantedIds.length ? (fail ? t('部分发放：{fail}', { fail }) : null) : (fail || t('发放失败')),
     });
     if (grantedIds.length) m.log.info?.(`[console] 已为 ${ps.name || ps.playerId} 发放 ${kind === 'chess' ? '棋子' : '装备'} ${grantedIds.join(', ')}`);
   }

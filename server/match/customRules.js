@@ -21,6 +21,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { t } from '../../shared/i18n.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CONFIG_PATH = path.join(ROOT, 'config', 'custom-rules.json');
@@ -126,7 +127,7 @@ function normalize(raw) {
       rolls,
       choices,
       rounds: Object.freeze(rounds),
-      label: typeof rl.label === 'string' && rl.label ? rl.label : '军备抽奖',
+      label: typeof rl.label === 'string' && rl.label ? rl.label : t('军备抽奖'),
       // 是否也给 AI 座位发（默认 false——AI 不需要，且要替它做选择逻辑；用户 2026-10-08 定）
       includeBots: rl.includeBots === true,
     });

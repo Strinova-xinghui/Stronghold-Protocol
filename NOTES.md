@@ -372,3 +372,46 @@
 - 本次的「画面变成纯平格子 + 圆形头像」是**另一回事**：**降级视图**，根因是 **12 s 加载超时**（樱花线也可能触发，不只隧道）；
 - 「3D 从未启用」的结论**不变**（`count:0`），与本次无关。
 
+
+## 上游 0.2.5 同步（2026-10-13 深夜，agent 自动执行）
+
+> 命令式任务：「更新底层到上游 0.2.5，落本地和 GitHub，验收后再上服务器」。本节给下一次同步/排查用。
+
+### 结果
+
+- `master` 已合并 `sganggs/Stronghold-Protocol` **v0.2.5**（`cf7a9400`），merge-base v0.1.4（跨 0.2.0–0.2.5 五个版本，上游 666 提交）。
+- 测试矩阵（`SP_OFFICIAL_RULES=1` 官方模式）：**content 2292/2292、match ~790（唯一失败 `android-blackscreen`，见下）、ui 765/765、render 582/582、sim 893/893、e2e 10/10、根目录 934/933（同一 android 项）、自研 10 套 119/119、golden 9/9**。`check-missing-imports` ✓。
+- 唯一已知失败：`test/android-blackscreen.test.js` 读 `android/` 原生工程——该目录在 6580b462（10-06「落实定向甄选」）已整目录删除且已 push，**HEAD 上本就失败**，非合并回归。客户端桥（`window.native`/reportClientState）与 lobby/settings 的 nativeShell 钩子保留。
+
+### 上游 0.2.5 大重构要点（影响未来同步）
+
+- `server/index.js` → 薄壳 + `server/http/*`（routes/websocket/static/media/files/buildTag/common/boot/config）。**自研路由整体迁入 `server/http/customRoutes.js`**（/monitor、/console*、/lan/room + isPrivateAddress/monitorSnapshot/MONITOR_HTML/consoleApi*），`routes.js` 里一行 `handleCustomRoutes()` 钩子；SP_MAX_SEATS 钩子在 `http/websocket.js`（createSessionStack）+ `http/config.js`（lobbyOptions 放行 maxSeats）。
+- `server/match/Match.js` → 薄壳 + `server/match/match/*` 17 个方法模块（prototype 拼接，**同名方法两次定义会 throw**）。**自研方法整体迁入第 18 个模块 `server/match/match/custom.js`**（monitor 群/setSkins/_debtRule/_pacing/_debtEnemyMul/roundLottery 群/prepWait 群）；改上游行为的钩子直改子模块：`messaging.js`（sendTo monitor 镜像 + bot 被监看推送 + public 发监看者）、`views.js`（lp 负值/skins 字段/prepWait/debt 段）、`combat.js`+`unitePhase.js`（_sanitizeSpawns applyDebtMul）、`settle.js`（负债清算）、`phases.js`（bandTurnMs pacing + raiseExtraRoundsFloor）、`spDraft.js`（spDraftMul）、`prep.js`（lottery/prepMul/waiters/_prepWaitRefresh）、`intents.js`（g.prepWait case）、`bossRounds.js`（bossPoolHp 传 hiddenLayerSum）。
+- `server/match/PlayerState.js` → 薄壳 + `server/match/player/*`。自研迁入 `player/custom.js`（setSkins/_rewardOfferPlan 群）；`economy.js`（bondBoost/装备甄选）、`acquire.js`（定向甄选循环，保留 diyStockEntries）、`round.js`（battleInput skin 字段）、`views.js`（pieceView skin）。
+- `server/match/pool.js`：rollItem 签名扩为 `(rng, maxTier, stock, opts)`——上游 SharedItemPool stock 参数 + 自研 bondBoost/onTierMiss 并存；加权路径走 `stock.pick(rng, list, weights)`。
+- `server/match/gamedata.js`：上游占位钩子 `gd.bossHpMul(bossId)` 被自研双参版覆盖（`bossHpMul(bossId, layerSum)`）；extraRounds 群/roundCfg 顺延/enemyScale 曲线/bans coopBansFor 全部保留。**⚠️ 新增 import 时小心**：本轮两次「植入后没加 import」都被 catch 吞掉（gamedata/economy 的 getCustomRules），表现为规则静默失效——下次同步后必跑自研 10 套测试。
+- `server/match/finalAssault.js`：`bossPoolHp(gd, bossId, aliveCount, players, layerSum)` = theirs bossPoolShareOf + 自研 `bossPoolShareFor(players)`（6 人缩放）+ 自研 bossHp 层数加压（audit.js 也按此签名调用）。
+- `server/index.js` 的 `DATA_SHIM_JS`/buildTag/静态服务语义上游不变；`update-restart.ps1`/`start-online.ps1` 不受影响。
+- 客户端：`public/js/ui/gameLogic.js` 1900 行单体 → `gameLogic/*` 18 子模块；`render/app.js` → `render/app/*`（info.js 的 renderInfo 已补 `skin` 字段）。**上游原生实现了中日配音**（voicePrefs/voiceOverrides/voiceLine，per-char 覆盖）——我们的 voiceKey 粗匹配已删（audio.js 取上游 + setVoiceLang 里保留 voiceGate.reset() 热切换钩子）；detailPanel 的 isOwnedOrDeployed 语音门控保留（3 处测试正则已放宽接纳）。
+- LpTower 改回上游 #479 行为（数字保持结算 LP，−N tick 单独标）+ 自研 debt 负数红字并存。
+
+### 测试侧适配（自研功能 vs 上游新测试的裁定）
+
+- `tools/pacing.test.mjs`：上游 BAND_TURN_SECONDS 30→50，倍率断言全部更新（×1.5 = 75s 等）。
+- `test/match/fuzz.test.js`：生成器补 `g.prepWait` case（自研消息）。
+- `test/docs-consistency.test.js` / `test/feedback7-voices.test.js` / `test/ui/standin-ui.test.js`：selectKey/selectChar 正则接纳 `isOwnedOrDeployed` 门控；`render/app.js` sig 正则接纳尾部 `|skin`。
+- `test/ui/text-scale.test.js`：clamp 40px 断言对齐上游（theme.css 的 24px 是 fork 旧值已修）；devices/briefing/draft/title 加入 NOT_SCALED_FILES；debtpill/waitbtn 加入 NOT_SCALED；--t 数量阈值 250→200。
+- `test/ui/playtest3.test.js`：tempnote 正则放宽（并集冗余坐标）；warmGameData+warmRenderEngine 同行触发；GAME_FILES 加 `skins`（gameComponents.js）。
+- `test/ui/loadout-stats.test.js`：statLevel 断言改为 `const statLevel = level;`（上游统一切换）。
+- `test/ui/devices.test.js`：credit 正则接纳 N_ 包装。
+- `test/version.test.js`：README 标题断言跳过 HF Space front matter。
+- `test/es2020-syntax.test.js` → **es2021-syntax.test.js**：上游 0.2.5 自带 ES2022 语法（top-level await/??=/||=/800_000），门升到 ecmaVersion 2022（我们自己的文件 0 违规）。
+- `test/scene-assets.test.js`：ROOT 改 fileURLToPath（中文路径 pathname 百分号编码 bug，上游英文路径踩不到）。
+- `docs/DESIGN.md` 必须保持「索引」形态（39 行）：designDocs helper 按 `## N.` 全局聚合，索引里残留正文会 § 撞车（第一次解决时混入旧正文导致 `§9 appears twice`，已重写为纯索引）。
+- 素材：0.2.5 新增 10963 文件清单，`node tools/fetch-assets.mjs --refresh-index` 全量补齐（含 clemnt JP 语音与 nearl2 epoque_17）；341 个 fork 皮肤 atlas 缺 `size:` 行已用 png IHDR 批量补（`.cache-fix-atlas.mjs` 一次性脚本，未入库）。
+
+### 遗留 / 注意
+
+- `sync/upstream-0.2.5` worktree（E:\sp-merge-025）留着供比对（junction node_modules/vendor 指向主仓），验收后可 `git worktree remove --force` + `cmd /c rmdir /s /q` 清理。
+- 服务器（云/本地）未重启：用户明确「明天验收后再上服务器」。上线时用 `update-restart.ps1`（读 SP_MAX_SEATS=6）或云服 `git pull && systemctl restart stronghold`，先确认 `matches == 0`。
+- `config/custom-rules.json` 是热改文件，跑测试前 `git checkout HEAD -- config/custom-rules.json`（多个测试写它、exit 时恢复，但中途 Ctrl-C 会留脏）。

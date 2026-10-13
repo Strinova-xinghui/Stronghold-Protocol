@@ -1,8 +1,8 @@
 // Regression tests (Node) of user playtest #3, HUD / UI items:
-//   2  the own LP drops live while the own battle's enemies enter the blue gate — pendingLoss / liveLp (the settle
+//   2  the own LP's pending loss is marked live while the own battle's enemies enter the blue gate — pendingLoss / liveLp (the settle
 //      rule min(lpCapPerRound, counted leaks), reset when the settled m.private lands, 联防中 during 联防), the team
 //      panel rows (rowLp: own live value, teammates' m.public players[].pendingLp), the LP tower's −N tick, and the
-//      server's pendingLp (server/match/Match.js _pendingLpView)
+//      server's pendingLp (server/match/match/views.js _pendingLpView)
 //   3  the temp overflow row (临时整备区): the ready button's visible reason, the row's frame geometry (tempRowFrame)
 //   8  the operator's own effect (特质 / garrison) right under the detail card's header (CHESS_SECTIONS, rendered order)
 //   9  no spinning busy indicators next to texts: no wait / progress cursors, the button's busy bar instead of a
@@ -59,7 +59,7 @@ const hasClass = (v, c) => typeof v?.props?.class === 'string' && v.props.class.
 
 // ---- 2: live LP ----------------------------------------------------------------------------------------------------
 
-describe('2: the own LP drops live while the battle runs', () => {
+describe("2: the own LP's pending loss is marked live while the battle runs", () => {
   test('pendingLoss is the settle rule: min(lpCapPerRound, counted leaks), never negative', () => {
     assert.equal(pendingLoss(0), 0);
     assert.equal(pendingLoss(3), 3);
@@ -150,7 +150,7 @@ describe('2: the own LP drops live while the battle runs', () => {
     assert.deepEqual(rowLp({ lp: 30 }, { phase: PHASE.FINAL_ASSAULT }, { lp: 99, pending: 5 }), { lp: 30, pending: 0, unite: false, left: null }, 'boss rounds: the row keeps its own share');
   });
 
-  test('LP tower: lp − pending in red with a −N tick keyed by the pending value (it pops again on every leak), the 联防中 tag', () => {
+  test('LP tower: the settled LP in red with a −N tick keyed by the pending value (it pops again on every leak) — the official keeps the current value until settlement (GitHub #479), the 联防中 tag', () => {
     const plain = LpTower({ value: 24, size: 'lg' });
     assert.ok(!hasClass(plain, 'is-pending'));
     assert.equal(textOf(plain), '24');
@@ -160,11 +160,11 @@ describe('2: the own LP drops live while the battle runs', () => {
     assert.equal(pend.key, 3, 'keyed: a new count re-mounts the tick (its pop animation plays again)');
     assert.equal(textOf(pend), '−3');
     const val = [...walk(v)].find((n) => hasClass(n, 'lp__val'));
-    assert.equal(textOf(val), '21');
+    assert.equal(textOf(val), '24', 'the number keeps the settled LP; the −3 tick carries the pending loss (GitHub #479)');
     assert.equal(v.props.title, 'x');
     const unite = LpTower({ value: 5, pending: 9, note: '联防中' });
-    assert.equal(textOf([...walk(unite)].find((n) => hasClass(n, 'lp__val'))), '0', 'clamped');
-    assert.equal(textOf([...walk(unite)].find((n) => hasClass(n, 'lp__pend'))), '−5');
+    assert.equal(textOf([...walk(unite)].find((n) => hasClass(n, 'lp__val'))), '5');
+    assert.equal(textOf([...walk(unite)].find((n) => hasClass(n, 'lp__pend'))), '−5', 'the tick clamps at the LP left');
     assert.equal(textOf([...walk(unite)].find((n) => hasClass(n, 'lp__note'))), '联防中');
     assert.equal(textOf(LpTower({ value: null, pending: 3 })), '--');
   });
@@ -222,6 +222,18 @@ describe('3: the temp overflow row (临时整备区)', () => {
     assert.deepEqual(tempInfo(null), { count: 0, items: 0 });
   });
 
+  test('Ready shows the personal-choice reason and describes it even with no temp pieces', () => {
+    for (const temp of [[], [{ uid: 1, kind: 'item' }]]) {
+      const v = ReadyToggle({ priv: { ...priv(temp), canReady: false, personalChoice: { id: 'choice.1' } }, onToggle() {} });
+      const nodes = [...walk(v)];
+      const btn = nodes.find((n) => n.type === 'button');
+      assert.equal(btn.props.disabled, true);
+      assert.equal(btn.props['aria-describedby'], 'readywrap-why');
+      assert.equal(textOf(nodes.find((n) => hasClass(n, 'readywrap__why'))), '请先完成教鞭选择');
+      assert.equal(nodes.find((n) => n.type?.name === 'Tooltip').props.text, '请先完成教鞭选择');
+    }
+  });
+
   test('the row frame: the outer corners of both end tiles, the label on the side with room (mirrored Final Assault prep too)', () => {
     // tileScreen polys: [back-left, back-right, front-right, front-left] (render/app.js tileScreen corner order)
     const tile = (cx, y, w = 100, d = 60) => ({ x: cx, y, s: w, poly: [[cx - w / 2 + 6, y - d / 2], [cx + w / 2 - 6, y - d / 2], [cx + w / 2, y + d / 2], [cx - w / 2, y + d / 2]] });
@@ -252,13 +264,14 @@ describe('3: the temp overflow row (临时整备区)', () => {
     assert.match(game, /<\$\{TempRowNotice\} view=\$\{view\} count=\$\{temp\.count\} items=\$\{temp\.items\} label=\$\{!drag && !facing\}\s+ready=\$\{phase === PHASE\.PREP && !!priv\?\.ready\} \/>/);
     assert.match(game, /toast\(tempReadyReason\(L\.priv\) \|\| refused, 'warn'\)/, 'Space says why');
     const css = read('public/css/screens/game-panels.css');
-    assert.match(css, /\.tempnote \{ position: fixed; inset: 0; z-index: 2; pointer-events: none; \}/, 'over the field, under the HUD, never takes the pointer');
+    // 0.2.5 合并：并集后的声明带冗余等价坐标（top/left/right/bottom/width/height 与 inset 同义），语义不变
+    assert.match(css, /\.tempnote \{ position: fixed;[^\n}]*z-index: 2; pointer-events: none; \}/, 'over the field, under the HUD, never takes the pointer');
   });
 
   test('while the ready button shows its reason the effects column moves down a line (on phones the ready count ran into it)', () => {
     const game = read('public/js/screens/game.js');
     // the same condition as ReadyToggle's reason: PREP, alive, not ready, pieces in the row
-    assert.match(game, /const readyWhy = phase === PHASE\.PREP && alive && !priv\?\.ready && temp\.count > 0;/);
+    assert.match(game, /const readyWhy = phase === PHASE\.PREP && alive && !priv\?\.ready && \(hasPersonalChoice \|\| temp\.count > 0\);/);
     assert.match(game, /readyWhy && 'has-readywhy'/);
     const css = read('public/css/screens/game.css');
     assert.match(css, /\.gm__effects \{ position: absolute; right: \.3rem; top: 2\.4rem; \}/);
@@ -269,6 +282,17 @@ describe('3: the temp overflow row (临时整备区)', () => {
 // ---- 8: the operator's own effect first --------------------------------------------------------------------------------
 
 describe('8: 特质 right under the detail card\'s header', () => {
+  // GitHub #175 (from PR #192 by @kukiC): the card's 7 / 14 is the cap the battle applies
+  test('华法琳\'s normal and elite cards show the 7 / 14 layer caps (GitHub #175)', async () => {
+    await data.loadAll('chess', 'garrisons', 'assets', 'bonds', 'items');
+    for (const [id, cap] of [['chess_char_4_26_a', 7], ['chess_char_4_26_b', 14]]) {
+      const blocks = ChessDetail({ chess: data.lookup('chess', id), piece: null, editable: false, bonds: [], loadout: null });
+      const block = blocks.find((b) => b.key === 'garrison');
+      const rich = [...walk(block.type(block.props))].find((n) => n.props?.text != null);
+      assert.match(rich.props.text, new RegExp(`每场战斗至多${cap}层`));
+    }
+  });
+
   test('the block order', () => {
     assert.deepEqual(CHESS_SECTIONS, ['head', 'garrison', 'trait', 'stats', 'skill', 'module', 'equip', 'talents', 'actions']);
   });
@@ -378,6 +402,18 @@ describe('9: busy indicators and data loading', () => {
     assert.ok(![...walk(landed)].some((n) => hasClass(n, 'spcard__busy')));
   });
 
+  test('choice requests carry the personal ID while global requests keep their existing shape', async () => {
+    const { net } = await import('../../public/js/net.js');
+    const { actions } = await import('../../public/js/ui/gameActions.js');
+    const request = net.request, sent = [];
+    net.request = async (t, fields) => { sent.push([t, fields]); };
+    try {
+      assert.equal(await actions.choice(0), true);
+      assert.equal(await actions.choice(2, 'seed.choice.3'), true);
+      assert.deepEqual(sent, [['g.choice', { idx: 0 }], ['g.choice', { idx: 2, choiceId: 'seed.choice.3' }]]);
+    } finally { net.request = request; }
+  });
+
   test('the "作战结束，等待队友完成作战" hourglass stands still', () => {
     const css = read('public/css/screens/game.css');
     assert.doesNotMatch(css, /hg-flip/);
@@ -457,7 +493,8 @@ describe('9: busy indicators and data loading', () => {
     const missing = [...used].filter((n) => !GAME_FILES.includes(n));
     assert.deepEqual(missing, [], 'read by the match UI but not awaited by the match screen');
     const main = read('public/js/main.js');
-    assert.match(main, /if \(s\.room && !prev\.room\) warmGameData\(\);/);
+    // 慢网预热（自研）: warmRenderEngine 与 warmGameData 同一触发点（进房间时）
+    assert.match(main, /if \(s\.room && !prev\.room\) \{ warmGameData\(\); warmRenderEngine\(\); \}/);
     assert.match(main, /data\.loadAll\(GAME_FILES\)/);
   });
 });

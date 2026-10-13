@@ -149,9 +149,10 @@ test('6 players: seatCount, a 1.5× pool, and three Final Assault fields on one 
     if (!ids.includes(cid)) continue;
     const override = m.gd.economy.poolCopiesOverrides?.[cid];
     if (Number.isInteger(override) && override >= 0) {
-      // a per-chess override is a content rule about that one operator and is never scaled
-      assert.equal(m.pool.cap(cid), plain4.cap(cid), `6 seats: ${cid} keeps its override`);
-      assert.equal(m.pool.cap(cid), override, `6 seats: ${cid} is the configured ${override}`);
+      // a per-chess override is a content rule about that one operator: seat scaling skips it (6 座 = 4 座原值)。
+      // 0.2.5 注：override 仍吃全池共通的 economy.coopPoolMultiplier（官方实测双倍池），所以这里只断言
+      // 「不随 seat 缩放」（plain4 == plain6 == m.pool），不再断言等于 override 裸值。
+      assert.equal(m.pool.cap(cid), plain4.cap(cid), `6 seats: ${cid} keeps its override (seat scaling skipped)`);
     } else {
       assert.ok(m.pool.cap(cid) > plain4.cap(cid), `6 seats: ${cid} holds more copies than at 4`);
     }

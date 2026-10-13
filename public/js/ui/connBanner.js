@@ -9,6 +9,7 @@ import { html, Button, Icon, useTicker } from './components.js';
 import { net, CLIENT_ERR_TEXT } from '../net.js';
 import { useStore, shallowEqual } from '../store.js';
 import { useDocClass } from './device.js';
+import { t } from '../../../shared/i18n.js';
 
 /** Whether the banner shows for this connection state (mirrors the early returns below). */
 export function bannerVisible(conn, entered, restoring, buildStale = false, simError = null) {
@@ -29,15 +30,15 @@ export function ConnectionBanner() {
   if (!entered) return null;
   if (conn.status === 'online' && !restoring && !buildStale && !simError) return null;
   if (conn.status === 'online' && restoring) {
-    return html`<div class="conn-banner" role="status"><${Icon} name="refresh" /><span>正在同步同盟状态…</span></div>`;
+    return html`<div class="conn-banner" role="status"><${Icon} name="refresh" /><span>${t('正在同步同盟状态…')}</span></div>`;
   }
   if (conn.status === 'online' && simError) {
     // the battle could not be built on this page: without this the player just sees a combat with no enemies
     const exhausted = (simError.tries || 1) >= (simError.max || 4);
     return html`<div class="conn-banner" role="alert">
       <${Icon} name="refresh" />
-      <span>${exhausted ? '战斗引擎加载失败，请刷新页面重试' : `战斗引擎加载中，正在自动重试（${simError.tries}/${simError.max || 4}）`} · ${simError.text}</span>
-      <${Button} size="sm" variant="secondary" icon="refresh" onClick=${() => location.reload()}>刷新页面<//>
+      <span>${exhausted ? t('战斗引擎加载失败，请刷新页面重试') : t('战斗引擎加载中，正在自动重试（{tries}/{1}）', { tries: simError.tries, 1: simError.max || 4 })} · ${simError.text}</span>
+      <${Button} size="sm" variant="secondary" icon="refresh" onClick=${() => location.reload()}>${t('刷新页面')}<//>
     </div>`;
   }
   if (conn.status === 'online' && buildStale) {
@@ -45,8 +46,8 @@ export function ConnectionBanner() {
     // for a player who would rather do it now
     return html`<div class="conn-banner" role="alert">
       <${Icon} name="refresh" />
-      <span>服务器已更新，本局结束后刷新</span>
-      <${Button} size="sm" variant="secondary" icon="refresh" onClick=${() => location.reload()}>刷新页面<//>
+      <span>${t('服务器已更新，本局结束后刷新')}</span>
+      <${Button} size="sm" variant="secondary" icon="refresh" onClick=${() => location.reload()}>${t('刷新页面')}<//>
     </div>`;
   }
   if (!conn.everOnline && (conn.status === 'connecting' || conn.status === 'handshaking' || conn.status === 'idle')) return null;
@@ -57,18 +58,18 @@ export function ConnectionBanner() {
   // Short transitional states (a rename re-sends hello on the live socket) only show if they linger.
   const transient = conn.status === 'connecting' || conn.status === 'handshaking' || (conn.status === 'connected' && !rejected);
   const text = conn.status === 'reconnecting'
-    ? '与服务器的连接已中断，正在重连'
-    : replaced ? '该身份已在其他页面登录'
-      : conn.status === 'closed' ? '连接已关闭'
-        : rejected ? conn.lastError.text : '正在连接服务器';
-  const action = conn.status === 'reconnecting' ? { label: '立即重连', run: () => net.retryNow() }
-    : conn.status === 'closed' ? { label: replaced ? '在此页面继续' : '重新连接', run: () => net.connect() }
-      : versionMismatch ? { label: '刷新页面', run: () => location.reload() }
-        : rejected ? { label: '重试', run: () => net.reconnectNow() } : null;
+    ? t('与服务器的连接已中断，正在重连')
+    : replaced ? t('该身份已在其他页面登录')
+      : conn.status === 'closed' ? t('连接已关闭')
+        : rejected ? t(conn.lastError.text) : t('正在连接服务器');
+  const action = conn.status === 'reconnecting' ? { label: t('立即重连'), run: () => net.retryNow() }
+    : conn.status === 'closed' ? { label: replaced ? t('在此页面继续') : t('重新连接'), run: () => net.connect() }
+      : versionMismatch ? { label: t('刷新页面'), run: () => location.reload() }
+        : rejected ? { label: t('重试'), run: () => net.reconnectNow() } : null;
   return html`<div class=${`conn-banner${transient ? ' conn-banner--soft' : ''}`} role="alert">
     <${Icon} name="wifiOff" />
     <span>${text}</span>
-    ${conn.status === 'reconnecting' ? html`<span class="conn-banner__sub">第 ${conn.attempt} 次 · ${secs}s</span>` : null}
+    ${conn.status === 'reconnecting' ? html`<span class="conn-banner__sub">${t('第 {attempt} 次 · {secs}s', { attempt: conn.attempt, secs })}</span>` : null}
     ${action ? html`<${Button} size="sm" variant="secondary" icon="refresh" onClick=${action.run}>${action.label}<//>` : null}
   </div>`;
 }

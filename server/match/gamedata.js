@@ -5,16 +5,17 @@
 // key is missing, so a partial data set (tests, data being regenerated) still yields a working match.
 //
 // No custom balance (DESIGN §14 corrections, research 08 §6): enemy numbers are the official ones — the PRTS
-// per-round enemyScale table of data/config.json, the leader pool = bloodPoint. data/tuning.json only overrides result
-// titles:
+// per-round enemyScale table of data/config.json, the leader pool = bloodPoint per player alive at the fight's start
+// (bossPoolShareOf). data/tuning.json only overrides result titles:
 //   titles[titleId]                                                { stat?, rule? } merged over config.titles
 // (the former enemyHpMul / enemyAtkMul / enemySpeedMul / bossHpMul / flyPlaceholders knobs were removed; a tuning file
 // that still carries them is ignored).
 
 import { getConfig, getMode } from '../data.js';
-import { getCustomRules } from './customRules.js';
 import { isShopItem } from '../sim/simdata.js';
-import { poolCopyMulFor, bossPoolShareFor, coopBansFor } from './scaling.js';
+import { standInRecord } from '../../shared/standIn.js';
+import { coopBansFor, poolCopyMulFor } from './scaling.js'; // 自研 6 人联机：禁用数/牌库缩放
+import { getCustomRules } from './customRules.js'; // 自研规则热读（extraRounds / bossHp / pacing）
 
 const own = (map, id) => (map && typeof map === 'object' && typeof id === 'string' && Object.hasOwn(map, id) && map[id] && typeof map[id] === 'object' ? map[id] : null);
 const numOr = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -56,6 +57,34 @@ export const DEFAULTS = Object.freeze({
 /** Game seconds per real second of a battle (forced 2×): combat limits in data are real seconds (combatTimeLimit). */
 export const COMBAT_TIME_SCALE = 2;
 
+/**
+ * Multiplier of bloodPoint[difficulty] for the shared leader pool (DESIGN §20.10, §25.13.4), from config bossHpScale —
+ * each key from the mode's entry first, then the global one; the defaults are the current rule:
+ *   solo   `solo` (1: the table value — one player's share);
+ *   co-op  `perPlayer` true (the owner's decision of 2026-10-06, adopting PR #209 by @qingjingshenghuo): `coop` (1) × the
+ *          players alive when the fight starts — bots and AI 托管 seats count, eliminated and departed seats do not —
+ *          at most `aliveFull` (4); a count left out means a full team;
+ *          `perPlayer` false: the fixed pool of 0.1.x (「保持固定血量」, restorable with `solo` 0.25): `coop` whatever the
+ *          count, × min(alive, aliveFull) / aliveFull with `aliveScaling`.
+ * @param {object|null|undefined} modeScale config.modes[modeId].bossHpScale
+ * @param {object|null|undefined} cfgScale config.bossHpScale
+ * @param {boolean} isSolo
+ * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
+ * @returns {number}
+ */
+export function bossPoolShareOf(modeScale, cfgScale, isSolo, aliveCount) {
+  const ms = modeScale && typeof modeScale === 'object' ? modeScale : {};
+  const cs = cfgScale && typeof cfgScale === 'object' ? cfgScale : {};
+  const pick = (k, d) => (Number.isFinite(ms[k]) && ms[k] > 0 ? ms[k] : Number.isFinite(cs[k]) && cs[k] > 0 ? cs[k] : d);
+  const flag = (k, d) => (typeof ms[k] === 'boolean' ? ms[k] : typeof cs[k] === 'boolean' ? cs[k] : d);
+  if (isSolo) return pick('solo', 1);
+  const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
+  const n = Number(aliveCount);
+  const alive = Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
+  if (flag('perPlayer', true)) return pick('coop', 1) * alive;
+  return pick('coop', 1) * (flag('aliveScaling', false) ? alive / full : 1);
+}
+
 /** Strip the _a/_b suffix of an item id (the registry key of an item family). */
 export const itemKey = (id) => (typeof id === 'string' ? id.replace(/_[ab]$/, '') : '');
 
@@ -69,13 +98,14 @@ export class GameData {
     this.config = getConfig(this.raw) || {};
     this.modeId = modeId;
     this.mode = getMode(modeId, this.raw) || {};
-    // 自研「回合编排」：热读（见 extraRounds getter）；_erFloor 由 Match 抬高以防热改重定义已打过的回合
-    this._erFloor = 0;
-    this._mixedTemplates = null;
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
     this._items = this.raw.items && typeof this.raw.items === 'object' ? this.raw.items : {};
+    // Fixed operator gifts are unlimited outputs, but every produced normal/advanced item still occupies 1/2 copies
+    // (card-pool experiment BV1eLXXBqEgF, maintainer-confirmed 2026-10-11). Random subset gifts are not exempt.
+    this._fixedGiftItems = new Set(Object.values(this.raw.garrisons || {})
+      .filter(g => g.effectKey === 'SERVER_GAIN_EQUIP').map(g => g.bbStr?.chess).filter(id => this._items[id]));
     this._bonds = this.raw.bonds && typeof this.raw.bonds === 'object' ? this.raw.bonds : {};
     /** visible, shop-eligible base (normal) chess ids */
     this.visibleChess = Object.keys(chess).filter((id) => {
@@ -100,6 +130,8 @@ export class GameData {
     this.inactiveEnemies = new Set(Array.isArray(this.mode.inactiveEnemyKeys) ? this.mode.inactiveEnemyKeys : []);
     /** data/tuning.json (titles only, see the header) */
     this.tuning = this.raw.tuning && typeof this.raw.tuning === 'object' ? this.raw.tuning : {};
+    /** standIn memo: chess id → composed 补位 record | null */
+    this._standIns = new Map();
   }
 
   /**
@@ -125,43 +157,33 @@ export class GameData {
     return Math.max(0.01, bh.mul * layerMul);
   }
 
+
   /**
-   * Official shared leader HP pool (DESIGN §20.10): ONE pool for every boss field of the match (official tip "最终攻势中，
+   * Shared leader HP pool (DESIGN §20.10, §25.13.4): ONE pool for every boss field of the match (official tip "最终攻势中，
    * 所有人将一起对敌方领袖造成伤害"; the mirrored copies of a pair field share it — notice 5114 "两侧的敌方领袖共享生命值
-   * （敌方领袖的总生命值不变）", which is about those copies, not about the number of players). Co-op = bloodPoint
-   * [difficulty]; with config bossHpScale.aliveScaling (default false) × alive / aliveFull (4) — 巴哈姆特 12294 "聯機隊友
-   * (撤退/死掉)變少，最後boss血條也會變少" is one community note without a proportion, kept off until confirmed (it would
-   * shorten fights after eliminations, the opposite of the playtest report); `aliveCount` omitted ⇒ a full team. Solo = bloodPoint ×
-   * bossHpScale.solo (0.25 = one player of four, [ASSUMED]). Leaders are never scaled by enemyScale ("领袖单位于服务器的
-   * 生命值加成不受上述加成影响").
+   * （敌方领袖的总生命值不变）", which is about those copies). Size = bloodPoint[difficulty] × bossPoolShare: the table value
+   * per player alive when the fight starts (the owner's decision of 2026-10-06, PR #209; it replaces the fixed pool of
+   * 「保持固定血量」, which config bossHpScale restores — bossPoolShareOf); `aliveCount` omitted ⇒ a full team. Leaders are
+   * never scaled by enemyScale ("领袖单位于服务器的生命值加成不受上述加成影响").
    * @param {string} bossId
    * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
    * @returns {number}
    */
-  bossPoolHp(bossId, aliveCount, players = 0) {
+  bossPoolHp(bossId, aliveCount) {
     const boss = this.boss(bossId);
     const diff = this.difficulty;
     let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
     if (base == null && boss && boss.bloodPoint) base = Object.values(boss.bloodPoint).find((v) => Number.isFinite(v)) ?? null;
     if (base == null) base = 500000;
-    return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount) * bossPoolShareFor(players)));
+    return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount)));
   }
 
   /**
-   * Multiplier of bloodPoint for the leader pool (see bossPoolHp): solo = bossHpScale.solo (0.25); co-op = coop (1) ×
-   * min(alive, aliveFull) / aliveFull when bossHpScale.aliveScaling (mode entry first, then the global one).
+   * Multiplier of bloodPoint for the leader pool (see bossPoolHp; the rule and the config keys: bossPoolShareOf).
    * @param {number} [aliveCount]
    */
   bossPoolShare(aliveCount) {
-    const ms = this.mode.bossHpScale && typeof this.mode.bossHpScale === 'object' ? this.mode.bossHpScale : {};
-    const cs = this.config.bossHpScale && typeof this.config.bossHpScale === 'object' ? this.config.bossHpScale : {};
-    const pick = (k, d) => (Number.isFinite(ms[k]) && ms[k] > 0 ? ms[k] : Number.isFinite(cs[k]) && cs[k] > 0 ? cs[k] : d);
-    if (this.isSolo) return pick('solo', 0.25);
-    const scaling = typeof ms.aliveScaling === 'boolean' ? ms.aliveScaling : cs.aliveScaling === true;
-    const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
-    const n = Number(aliveCount);
-    const alive = scaling && Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
-    return pick('coop', 1) * (alive / full);
+    return bossPoolShareOf(this.mode.bossHpScale, this.config.bossHpScale, this.isSolo, aliveCount);
   }
 
   /** config.titles with the tuning overrides (stat / rule per title id) merged in. */
@@ -193,6 +215,26 @@ export class GameData {
   token(id) { return own(this.raw.tokens, id); }
   get choices() { return this.raw.choices && typeof this.raw.choices === 'object' ? this.raw.choices : {}; }
   get factions() { return this.raw.factions && typeof this.raw.factions === 'object' ? this.raw.factions : {}; }
+
+  /**
+   * The 补位 record of chess `id` (normal or elite; DATA.md §18): shared/standIn.js standInRecord over data/backups.json
+   * — the chess's identity (ids, tier, bonds, 特质, price, merge) with its official stand-in's body (stats, range, skills
+   * with the backup skill as the default, talents, module, art, `standInFor`). Null for a PRESET / 自选 chess, an unknown
+   * id or data without backups.json. Memoized (frozen records).
+   * @param {string} id
+   * @returns {object|null}
+   */
+  standIn(id) {
+    if (typeof id !== 'string') return null;
+    if (this._standIns.has(id)) return this._standIns.get(id);
+    const c = this.chess(id);
+    const backups = this.raw.backups && typeof this.raw.backups === 'object' ? this.raw.backups : null;
+    let rec;
+    try { rec = c && backups ? standInRecord(c, backups) : null; } catch { rec = null; }
+    if (rec) Object.freeze(rec);
+    this._standIns.set(id, rec);
+    return rec;
+  }
 
   /** Normal (base) chess id of a chess id (golden → base). */
   baseIdOf(id) {
@@ -272,20 +314,33 @@ export class GameData {
   }
 
   /**
-   * Copies of a base chess in the shared pool. `players` (>4 only, server/match/scaling.js poolCopyMulFor) scales the
-   * per-tier value for a bigger room; per-chess overrides are content rules and are never scaled.
-   * @param {string} baseId
-   * @param {number} [players] seated players (≤4 ⇒ the original value)
+   * Copies of a base chess in the shared pool. `players`（自研 6 人联机 scaling.js poolCopyMulFor）: the seat
+   * count — >4 ⇒ copies ×players/4（per-chess override 例外，content 规则不缩放）; ≤4 ⇒ ×1，官方原值。
+   * 上游 0.2.5 的 coopPoolMultiplier（config economy，默认 1）仍生效：两个乘数相乘。
    */
   poolCopies(baseId, players = 0) {
     const ov = this.economy.poolCopiesOverrides;
-    if (ov && typeof ov === 'object' && Number.isInteger(ov[baseId]) && ov[baseId] >= 0) return ov[baseId];
     const tier = this.tierOf(baseId);
     const pc = this.economy.poolCopies;
-    const v = pc && typeof pc === 'object' ? pc[tier] : undefined;
+    const v = ov && Number.isInteger(ov[baseId]) && ov[baseId] >= 0 ? ov[baseId] : pc?.[tier];
     const base = Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
-    return Math.round(base * poolCopyMulFor(players));
+    // The measured doubled pool is shared by the whole co-op team, independent of team size. DIY is private stock.
+    const multiplier = this.isSolo || this.chess(baseId)?.isDiy ? 1 : posIntOr(this.economy.coopPoolMultiplier, 1);
+    // per-chess overrides are content rules about that one operator — the seat scaling skips them
+    const seat = !ov || !Number.isInteger(ov[baseId]) || ov[baseId] < 0 ? poolCopyMulFor(players) : 1;
+    return Math.round(base * multiplier * seat);
   }
+
+  /** Normal equipment copies in the shared pool; effect-only items have no shop stock limit. */
+  itemPoolCopies(id) {
+    const base = this.baseIdOf(id), rec = this.item(base);
+    if (!rec || !isShopItem(rec)) return null;
+    const count = this.economy.itemPoolCopiesOverrides?.[base] ?? this.economy.itemPoolCopies?.[rec.tier];
+    return Number.isInteger(count) && count >= 0 ? count : null;
+  }
+
+  /** Whether a fixed trait gift may be produced beyond stock (including the advanced version of that item). */
+  isUnlimitedGiftItem(id) { return this._fixedGiftItems.has(this.baseIdOf(id)); }
 
   /** Copies needed to merge (0 = never merges: golden chess). */
   mergeCount(id) {
@@ -299,6 +354,8 @@ export class GameData {
 
   // ---- mode -----------------------------------------------------------------------------------------
 
+  get isSolo() { return this.mode.type === 'SINGLE' || /^mode_single_/.test(this.modeId || ''); }
+  get difficulty() { return this.mode.difficulty || (this.modeId ? String(this.modeId).split('_').pop().toUpperCase() : 'NORMAL'); }
   /**
    * 自研「回合编排」（custom-rules.json extraRounds）：延后 BOSS 给玩家更多发育回合。
    * **热读**（getter，每次从 customRules 取 + mtime 缓存）——用户 2026-10-08 要求「改 BOSS 轮时间后自动重算难度
@@ -332,10 +389,13 @@ export class GameData {
     const er = this.extraRounds;
     return er && this.isInsertedRound(r) ? er.templateRound : r;
   }
-
-  get isSolo() { return this.mode.type === 'SINGLE' || /^mode_single_/.test(this.modeId || ''); }
-  get difficulty() { return this.mode.difficulty || (this.modeId ? String(this.modeId).split('_').pop().toUpperCase() : 'NORMAL'); }
-  get lastRound() { return this.bossRound; }
+  get lastRound() {
+    // 自研「回合编排」：lastRound = 官方 mode.lastRound（可配）顺延 count（BOSS 顺延 ⇒ 结束回合顺延）。
+    const base = Number.isInteger(this.mode.lastRound) && this.mode.lastRound > 0 ? this.mode.lastRound
+      : (this.modeId === 'mode_single_funny' ? 9 : 14);
+    const er = this.extraRounds;
+    return er ? base + er.count : base;
+  }
   /**
    * 主 BOSS 回合（热读 + 两道保护，用户 2026-10-08 要求「改 BOSS 轮时间后自动重算难度」）：
    *   ① `_erFloor` = 本局已开始的回合：BOSS 不能落在过去（`computed > floor ? computed : floor + 1`）——
@@ -346,7 +406,7 @@ export class GameData {
   get bossRound() {
     if (this._erBossAt != null) return this._erBossAt;               // ② 已触发 → 锁定
     const er = this.extraRounds;
-    const base = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : 14;
+    const base = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : this.lastRound;
     const computed = base + (er ? er.count : 0);
     const floor = this._erFloor || 0;
     // ① 不落在**已经过去**的回合（floor 是当前正在进行的回合，它本身还可以成为 BOSS）。
@@ -357,7 +417,7 @@ export class GameData {
   get hiddenRound() {
     const base = Number.isInteger(this.mode.hiddenRound) && this.mode.hiddenRound > 0 ? this.mode.hiddenRound : null;
     if (base == null) return null;
-    const baseBoss = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : 14;
+    const baseBoss = Number.isInteger(this.mode.bossRound) && this.mode.bossRound > 0 ? this.mode.bossRound : this.lastRound;
     return this.bossRound + (base - baseBoss);
   }
   get maxShopLevel() { return posIntOr(this.mode.maxShopLevel, DEFAULTS.maxShopLevel); }
@@ -483,17 +543,24 @@ export class GameData {
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
   }
 
-  /** Official enemy multipliers of round r (config enemyScale: the PRTS table + 终极 speed ×1.15 from R3). */
+  /**
+   * Official enemy multipliers of round r (config enemyScale: the PRTS table + 终极 speed ×1.15 from R3). `supplyHpMul`
+   * (only when ≠ 1: co-op 终极 R5–R15) = the share of hpMul from 补给线 / 补给线II (config `supplyHp`), effects whose
+   * `enemy_exclude` leaves out the 14 器物 hit-count keys — they take hpMul / supplyHpMul (archetypes.js `times`).
+   */
   baseEnemyScale(r) {
     const e = this.mode.enemyScale && this.mode.enemyScale[String(r)];
     if (!e || typeof e !== 'object') return { hpMul: 1, atkMul: 1, speedMul: 1 };
+    const supply = numOr(e.supplyHp, 1);
     return {
       hpMul: Math.max(0.01, numOr(e.hp, 1)),
       atkMul: Math.max(0, numOr(e.atk, 1)),
       speedMul: Math.max(0.01, numOr(e.speed, 1)),
+      ...(supply > 0 && supply !== 1 ? { supplyHpMul: supply } : {}),
     };
   }
 
+  /** Enemy multipliers of round r = the official table (baseEnemyScale; no custom multiplier). */
   /**
    * Enemy multipliers of round r = the official table (baseEnemyScale; no custom multiplier).
    * 自研「回合编排」插入的发育回合按 `curve` 策略取难度（用户 2026-10-08 定稿：**stretch = 整条曲线重排**）：
@@ -586,8 +653,8 @@ export class GameData {
    * Team LP the overtime drain has taken when a boss field clock reads `gt` game seconds: bossOvertimeDrainReal per
    * whole REAL second past bossOvertimeAfterReal (the first point at 151 real s).
    */
-  bossOvertimeDue(gt) {
-    const over = (Number(gt) || 0) / this.combatTimeScale - this.bossOvertimeAfterReal;
+  bossOvertimeDue(gt, afterReal = this.bossOvertimeAfterReal) {
+    const over = (Number(gt) || 0) / this.combatTimeScale - afterReal;
     return over >= 1 ? Math.floor(over) * this.bossOvertimeDrainReal : 0;
   }
   get dp() {

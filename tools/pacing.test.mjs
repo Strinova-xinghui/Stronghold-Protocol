@@ -22,7 +22,7 @@ describe('对局节奏 · 配置解析', () => {
     writeCfg({});
     assert.equal(getCustomRules({}).pacing, null, 'pacing 为 null');
     const m = mk(1);
-    assert.equal(m.bandTurnMs(), 30000, '策略轮选 30 秒');
+    assert.equal(m.bandTurnMs(), 50000, '策略轮选 50 秒（上游 0.2.5 BAND_TURN_SECONDS 30→50）');
     assert.equal(m.gameSpeed, 2, '对局速度官方 2×');
   });
 
@@ -51,14 +51,14 @@ describe('对局节奏 · 配置解析', () => {
 });
 
 describe('对局节奏 · 时长生效', () => {
-  test('策略轮选加时：1.5 倍 → 30 秒变 45 秒', () => {
+  test('策略轮选加时：1.5 倍 → 50 秒变 75 秒', () => {
     writeCfg(pace({ bandDraftMul: 1.5 }));
-    assert.equal(mk(2).bandTurnMs(), 45000);
+    assert.equal(mk(2).bandTurnMs(), 75000);
   });
 
-  test('策略轮选减时：0.5 倍 → 15 秒', () => {
+  test('策略轮选减时：0.5 倍 → 25 秒', () => {
     writeCfg(pace({ bandDraftMul: 0.5 }));
-    assert.equal(mk(3).bandTurnMs(), 15000);
+    assert.equal(mk(3).bandTurnMs(), 25000);
   });
 
   test('机变加时：spFirst/spTurn 都 ×1.5', () => {
@@ -82,7 +82,7 @@ describe('对局节奏 · 时长生效', () => {
   test('多项同时生效（策略+机变+休整期）', () => {
     writeCfg(pace({ bandDraftMul: 1.5, spDraftMul: 2, prepMul: 1.5 }));
     const m = mk(6);
-    assert.equal(m.bandTurnMs(), 45000);
+    assert.equal(m.bandTurnMs(), 75000);
     assert.equal(m._pacing.spDraftMul, 2);
     assert.equal(m._pacing.prepMul, 1.5);
   });
@@ -116,9 +116,9 @@ describe('对局节奏 · 热改', () => {
   test('对局中改 bandDraftMul → 立即生效（下一次调用）', () => {
     writeCfg(pace({ bandDraftMul: 1 }));
     const m = mk(12);
-    assert.equal(m.bandTurnMs(), 30000, '初始 30 秒');
+    assert.equal(m.bandTurnMs(), 50000, '初始 50 秒');
     writeCfg(pace({ bandDraftMul: 2 }));           // 热改
-    assert.equal(m.bandTurnMs(), 60000, '热改后立即 60 秒');
+    assert.equal(m.bandTurnMs(), 100000, '热改后立即 100 秒（50 × 2）');
   });
 
   test('对局中改 spDraftMul → 立即生效', () => {

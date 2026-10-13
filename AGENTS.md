@@ -74,10 +74,10 @@ node tools/check-missing-imports.mjs      # 符号审计
 
 ### 上游同步方法论（2026-10-06 定稿，下次直接照做）
 
-- **流程**：`api.github.com` 查远程 HEAD → `codeload.github.com/.../tar.gz/<sha>` 下 tarball → robocopy **`/E`（绝不用 `/MIR`，会删本地文件）** → `git status` 审查恢复自研文件 → 跑测试 → 提交。
-- **自研文件清单（同步后必查仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`register-wake.*`、`uninstall-task.*`、`wake-start.ps1`、`tools/test-monitor.mjs`、`test-bond-boost-math.mjs`；`server/index.js`(monitor)、`pool.js`+`PlayerState.js`+`Match.js`(bondBoost)。
-- **合并后必跑 `node tools/check-missing-imports.mjs`**：血案 2026-10-06 `voiceKey is not defined`——`game.js` 取了 fork 代码（调 `voiceKey`）但 import 取自上游、`audio.js` 不导出该符号 → 运行时 ReferenceError（表现为「卖不了人」）。**教训：解冲突按「符号依赖」判断，不能按「文件」**；合并后立刻跑扫描器 + 无头浏览器走真实操作。
-- **`public/vendor/` 被清空**（不进 git）症状=游戏页加载一半报「脚本加载失败」→ `node tools/vendor.mjs`。
+- **流程**：`api.github.com` 查远程 HEAD → `codeload.github.com/.../tar.gz/<sha>` 下 tarball → robocopy **`/E`（绝不用 `/MIR`，会删本地文件）** → `git status` 审查恢复自研文件 → 跑测试 → 提交。**0.2.5 起改用 `git merge <tag>` 三方合并**（merge-base 更准、冲突有 ours/theirs 标记），robocopy 法只在跨多版本 squash 后无共同祖先时用。
+- **自研文件清单（同步后必查仍在）**：`AGENTS.md`、`start-online.bat/ps1`、`update-restart.bat/ps1`、`scripts/night-off.*`、`register-wake.*`、`uninstall-task.*`、`wake-start.ps1`、`tools/test-monitor.mjs`、`test-bond-boost-math.mjs`；**0.2.5 重构后自研代码集中在**：`server/http/customRoutes.js`、`server/match/match/custom.js`、`server/match/player/custom.js`、`server/match/customRules.js`、`server/match/grant.js`、`server/match/scaling.js`、`public/console.html`、`config/custom-rules.json`；钩子分散在上游子模块（详见 NOTES.md「上游 0.2.5 同步」一节）。
+- **合并后必跑 `node tools/check-missing-imports.mjs`**：血案 2026-10-06 `voiceKey is not defined`——`game.js` 取了 fork 代码（调 `voiceKey`）但 import 取自上游、`audio.js` 不导出该符号 → 运行时 ReferenceError（表现为「卖不了人」）。**教训：解冲突按「符号依赖」判断，不能按「文件」**；合并后立刻跑扫描器 + 无头浏览器走真实操作。**0.2.5 补充血案：植入 getter 调 `getCustomRules` 忘了 import，被 catch 吞成 null → 规则静默全关（测试批量红）**——植入后必跑 `tools/*.test.mjs` 自研 10 套。
+- **`public/vendor/` 被清空**（不进 git）症状=游戏页加载一半报「脚本加载失败」→ `node tools/vendor.mjs`。0.2.5 起新素材/新干员语音用 `node tools/fetch-assets.mjs --refresh-index` 增量补齐。
 
 ### 不打扰线上玩家的验证方法论（2026-10-06 定稿，必读）
 
