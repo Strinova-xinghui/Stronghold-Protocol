@@ -525,13 +525,10 @@ export async function handleCustomRoutes({ req, res, parts, deps }) {
   const p = parts.rawPath;
   if (p !== '/monitor' && !CONSOLE_PATHS.has(p) && p !== '/lan/room') return false;
   // 外层门：只看 socket 传输层（回环/内网/公网直连），不看任何转发头——伪造也无传输层地位。
-  if (!isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, t('未找到 · Not found')); return true; }
+  // monitor 例外：房主日常经域名看监看台（只读快照，泄露面小），不设门（2026-10-13 恢复原行为——
+  // 此前补的 realClientIp 内层门把经域名的房主也 404 了，误伤）。realClientIp 仅 console 登录制使用。
+  if (p !== '/monitor' && !isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, t('未找到 · Not found')); return true; }
   const { lobby, network, publicDir, log } = deps;
-  // monitor / lan 内层门：经反代（socket 回环）时按 realClientIp 还原真源，公网访客 404——
-  // 这两条路由没有登录录，不能像 console 那样对公网放行凭据访问，直接不可见（2026-10-13 补）。
-  if ((p === '/monitor' || p === '/lan/room') && !isPrivateAddress(realClientIp(req))) {
-    sendError(req, res, 404, t('未找到 · Not found')); return true;
-  }
   if (p === '/monitor') {
     if (parts.query === 'json' || parts.query.startsWith('json&') || new URLSearchParams(parts.query).has('json')) {
       sendJson(req, res, 200, monitorSnapshot(lobby, network.connectionCount)); return true;
