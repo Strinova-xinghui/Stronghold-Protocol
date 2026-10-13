@@ -188,3 +188,10 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 - directed-pick / prep-debt 测试随机波动（新旧数据对照 4~8 失败同分布，概率断言+seed 敏感）
 - docs 一致性 4 失败（.github/workflows/ci.yml 引用 + 115!==120 倒计时）
 - 本机 Clash TUN 修复为内存态（route-exclude-address PATCH），订阅更新/核心重启后 SSH 会再断，持久化待办见上节
+
+### 🧊 祥子任务搁置（2026-10-14 00:10，房主裁定）
+
+- 房主确认：祥子没有内建素材与数据支撑（backups 里只有 excluded 一个字符串，无 charpack/skill bb 引用链素材），kit 属于手搓硬造 → **先搁置**
+- 数据侧改动保留（a2bd389d：ownedPool 73 含祥子 + build-data 豁免）——无 kit 就不会被 offered（diyPool 的 kitted 过滤），零行为影响；未来想解锁时补 ops/op-oblvns.js + OPERATOR_KIT_FILES 注册即可
+- kit 骨架草稿曾写出后按裁定删除；sakiko-kit 队友无产出，且其运行期间打坏过 config/custom-rules.json（已恢复）
+- 若未来重启任务：需官方素材提取（她的 avatar/spine 走 fetch-assets 的 charpack 链）+ kit 忠实还原（8音符衰减弹幕/双音色切换/Fever/双声部追踪，参考 op-logos.js 与 ProjectileSystem）
