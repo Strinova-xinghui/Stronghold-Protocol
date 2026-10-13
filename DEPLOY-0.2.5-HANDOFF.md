@@ -202,3 +202,10 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 - 外网八项终验全过：monitor 域名 200（含 ?json）、console 401/200/401、直连 404、皮肤 avatar 200、healthz 0.2.5
 - 玩家可见变化：**/monitor 经域名恢复可看**；console 登录（strinova）不变；皮肤修复此前已生效（刷新即得）
 - 祥子：搁置（数据侧保留无行为影响），恢复路径见上节
+
+### ✅ 祥子任务状态修订（2026-10-14 01:20，取代上节"搁置"）
+
+- 社区发现两个 fork 已有实现（FanFenMo 253 行 / remember-4 157 行），sakiko-kit 据此校准出 322 行最终版
+- **提交 0706165c 已推送**：op-oblvns.js + index.js 注册 + trait 覆盖锁定测试更新 + 新 kit 契约测试 5 条（2 绿 3 卡 harness 施放姿势，卡点见上节）
+- **尚未部署**：server 代码需重启，等 matches==0 窗口；部署后她将出现在自选编队可选名单（tier-5/6）
+- 遗留：① 3 条战斗断言的 harness 施放姿势（charges 自动释放路径待查）② golden 语料更新 ③ Fever 4 条引擎缺口
