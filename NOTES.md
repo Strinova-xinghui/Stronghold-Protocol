@@ -415,3 +415,10 @@
 - `sync/upstream-0.2.5` worktree（E:\sp-merge-025）留着供比对（junction node_modules/vendor 指向主仓），验收后可 `git worktree remove --force` + `cmd /c rmdir /s /q` 清理。
 - 服务器（云/本地）未重启：用户明确「明天验收后再上服务器」。上线时用 `update-restart.ps1`（读 SP_MAX_SEATS=6）或云服 `git pull && systemctl restart stronghold`，先确认 `matches == 0`。
 - `config/custom-rules.json` 是热改文件，跑测试前 `git checkout HEAD -- config/custom-rules.json`（多个测试写它、exit 时恢复，但中途 Ctrl-C 会留脏）。
+
+## 移除慢网重试与安卓壳桥（2026-10-13 下午，用户裁定「这俩全删」）
+
+- **慢网修复 ③（runner.js simError 横幅 + 2.5s×4 自动重试）删除**，runner.js / connBanner.js 恢复上游 0.2.5 原版。保留的部分：fieldHost 30s 加载预算（防静默降级平格子）与 warmRenderEngine 预热（纯预取无副作用）——这两项是当初三件套里真正起作用的部分。实测重试机制效果差（2026-10-13 用户裁定）。
+- **安卓壳桥死代码清除**：main.js reportClientState（含 error 监听里的调用与 boot 尾上报）、lobby.js LAN 扫房（nativeShell/lanRoom/lanNote/__onRoomFound 全链）、settings.js「本机服务」面板、test/android-blackscreen.test.js 与 test/ui/native-boot-report.e2e.test.js 两个测试文件。android/ 原生工程 10-06 已删，这些桥检查 globalThis.AndroidNative，官方 APK 的纯 WebView 永远不会注入 → 永不触发。
+- **测试矩阵从此全绿**：android-blackscreen 是此前 6274 项里唯一失败项，本次清零（ui 765/765、根目录抽查 107/107）。
+- 踩坑记录：删 settings.js nativeShell 声明时误删相邻的 mtNote 声明（机器翻译提示），无头浏览器冒烟抓到 ReferenceError 后补回——删相邻行后必须起页面实测而不是只过语法检查。
