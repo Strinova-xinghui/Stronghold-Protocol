@@ -380,7 +380,7 @@ function Detail({ m, chess, golden, entries, ops = {}, onChange, onOps, onReset,
             onPick=${(i) => onChange({ skill: i })} />`)}
         </div>
       </section>
-      <${LoadoutStats} base=${chess} golden=${golden} entries=${entries} ops=${ops} level=${statLevel} onLevel=${setStatLevel} />
+      <${LoadoutStats} base=${chess} golden=${golden} entries=${entries} ops=${ops} level=${statLevel} onLevel=${setLevel} />
       ${golden ? html`<section class="lo-sec lo-sec--mod">
         <header class="lo-sec__head">
           <h3>${t('模组')}<${MicroLabel}>MODULE<//></h3>

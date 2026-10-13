@@ -104,3 +104,17 @@ curl -s https://strinova.me/healthz   # 本机 curl 即可
 sudo sed -i 's|WorkingDirectory=/home/azureuser/sp-025|WorkingDirectory=/home/azureuser/sp|' /etc/systemd/system/stronghold.service
 sudo systemctl daemon-reload && sudo systemctl restart stronghold
 ```
+
+## 🔧 上线后热修复（2026-10-13 21:25）
+
+**症状**：干员调配页崩溃（`setStatLevel is not defined` 的 SYSTEM FAULT + Preact `insertBefore` 报错）；朋友反馈 IP 与域名进服版本不一致。
+
+- **根因**：0.2.5 合并漏改一行——上游把 `Detail` 的数值档位从内部 state 改为受控 props
+  （`level`/`onLevel`），`loadout.js:383` 仍引用上游内部命名 `setStatLevel`（本地该名字不存在）。
+  修复：`onLevel=${setStatLevel}` → `onLevel=${setLevel}`（321 行的受控别名，技能 普通/精锐 切换同款）。
+- **验证**：`node --check` ✓、`check-missing-imports` ✓、`test/lobby-loadout.test.js` 6/6 ✓；
+  scp 上云后 curl served JS：`setStatLevel` 0 处、`onLevel=${setLevel}` 在位。**纯静态文件，未重启服务**（healthz uptime 连续）。
+- **「版本不一致」结论**：游戏 JS 无 `?v=` 版本参数、走 no-cache+ETag（`server/http/files.js` 长缓存仅 assets/fonts/vendor），
+  服务器侧没有顽固缓存层；不一致来自升级窗口期（19:35–19:50）已打开的旧标签页 + IP(`:24500`) 与域名(https) 是不同 origin 各自缓存。
+  **让朋友强刷/重开标签页（APK 重启 WebView）即归位**；`insertBefore` 是前者的次生症状，应随之消失。
+- UPDATE 机制核实：云服无 UPDATE.json，单文件 scp 覆盖不触发 MANIFEST 校验拒绝启动。
