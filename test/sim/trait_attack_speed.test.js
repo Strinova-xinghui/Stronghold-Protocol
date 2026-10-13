@@ -411,6 +411,11 @@ test('覆盖锁定（补位 / 自选）: 每个补位干员和每个自选组合
   }
   assert.ok(tally.standIn > 100, `every stand-in was scanned (${tally.standIn})`);
   assert.ok(tally.diy > 1000, `every 自选 combination was scanned (${tally.diy})`);
-  assert.deepEqual(applied, [], 'no stand-in or 自选 pick gains the engine rule');
-  assert.deepEqual(Object.keys(reasons).sort(), ['kit'], 'every line they carry is a kit-owned shape (no unknown, no other mode)');
+  // 丰川祥子 (char_4182_oblvns, 2026-10-13 自选解锁) 的 LOR-Y 模组行「攻击范围内存在2名及以上敌人时攻击速度+12」
+  // 正是本引擎规则的形态（无白名单，条件行由引擎统一实现），而她的 kit（op-oblvns.js）不做双重实现 → 合法接管。
+  const sakiko = applied.filter((t) => t.includes('char_4182_oblvns'));
+  const rest = applied.filter((t) => !t.includes('char_4182_oblvns'));
+  assert.deepEqual(rest, [], 'no stand-in or 自选 pick gains the engine rule (except the exempted 祥子)');
+  assert.ok(sakiko.length > 0, `祥子 LOR-Y combos are engine-owned (${sakiko.length})`);
+  assert.deepEqual(Object.keys(reasons).sort(), ['kit', 'ok'], 'kit-owned lines refused; 祥子 LOR-Y ok');
 });
