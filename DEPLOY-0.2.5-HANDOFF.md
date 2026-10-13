@@ -73,3 +73,34 @@ curl -s https://strinova.me/healthz   # 本机 curl 即可
 - **测试基线**：部署前若想再验一遍，本地 `SP_OFFICIAL_RULES=1 node --test test/*.test.js`（官方模式全绿 934/933+）。
 - **CLAUDE.md 阅读顺序**：先读本文件 → AGENTS.md「迁移执行记录」节（SSH 私钥 /caddy/systemd 细节）→ NOTES.md
   「上游 0.2.5 同步」节（本次合并完整变更清单）。
+
+## ✅ 部署完成记录（2026-10-13 19:35–19:50 执行）
+
+**结果：云服已上线 v0.2.5**（app:"0.2.5"、build 619e3407dde9、maxSeats:6、matches:0），三条线全通：
+- `https://strinova.me/healthz` ✅
+- `http://20.89.110.22:24500/healthz`（APK 明文线）✅
+- 本机外网打开首页标题正常 ✅
+
+服务端实测 `getCustomRules()` 8 项自研开关全 true（定向甄选/负债/抽奖/编排/节奏/BOSS 倍率/GM 发放）。
+
+### 实际执行步骤（与上文推荐步骤的差异已修正）
+
+1. 备份：`~/sp-backup-0.1.6-10131133.tar.gz`（404MB，回滚点；不含 node_modules）。
+2. 整包 scp 直传 455MB 一次成功（未用分块），远端 sha256 = `f6a15be9…34bbce` 与本地一致。
+3. **包顶层是单层 `Stronghold-Protocol/`**（上文第 4 步的双层 `mv` 写法不适用）：
+   `tar -xzf sp-025.tar.gz -C ~ && mv Stronghold-Protocol sp-025`。
+4. ⚠️ **`config/custom-rules.json` 不在包里**（`tools/package.mjs` 按「per-machine config」排除整个 `config/`，
+   与上文注意事项第 2 条矛盾——照旧文档做会静默全关自研规则）。已单独 scp 补传到 `~/sp-025/config/`。
+   **下次打包部署记住：config 必须手动补传。**
+5. 体检新目录：version 0.2.5 / MANIFEST files:6489 / 自研三文件在 / ws 8.22.0 / assets 10956 个 / vendor 5 件。
+6. 切 systemd：仅改 `WorkingDirectory=/home/azureuser/sp → /home/azureuser/sp-025`（unit 是 npm start 形式），
+   daemon-reload + restart，4 秒后 healthz 即 0.2.5。
+7. 旧目录 `~/sp` 与 `~/sp-025.tar.gz` 暂保留（回滚用），确认稳定玩过几次后可删：
+   `rm -rf ~/sp ~/sp-025.tar.gz`（备份 tar 建议留）。
+
+### 回滚方法（如 0.2.5 有问题）
+
+```bash
+sudo sed -i 's|WorkingDirectory=/home/azureuser/sp-025|WorkingDirectory=/home/azureuser/sp|' /etc/systemd/system/stronghold.service
+sudo systemctl daemon-reload && sudo systemctl restart stronghold
+```
