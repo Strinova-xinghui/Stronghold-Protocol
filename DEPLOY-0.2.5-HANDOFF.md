@@ -195,3 +195,10 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 - 数据侧改动保留（a2bd389d：ownedPool 73 含祥子 + build-data 豁免）——无 kit 就不会被 offered（diyPool 的 kitted 过滤），零行为影响；未来想解锁时补 ops/op-oblvns.js + OPERATOR_KIT_FILES 注册即可
 - kit 骨架草稿曾写出后按裁定删除；sakiko-kit 队友无产出，且其运行期间打坏过 config/custom-rules.json（已恢复）
 - 若未来重启任务：需官方素材提取（她的 avatar/spine 走 fetch-assets 的 charpack 链）+ kit 忠实还原（8音符衰减弹幕/双音色切换/Fever/双声部追踪，参考 op-logos.js 与 ProjectileSystem）
+
+### ✅ monitor 修复上线（2026-10-14 00:18，守卫重启）
+
+- 00:18 窗口开启（matches=0）→ 守卫脚本重启成功（build 94d02c30b464，app 0.2.5）
+- 外网八项终验全过：monitor 域名 200（含 ?json）、console 401/200/401、直连 404、皮肤 avatar 200、healthz 0.2.5
+- 玩家可见变化：**/monitor 经域名恢复可看**；console 登录（strinova）不变；皮肤修复此前已生效（刷新即得）
+- 祥子：搁置（数据侧保留无行为影响），恢复路径见上节
