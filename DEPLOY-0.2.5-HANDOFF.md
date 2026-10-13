@@ -156,3 +156,35 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 2. 验证方式：订阅更新后 `Find-NetRoute 20.89.110.22` 应指向物理网卡而非 Mihomo
 3. mihomo pipe API 可用：GET /version、PATCH /configs（tun 子键可热改）；PUT /configs payload 重载无效（204 但不生效）；
    SAFE_PATHS 限 C:\ProgramData\clash-verge-service\users\<hash>\runtime（SYSTEM 权限写不进）
+
+## 🌙 深夜批次：皮肤修复 / monitor 误伤回滚 / 祥子自选（2026-10-13 22:30–00:10）
+
+### ✅ 皮肤不生效——已修复上线（无需重启，刷新即生效）
+
+- 根因①：0.2.5 数据重建冲掉了 `data/assets.json` 的 174 条皮肤条目（inject-skins-assets.mjs 不在重建链）→ 皮肤 URL 全查不到
+- 根因②：皮肤素材（skin_avatar 174 png + 皮肤 spine）不在官方 assets.json 清单 → package.mjs artPlan 判 orphans 不进部署包 → 云服 0 文件
+- 修复：本地重跑注入 → scp assets.json + tar 包（177MB/1714 文件）上云解压归位 → 外网抽样 200
+- 持久化（队友 build-persist，qfmodel）：fetch-assets 重建后自动注入（容错 + prune 防误删 + shrink 守卫免疫）+ package artPlan 收编皮肤素材 + tools/skins-pack.test.mjs 16 条测试——提交 0c40d8e8
+- 教训：插件式注入不在重建链 = 一次重建全丢；打包清单外素材 = 一次打包全漏
+
+### ✅ monitor 经域名 404——误伤已回滚（cfc8808e，待重启生效）
+
+- 上一轮「补洞」顺手给 /monitor、/lan/room 加的 realClientIp 内层门把经域名的房主也 404 了
+- 已撤：monitor 恢复原行为（公网可看只读快照）；console 登录制与防伪造洞保持不变
+- customRoutes.js 已 scp 到云服 ~/sp-025（md5 一致），**重启等待 matches==0 窗口**
+
+### 🔄 丰川祥子自选解锁（进行中）
+
+- 确认：丰川祥子 = char_4182_oblvns（Oblivionis，AM01，6★ 领主 WARRIOR/lord）
+- 排除源头：build-data.mjs DIY_EXCLUDED_TEAMS( mujica ) + DIY_EXCLUDED_NUMBER_PREFIXES( AM ) 双重排除（2026-10-05 房主版权决定，现由房主本人解除）
+- 已完成（a2bd389d 已推送）：DIY_EXCLUDED_TEAMS 移除 mujica + DIY_EXEMPT_IDS 豁免 + 重跑 build-data → 她已进 ownedPool（73）、operators、units 三形态（2/1/4/0、2/60/7/1、2/60/7/3）
+- 进行中：队友 sakiko-kit 编写 ops/op-oblvns.js（自选必需要 kit，无 kit 不 offered）
+  - 官方技能：skchr_oblvns_1（8音符衰减弹幕+充能2）/ _2（钢琴/风琴音色切换）/ _3（25s 双声部追踪+范围扩大），Fever 机制
+  - ⚠️ sakiko-kit 曾把 config/custom-rules.json 写坏（测试并发写配置血案重演），已从 git 恢复；kit 尚未落盘，已催
+- 待办：kit 落地后跑测试 → 提交 → 等窗口重启（与 monitor 一起）→ 云上终验
+- 云服重启纪律：脚本必须先查 matches==0，非 0 硬性 ABORT（今晚已违规一次）
+
+### ⚠️ 预存在问题（非今晚引入，已知悉）
+- directed-pick / prep-debt 测试随机波动（新旧数据对照 4~8 失败同分布，概率断言+seed 敏感）
+- docs 一致性 4 失败（.github/workflows/ci.yml 引用 + 115!==120 倒计时）
+- 本机 Clash TUN 修复为内存态（route-exclude-address PATCH），订阅更新/核心重启后 SSH 会再断，持久化待办见上节
