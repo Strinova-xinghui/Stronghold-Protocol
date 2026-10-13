@@ -118,3 +118,13 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
   服务器侧没有顽固缓存层；不一致来自升级窗口期（19:35–19:50）已打开的旧标签页 + IP(`:24500`) 与域名(https) 是不同 origin 各自缓存。
   **让朋友强刷/重开标签页（APK 重启 WebView）即归位**；`insertBefore` 是前者的次生症状，应随之消失。
 - UPDATE 机制核实：云服无 UPDATE.json，单文件 scp 覆盖不触发 MANIFEST 校验拒绝启动。
+
+## 📌 裁定：上游无换装，自研皮肤子系统保留（2026-10-13 21:35）
+
+用户疑「上游 0.2.5 有自己的换装，自研皮肤若冗余则删」。全树对比结论：**上游没有任何玩家可见的换装功能，自研不冗余，保留**。
+
+- 上游 `git grep -i skin`（public/js、server、shared）全部命中为 Spine 骨骼技术语义（skeleton skins/attachments/动画裁剪），非 UI；
+- 中文词「换装/时装/皮肤/外观」上游零命中（「替换装备」= 装备栏替换，另一功能）；
+- 上游 `data/` 无 skins.json；0.2.5 CHANGELOG 无换装条目；
+- 干员详情页第 4 个页签「换装 SKIN」本就是自研 SkinSection（loadout.js ← ui/skinPicker.js），0.2.5 合并后工作正常（skins.test.js 全绿）。
+- 疑似混淆源：0.2.5 上游新增「3D 官方场景 / 官方伤害数字 / 内容包与 i18n」等，观感像官方外观功能。
