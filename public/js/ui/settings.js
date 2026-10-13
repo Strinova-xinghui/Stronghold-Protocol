@@ -91,7 +91,6 @@ function Toggle({ label, micro, value, onChange }) {
 }
 
 const QUALITY = [['high', N_('高')], ['medium', N_('中')], ['low', N_('低')]];
-/** 自研安卓壳的「本机服务」面板（LOCAL ENGINE）— 见下方 nativeShell 分支。 */
 /**
  * 文字大小: one step of TEXT_SIZES (ui/gameLogic/settings.js) with its label — 小 is the design's own sizes, the others
  * raise the text root `--t` (css/theme.css) and with it every readable font-size; the board and the HUD's boxes stay.
@@ -243,10 +242,8 @@ export function SettingsModal({ open, onClose }) {
   const s = useSettings();
   const [tested, setTested] = useState(false);
   const [touchUi] = useState(() => detectFeatures().coarse && !detectFeatures().fine);
-  // The Android shell exposes itself as AndroidNative; the same page in a browser has none of it. (自研安卓壳)
-  const nativeShell = globalThis.AndroidNative?.isNativeApp?.() ? globalThis.AndroidNative : null;
   const mtNote = machineTranslationNote(); // a pack marked as machine translation says so under the switch
-  return html`<${Modal} open=${open} onClose=${onClose} title=${t('设置')} micro="SETTINGS" width=${nativeShell ? 'min(8.8rem, 92vw)' : '7.4rem'}
+  return html`<${Modal} open=${open} onClose=${onClose} title=${t('设置')} micro="SETTINGS" width='7.4rem'
                         actions=${html`<${Button} variant="secondary" icon="book" class="set-guide" onClick=${() => openGuide(0)}>${t('玩法说明')}<//>
                         <${Button} variant="primary" icon="check" onClick=${onClose}>${t('完成')}<//>`}>
     <div class="set-list">
@@ -287,15 +284,6 @@ export function SettingsModal({ open, onClose }) {
       <p class="set-hint set-textsize-note">${t('调整界面文字大小，棋盘保持原比例。')}</p>
       <${HotkeySection} keys=${s.keys} touchUi=${touchUi} />
       <${DiagSection} />
-      ${nativeShell ? html`<div class="set-row">
-            <span class="set-row__label">${t('本机服务')}<${MicroLabel}>LOCAL ENGINE<//></span>
-            <div class="set-engine-grid">
-              <button type="button" onClick=${() => nativeShell.openServerSettings()}>${t('服务器设置')}</button>
-              <button type="button" onClick=${() => nativeShell.restartLocalServer()}>${t('重启引擎')}</button>
-              <button type="button" onClick=${() => nativeShell.showLogs()}>${t('运行日志')}</button>
-              <button type="button" onClick=${() => nativeShell.reloadClient()}>${t('重载页面')}</button>
-            </div>
-          </div>` : null}
       <p class="set-hint">${touchUi ? t('触屏操作：点击单位选中（撤退 / 出售）· 长按单位或卡牌查看详情 · 拖动部署后滑动选择朝向') : t('右键查看详情')}</p>
     </div>
   <//>`;

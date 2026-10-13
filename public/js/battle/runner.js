@@ -71,10 +71,9 @@
 
 import { net as appNet } from '../net.js';
 import { store as appStore } from '../store.js';
-import { unitStatsEntry, fxForm, RESULT_LIMITS } from '../../../shared/protocol.js';
+import { unitStatsEntry, fxForm } from '../../../shared/protocol.js';
 import { spectateEffects } from './observe.js';
 import { recordError, setBattleSource } from '../diag.js';
-import { N_ } from '../../../shared/i18n.js'; // 自研横幅文案引擎标记（i18n 扫描登记）
 
 const TICK = 1 / 30;
 /** Fast-forward budget per frame (ticks) when far behind. */
@@ -139,17 +138,6 @@ function deepFreeze(root) {
     for (const v of Object.values(o)) if (v !== null && typeof v === 'object') stack.push(v);
   }
   return root;
-}
-
-/** Retry cadence for a failed sim load, and how many times before the player is asked to reload. */
-export const SIM_RETRY_MS = 2500;
-export const SIM_RETRIES_MAX = 4;
-
-/** The engine the page runs on, short enough for a banner: a report from an Android WebView needs this to be visible. */
-function engineTag() {
-  const ua = typeof navigator !== 'undefined' && navigator.userAgent ? navigator.userAgent : '';
-  const m = ua.match(/(?:Chrome|Chromium|CriOS)\/(\d+)/) || ua.match(/Version\/(\d+)[^)]*Safari/);
-  return m ? N_('引擎 Chromium {0}').replace('{0}', m[1]) : N_('引擎未知');
 }
 
 /**
@@ -223,9 +211,6 @@ export function createBattleRunner(deps) {
   let simP = null;
   let startSeq = 0;            // counts the b.starts: the latest one is the view asked for
   let loading = null;          // the pending entry of the latest b.start (shown when prepared)
-  // 自研慢网修复: the last ensureSim() failure ({ text, tries }) — a page that cannot build the sim shows a combat with no enemies
-  // and nothing else, so ui/connBanner.js says it out loud (see SIM_RETRY_MS below for the automatic part)
-  let simError = null;
   let rafH = null;
   let ivH = null;
   let lastPool = null;
@@ -280,12 +265,10 @@ export function createBattleRunner(deps) {
 
   function state() {
     const e = cur;
-    if (!e) return loading || simError
-      ? { loading: !!loading, ...(loading ? { battleId: loading.battleId, fieldId: loading.fieldId, kind: loading.kind } : null), simError, leaks: leakMap(), uniteLeft: uniteLeftMap(), bondLayers: layerMap() }
-      : null;
+    if (!e) return loading ? { loading: true, battleId: loading.battleId, fieldId: loading.fieldId, kind: loading.kind, leaks: leakMap(), uniteLeft: uniteLeftMap(), bondLayers: layerMap() } : null;
     return {
       battleId: e.battleId, fieldId: e.fieldId, kind: e.kind, authoritative: e.authoritative, watch: e.watch,
-      done: e.done, own: e.own, members: e.members.slice(), loading: !!loading, simError, speed: e.speed, paused: pausedAt != null,
+      done: e.done, own: e.own, members: e.members.slice(), loading: !!loading, speed: e.speed, paused: pausedAt != null,
       leaks: leakMap(), uniteLeft: uniteLeftMap(), bondLayers: layerMap(),
     };
   }
@@ -472,13 +455,13 @@ export function createBattleRunner(deps) {
       msg.bossDmg = pool && Number.isFinite(pool.cum) ? pool.cum : 0;
       if (pool && pool.byPlayer) {
         const by = {};
-        for (const pid of Object.keys(pool.byPlayer).slice(0, RESULT_LIMITS.players)) by[pid] = pool.byPlayer[pid];
+        for (const pid of Object.keys(pool.byPlayer).slice(0, 4)) by[pid] = pool.byPlayer[pid];
         msg.by = by;
       }
     } else {
       msg.leaks = Math.min(1e6, p.leaks);
       // 联防: the leakers' enemies still standing (shared/protocol.js b.progress `left`, ≤ 4 players)
-      if (p.left) msg.left = Object.fromEntries(Object.entries(p.left).slice(0, RESULT_LIMITS.players));
+      if (p.left) msg.left = Object.fromEntries(Object.entries(p.left).slice(0, 4));
     }
     try { net.send('b.progress', msg); } catch { /* offline */ }
   }
@@ -693,7 +676,7 @@ export function createBattleRunner(deps) {
     pending.set(e.battleId, e);
     loading = e;
     publishState();
-    e.ready = prepare(e, msg);
+    e.ready = prepare(e);
     return e.ready;
   }
 
@@ -703,18 +686,12 @@ export function createBattleRunner(deps) {
    * (or a new b.start replaced it after a clear) and when a b.start of another field superseded it — unless it is an
    * authority (it must finish and report) or the server already ended it (switching back shows the end).
    */
-  async function prepare(e, startMsg = null) {
+  async function prepare(e) {
     const wanted = () => pending.get(e.battleId) === e && (e.seq === startSeq || e.authoritative || !!e.endReason);
     try {
       let sim;
       try { sim = await ensureSim(); } catch (err) {
         console.warn('[runner] simulation unavailable', err);
-        // 自研慢网修复: surface the failure on the conn banner and retry the same b.start a few times (a dropped
-        // fetch or a cold module graph usually clears by itself); past that only a reload helps, because a page's
-        // module map is fixed for its lifetime (ui/buildGuard.js) — connBanner.js reads s.match.battle.simError.
-        simError = { text: `${String(err?.message || err).slice(0, 160)} · ${engineTag()}`, tries: (simError?.tries || 0) + 1, max: SIM_RETRIES_MAX };
-        publishState();
-        if (simError.tries < SIM_RETRIES_MAX && startMsg) setTimeout(() => { onStart(startMsg); }, SIM_RETRY_MS);
         recordError('runner', err, 'simulation unavailable');
         return;
       }
@@ -727,7 +704,6 @@ export function createBattleRunner(deps) {
         recordError('runner', err, 'battle construction failed');
         return;
       }
-      simError = null;   // 自研慢网修复: a successful build clears the banner
       stats.battles++;
       e.sim = sim;
       e.battle = battle;
