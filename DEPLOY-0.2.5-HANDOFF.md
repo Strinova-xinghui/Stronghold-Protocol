@@ -128,3 +128,31 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 - 上游 `data/` 无 skins.json；0.2.5 CHANGELOG 无换装条目；
 - 干员详情页第 4 个页签「换装 SKIN」本就是自研 SkinSection（loadout.js ← ui/skinPicker.js），0.2.5 合并后工作正常（skins.test.js 全绿）。
 - 疑似混淆源：0.2.5 上游新增「3D 官方场景 / 官方伤害数字 / 内容包与 i18n」等，观感像官方外观功能。
+
+## 🔐 控制台登录制恢复（2026-10-13 22:00–22:20）
+
+**背景**：控制台（/console）因 0.2.5 换目录部署失去密码保护。根因：登录录（内网免密/公网 HTTP Basic）
+是 2026-10-11 直接改在云服旧目录 ~/sp/server/index.js 里的，从未进 git——0.2.5 部署到 sp-025 后随旧目录丢失。
+
+**已恢复并上线**（账号 strinova / 密码走 systemd 的 SP_CONSOLE_PASSWORD 环境变量，未变）：
+
+- `server/http/customRoutes.js`：新增 `realClientIp(req)` 严格判源 + console 登录制 + monitor/lan 内层门
+- 判源规则：socket 非回环 → 只信 socket 本身（转发头一律无视）；socket 回环（Caddy）→ 只取 XFF **最右**值
+  （Caddy 必追加真实来源在最右，伪造条目被挤到左边），**禁信 cf-connecting-ip / x-real-ip**（Caddy 会透传客户端伪造的头）
+- 提交 5debc0a9（登录制+判源）+ a5c358e6（monitor/lan 内层门），已推送
+
+**云服终验九项全过**：本机免密 200 / 域名无凭据 401 / 域名对凭据 200 / 域名伪造内网XFF 仍 401 /
+直连公网 404（伪造头不救）/ 域名 monitor 404（此前公网可无凭据看监看台，已关）/ VM 本机 monitor 200。
+
+⚠️ **纪律违规记录**：22:0x 第一次重启云服时未先确认 matches==0（脚本虽有检查但无守卫，打断了 1 场进行中对局）。
+第二次起脚本加了硬守卫（matches!=0 则 ABORT），教训：守卫必须放在重启语句之前硬性拦截。
+
+**⚠️ 本机 Clash 修复的持久化缺口（下次会话关注）**：SSH 被劫持系 21:52 订阅更新重合成丢失 Merge.yaml 规则。
+已生效的修复是经 mihomo pipe API（\\.\pipe\verge-mihomo-production-<hash>）PATCH /configs 写入
+`tun.route-exclude-address: [20.89.110.22/32, 198.41.192.0/24, 198.41.200.0/24]`——**只存在于内存态**，
+核心重启/订阅更新后会丢。持久化待办（按优先级）：
+1. Verge UI → 订阅右键「编辑合并配置」确认 m0gurPPZFZSw.yaml（当前订阅绑定的 merge）里 IP-CIDR 规则在，
+   并把 tun.route-exclude-address 三条也补进去（已手工写入该文件 prepend-rules 段，但 tun 段未加）
+2. 验证方式：订阅更新后 `Find-NetRoute 20.89.110.22` 应指向物理网卡而非 Mihomo
+3. mihomo pipe API 可用：GET /version、PATCH /configs（tun 子键可热改）；PUT /configs payload 重载无效（204 但不生效）；
+   SAFE_PATHS 限 C:\ProgramData\clash-verge-service\users\<hash>\runtime（SYSTEM 权限写不进）
