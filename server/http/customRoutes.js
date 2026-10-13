@@ -491,6 +491,27 @@ async function consoleApiWrite(req, res, log) {
 const CONSOLE_PATHS = new Set(['/console', '/console/api', '/console/api/state', '/console/api/grant']);
 
 /**
+ * The real client IP for our private-only routes. Strict(er than net.js 'auto'):
+ * a non-loopback socket is judged by its own address — forwarding headers are never
+ * trusted (a direct public peer could spoof X-Forwarded-For: 10.x); a loopback socket
+ * is a local reverse proxy (Caddy) — take the RIGHTMOST X-Forwarded-For entry only
+ * (the proxy appends the real client IP last, so client-forged entries sit left), and
+ * ignore cf-connecting-ip / x-real-ip entirely (Caddy forwards client-forged headers).
+ * @param {import('node:http').IncomingMessage} req @returns {string}
+ */
+function realClientIp(req) {
+  const peer = String(req.socket?.remoteAddress || '').toLowerCase().replace(/^::ffff:/, '');
+  if (peer !== '::1' && peer !== '127.0.0.1') return peer;
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string') {
+    const parts = xff.split(',');
+    const ip = parts[parts.length - 1].trim();
+    if (ip) return ip;
+  }
+  return peer;
+}
+
+/**
  * Handle our custom routes; `true` = handled (the response was written), `false` = not ours (the caller falls
  * through to the static handler). /monitor is a read-only snapshot; /console* and /lan/room answer private
  * (loopback / RFC1918 / CGNAT / ULA) peers only — 404 to everyone else, never a room list or a rule write.
@@ -503,6 +524,8 @@ const CONSOLE_PATHS = new Set(['/console', '/console/api', '/console/api/state',
 export async function handleCustomRoutes({ req, res, parts, deps }) {
   const p = parts.rawPath;
   if (p !== '/monitor' && !CONSOLE_PATHS.has(p) && p !== '/lan/room') return false;
+  // 外层门：只看 socket 传输层（回环/内网/公网直连），不看任何转发头——伪造也无传输层地位；
+  // 经反代来的真实来源在内层门（console 登录制 / monitor+lan 的 realClientIp）细分。
   if (p !== '/monitor' && !isPrivateAddress(req.socket?.remoteAddress)) { sendError(req, res, 404, t('未找到 · Not found')); return true; }
   const { lobby, network, publicDir, log } = deps;
   if (p === '/monitor') {
@@ -518,6 +541,23 @@ export async function handleCustomRoutes({ req, res, parts, deps }) {
     return true;
   }
   if (CONSOLE_PATHS.has(p)) {
+    // 登录制（2026-10-11 旧服 server/index.js 实现，2026-10-13 移植 0.2.5 新架构并补洞）：内网免密；
+    // 公网走 HTTP Basic（用户名 strinova，密码 SP_CONSOLE_PASSWORD）；未配置密码时公网一律 404，不暴露入口。
+    // 来源判定分两层：外层门只看 socket（上文）；此处内层门用 realClientIp 还原真实来源——
+    // Caddy 反代下 socket 全是 127.0.0.1，取 XFF 最右（代理追加的真源）；直连 :24500 时 socket 即
+    // 真源、任何转发头都不看。旧写法信任全局 TRUST_PROXY/任意转发头——直连伪造 X-Forwarded-For: 10.x、
+    // 经域名伪造 cf-connecting-ip 都能冒充内网绕过密码（旧实现自 10-11 起就存在的洞，本次一并关掉）。
+    {
+      const isLocal = isPrivateAddress(realClientIp(req));
+      const pass = process.env.SP_CONSOLE_PASSWORD || '';
+      if (!isLocal && !pass) { sendError(req, res, 404, t('未找到 · Not found')); return true; }
+      if (!isLocal) {
+        const hdr = req.headers.authorization || '';
+        const ok = (() => { const m = /^Basic (.+)$/i.exec(hdr); if (!m) return false;
+          try { const [u, pw] = Buffer.from(m[1], 'base64').toString('utf8').split(':'); return u === 'strinova' && pw === pass; } catch { return false; } })();
+        if (!ok) { res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="strinova console", charset="UTF-8"' }); res.end('401 · 需要登录'); return true; }
+      }
+    }
     if (p === '/console/api') {
       if (req.method === 'POST') { await consoleApiWrite(req, res, log); return true; }
       if (req.method === 'GET' || req.method === 'HEAD') { sendJson(req, res, 200, consoleApiRead()); return true; }
