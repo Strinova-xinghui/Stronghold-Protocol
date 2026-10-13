@@ -58,9 +58,10 @@
 //                                    [--local-spines] [--help]
 
 import { readFile, writeFile, mkdir, rename, readdir, unlink } from 'node:fs/promises';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { Downloader } from './assets/downloader.mjs';
 import { restartForEnvProxy } from './assets/env-proxy.mjs';
 import { MirrorPolicy, selectDownloadSource, validateSource } from './assets/network.mjs';
@@ -82,6 +83,16 @@ const FONTS = join(ROOT, 'public', 'fonts');
 const CACHE = join(ROOT, '.cache');
 const MANIFEST = join(ROOT, 'data', 'assets.json');
 const REPORT = join(CACHE, 'assets-report.json');
+/**
+ * The skin entries of data/assets.json are not part of research 07's plan: tools/inject-skins-assets.mjs puts them in
+ * from docs/research/08-skins.json. The mount below runs it after every manifest write, so a rebuilt manifest can never
+ * lose the skins (0.2.5: the injection was forgotten, all 174 entries went, the skin files on disk read as orphans and
+ * `--prune` would delete them; a release zip built from that manifest ships no skin art).
+ */
+const SKINS_RESEARCH = join(ROOT, 'docs', 'research', '08-skins.json');
+const INJECT_SKINS_TOOL = join(ROOT, 'tools', 'inject-skins-assets.mjs');
+/** The skin avatars ship as one directory (the same rule tools/package.mjs's skinArtFiles uses): never an orphan. */
+const SKIN_AVATAR_REL = 'char/skin_avatar/';
 /**
  * The local-client model overlays (spineLocal): the committed metadata file, where extract.py writes the models (under
  * public/assets), how to find them, and the file's `about` line.
@@ -331,6 +342,80 @@ function countStats(m, bytes, files) {
   };
 }
 
+/** Parse a JSON file, null when unreadable. */
+function readJsonOrNull(abs) {
+  try { return JSON.parse(readFileSync(abs, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Run tools/inject-skins-assets.mjs over the manifest that was just written, so a rebuilt data/assets.json never loses
+ * the skin entries (the 0.2.5 incident: the injection was forgotten after a rebuild, the 174 entries went, the skin
+ * files on disk read as orphans — `--prune` deletes them and a release zip built from that manifest ships no skins).
+ * Every failure mode is a warning: no 08-skins.json / no injector / a non-zero exit leaves the run green.
+ * @param {(m: string) => void} log
+ * @returns {boolean} whether the manifest now carries the injected skins
+ */
+export function injectSkins(log) {
+  if (!existsSync(INJECT_SKINS_TOOL)) { log('[skins] tools/inject-skins-assets.mjs is missing — skipped'); return false; }
+  if (!existsSync(SKINS_RESEARCH)) { log('[skins] docs/research/08-skins.json is missing — skin injection skipped (the skins stay unlisted until it is restored)'); return false; }
+  if (!existsSync(MANIFEST)) { log('[skins] data/assets.json is missing — nothing to inject into'); return false; }
+  const r = spawnSync(process.execPath, [INJECT_SKINS_TOOL], { encoding: 'utf8' });
+  if (r.error || r.status !== 0) {
+    log(`[skins] injection FAILED (ignored, the build stays green): ${(r.stderr || r.error?.message || '').trim().split('\n')[0] || `exit ${r.status}`}`);
+    return false;
+  }
+  for (const line of (r.stdout || '').trim().split('\n').filter(Boolean)) log(`[skins] ${line}`);
+  return true;
+}
+
+/**
+ * The skin entries' asset URLs as paths relative to public/assets (the shape of the `resolved.files` set, so a
+ * referenced skin file is never an orphan — and never `--prune`d): every chars[id].skins[id].{avatar,spine.*} URL.
+ * @param {any} m a data/assets.json
+ * @returns {Set<string>}
+ */
+export function manifestSkinFiles(m) {
+  const out = new Set();
+  const addUrl = (u) => {
+    if (typeof u !== 'string' || !u.startsWith('/assets/')) return;
+    try { out.add(decodeURIComponent(u.slice('/assets/'.length))); } catch { /* a malformed escape: leave it out */ }
+  };
+  for (const c of Object.values(m?.chars ?? {})) {
+    for (const s of Object.values(c?.skins ?? {})) {
+      if (!s || typeof s !== 'object') continue;
+      addUrl(s.avatar);
+      for (const side of Object.values(s.spine ?? {})) {
+        if (!side || typeof side !== 'object') continue;
+        addUrl(side.skel); addUrl(side.atlas);
+        for (const t of side.textures ?? []) addUrl(t);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The shrink guard compares the current manifest with the rebuilt one, but the rebuilt one gets its skin entries
+ * right after the write (injectSkins below), not from the plan. Without this the guard would refuse every rebuild on
+ * a machine whose current manifest carries skins (the 174 entries read as 'would drop'), the exact --allow-shrink
+ * workaround that lost them in 0.2.5. Where the injection CAN run the skins are imminent, so the comparison strips
+ * them from the current manifest; where it cannot (no 08-skins.json, no injector) the guard keeps reporting them, as
+ * it should: they would really be lost.
+ * @param {any} prev the current data/assets.json (or null)
+ * @returns {any} `prev` without its skin entries when an injection will follow
+ */
+export function guardPrevWithoutImminentSkins(prev) {
+  if (!prev?.chars) return prev;
+  if (!existsSync(INJECT_SKINS_TOOL) || !existsSync(SKINS_RESEARCH)) return prev;
+  const stripped = { ...prev, chars: {} };
+  for (const [id, c] of Object.entries(prev.chars)) {
+    if (!c || !('skins' in c)) { stripped.chars[id] = c; continue; }
+    const { skins, ...rest } = c; // eslint-disable-line no-unused-vars -- dropping the field the guard must not miss
+    stripped.chars[id] = rest;
+  }
+  return stripped;
+}
+
 /** Required assets whose absence makes the run fail (exit code 1). */
 function requiredMisses(m, charIds) {
   const out = [];
@@ -465,15 +550,32 @@ async function main() {
   body.fonts = opts.addOnly && current?.fonts ? current.fonts
     : existsSync(join(FONTS, 'fonts.css')) ? { css: '/fonts/fonts.css', faces: fontFaces } : { faces: fontFaces };
   const bytes = totalBytes(ASSETS, resolved.files);
-  const manifest = {
+  let manifest = {
     version: MANIFEST_VERSION,
     hash: contentHash(body),
     generator: 'tools/fetch-assets.mjs',
     stats: countStats(body, bytes, resolved.files.size),
     ...body,
   };
-  const guard = shrinkGuard(current, manifest, opts);
+  const guard = shrinkGuard(guardPrevWithoutImminentSkins(current), manifest, opts);
   if (guard.write) await writeJsonAtomic(MANIFEST, manifest);
+
+  // Skins are not part of research 07's plan (see injectSkins): inject right after a manifest write, then read the
+  // manifest back and count its skin files as referenced, so they are never orphans and --prune never deletes them.
+  // With the shrink guard keeping the current manifest (already injected on a normal checkout) the read-back still runs:
+  // a run that writes no manifest would otherwise prune the skins of the manifest it just kept.
+  if (guard.write) injectSkins(log);
+  const effective = readJsonOrNull(MANIFEST);
+  if (effective?.chars) {
+    for (const rel of manifestSkinFiles(effective)) resolved.files.add(rel);
+    // the avatar directory ships whole (tools/package.mjs skinArtFiles): not an orphan even with no manifest entry
+    for (const rel of await listFiles(join(ASSETS, SKIN_AVATAR_REL), ASSETS)) resolved.files.add(rel);
+    if (guard.write) {
+      manifest = effective;
+      const s = effective.stats ?? {};
+      manifest.stats = { ...countStats(manifest, totalBytes(ASSETS, resolved.files), resolved.files.size), skins: s.skins, charsWithSkins: s.charsWithSkins };
+    }
+  }
 
   // Orphans: files on disk that the manifest does not reference (e.g. after a mapping change).
   const orphans = orphanFiles(await listFiles(ASSETS), resolved.files);

@@ -90,7 +90,13 @@ export const RUNTIME_RESEARCH = ['docs/research/03-operators.json', 'docs/resear
 export const PLAYER_SCRIPTS = ['scripts/install-service-windows.ps1', 'scripts/launch.mjs', 'scripts/open-browser.mjs',
   'scripts/run-server.cmd', 'scripts/start-windows.bat', 'scripts/start-windows.ps1', 'scripts/start.sh'];
 /** The tools a player runs (npm run setup / doctor / assets, the postinstall) and the ones setup starts. */
-export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', 'tools/fetch-assets.mjs', 'tools/setup.mjs', 'tools/vendor.mjs'];
+export const PLAYER_TOOLS = ['tools/crop-board-atlas.mjs', 'tools/doctor.mjs', 'tools/fetch-assets.mjs', 'tools/inject-skins-assets.mjs', 'tools/setup.mjs', 'tools/vendor.mjs'];
+/**
+ * The research table tools/inject-skins-assets.mjs reads (fetch-assets runs it after every manifest write). Kept out of
+ * RUNTIME_RESEARCH (a frozen 0.2.x list with its own count assertions) but shipped for the same reason: an install that
+ * rebuilds data/assets.json without it silently loses every skin entry (the 0.2.5 incident).
+ */
+export const SKINS_RESEARCH = 'docs/research/08-skins.json';
 /** Whole tool directories: fetch-assets' modules, the local-client extraction setup runs. */
 export const PLAYER_TOOL_DIRS = ['tools/assets/', 'tools/local-extract/'];
 /** Whole runtime directories (their tracked files). */
@@ -121,6 +127,8 @@ export const FULL_ZIP_JP_VOICE = true;
 export const JP_VOICE_DIR = 'public/assets/audio/voice/jp/';
 /** Extracted official battlefield scenes (0.2.5 asset pack). Already ignored with public/assets/. */
 const SCENE_ART_PREFIX = 'public/assets/local/scene/';
+/** Skin avatars (docs/research/08-skins.json + tools/inject-skins-assets.mjs): shipped as a whole directory. */
+const SKIN_AVATAR_DIR = 'public/assets/char/skin_avatar';
 
 /**
  * Refused in a plan and in a stage: 0.1.x's list (owner-only notes, the promo project, caches, per-machine config) and
@@ -163,7 +171,8 @@ export function isPlayerFile(rel) {
   if (!p || isRefused(p) || isJunk(p) || p === 'data/local-assets.json' || p === GENERATED_PACK_INDEX) return false;
   if (NOT_TRACKED_SHIP.some((d) => p.startsWith(d))) return false;
   if (RUNTIME_DIRS.some((d) => p.startsWith(d)) || PLAYER_TOOL_DIRS.some((d) => p.startsWith(d))) return true;
-  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p) || PLAYER_TOOLS.includes(p);
+  return ROOT_FILES.includes(p) || PLAYER_DOCS.includes(p) || RUNTIME_RESEARCH.includes(p) || PLAYER_SCRIPTS.includes(p)
+    || PLAYER_TOOLS.includes(p) || p === SKINS_RESEARCH;
 }
 
 /**
@@ -232,6 +241,37 @@ export function listTree(root, rel, { junk = false } = {}) {
 export const manifestFiles = listedArtFiles;
 
 /**
+ * The skin art of a full package, collected independently of the manifest's skin entries:
+ * the whole `public/assets/char/skin_avatar/` directory, plus every file `chars[charId].skins[skinId].spine.{front,back}`
+ * (skel / atlas / textures) points at. A file that is not on disk is skipped (artPlan's tolerant style), so this never
+ * adds a `missing` entry. data/assets.json carries skin entries only after tools/inject-skins-assets.mjs ran, so a
+ * rebuild that skipped the injection would otherwise report every skin file as an orphan and ship a zip without skins
+ * (0.2.5 packaging incident).
+ * @param {string} root the repository root
+ * @param {any} manifest the parsed data/assets.json (may lack `chars`)
+ * @returns {Set<string>} repository-relative paths of the skin files that exist on disk
+ */
+export function skinArtFiles(root, manifest) {
+  const out = new Set(listTree(root, SKIN_AVATAR_DIR));
+  const urls = (v, acc) => {
+    if (typeof v === 'string') {
+      if (v.startsWith('/assets/')) {
+        try { acc.push(`public/${decodeURIComponent(v.slice(1))}`); } catch { /* a malformed escape: leave it out */ }
+      }
+    } else if (Array.isArray(v)) for (const x of v) urls(x, acc);
+    else if (v && typeof v === 'object') for (const x of Object.values(v)) urls(x, acc);
+    return acc;
+  };
+  for (const c of Object.values(manifest?.chars ?? {})) {
+    for (const s of Object.values(c?.skins ?? {})) {
+      if (!s?.spine) continue;
+      for (const f of urls(s.spine, [])) if (isFile(path.join(root, f))) out.add(f);
+    }
+  }
+  return out;
+}
+
+/**
  * The art of a full package: every file data/assets.json lists, public/fonts, public/assets/local/ and
  * data/local-assets.json (when present). `missing`: listed files not on disk; `orphans`: files under public/assets
  * that nothing lists (left out); `held`: listed files the zip holds back on purpose — the JP voice dub when `jpVoice`
@@ -241,7 +281,8 @@ export const manifestFiles = listedArtFiles;
  */
 export function artPlan(root, { lite = false, jpVoice = FULL_ZIP_JP_VOICE } = {}) {
   if (lite) return { files: [], missing: [], orphans: [], held: [], local: false, scenes: [] };
-  const listed = manifestFiles(readJson(path.join(root, 'data', 'assets.json')) ?? {});
+  const assetsJson = readJson(path.join(root, 'data', 'assets.json')) ?? {};
+  const listed = manifestFiles(assetsJson);
   const local = isFile(path.join(root, 'data', 'local-assets.json'));
   if (local) for (const f of manifestFiles(readJson(path.join(root, 'data', 'local-assets.json')) ?? {})) listed.add(f);
   const files = new Set();
@@ -257,6 +298,10 @@ export function artPlan(root, { lite = false, jpVoice = FULL_ZIP_JP_VOICE } = {}
     for (const f of listTree(root, 'public/assets/local')) files.add(f);
     files.add('data/local-assets.json');
   }
+  // The skin directory + skin Spine files ship whole (skinArtFiles, above); collected before `orphans` is computed
+  // so the files tools/inject-skins-assets.mjs put in the manifest can never be flagged as orphans even if a rebuild
+  // skipped the injection and the manifest does not mention skins at all.
+  for (const f of skinArtFiles(root, assetsJson)) files.add(f);
   // without case: on Windows / macOS a file whose name differs only in case is the listed one (fetch-assets orphanFiles)
   const lower = new Set([...files, ...held].map((f) => f.toLowerCase()));
   const orphans = listTree(root, 'public/assets').filter((f) => !lower.has(f.toLowerCase()));
