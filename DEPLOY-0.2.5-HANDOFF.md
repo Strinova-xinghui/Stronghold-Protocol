@@ -209,3 +209,12 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 - **提交 0706165c 已推送**：op-oblvns.js + index.js 注册 + trait 覆盖锁定测试更新 + 新 kit 契约测试 5 条（2 绿 3 卡 harness 施放姿势，卡点见上节）
 - **尚未部署**：server 代码需重启，等 matches==0 窗口；部署后她将出现在自选编队可选名单（tier-5/6）
 - 遗留：① 3 条战斗断言的 harness 施放姿势（charges 自动释放路径待查）② golden 语料更新 ③ Fever 4 条引擎缺口
+
+### ✅ 祥子自选已上线（2026-10-14 14:15，窗口守卫重启）
+
+- 第二天下午窗口开启（matches=0、零会话）→ 三件套（op-oblvns.js / index.js / backups.json）scp 上云，
+  md5 双端一致（f39b884a… / 653061f4…）→ 守卫重启 → build 443ad1a87c71
+- 外网复核：healthz 0.2.5、monitor 200、console 401/200 正常、皮肤 avatar 200、backups.json 200
+- **丰川祥子现在出现在自选编队可选名单（tier-5/6）**，朋友建自选房即可选用；
+  Fever 机制 4 条为引擎级待办（kit 头注释有完整清单），不影响其余机制
+- 祥子任务至此全链路闭环：解锁裁定 → 数据收录（a2bd389d）→ kit 社区校准（0706165c）→ 部署上线（本次）
