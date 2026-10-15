@@ -71,6 +71,14 @@ function snapshotPlayer(ps) {
     phase: m.phase,
     roundNo: m.round,
     prepsEnded: ps.prepsEnded,
+    // ---- 反 SL（用户 2026-10-15 要求）：随机数状态一并回滚 ----
+    // 松果卖出/寻呼模块/拟态物质/简易通讯机/商业包装方案等效果消耗 rngMeta（ctx.rollChess / rollPool →
+    // m.pool.roll(m.rngMeta, …)）。撤回若不恢复 rng 状态，重做一次会得到不同随机结果 = 无限 SL 刷随机。
+    // 把 match 级 rngMeta 的内部状态存进快照、恢复时写回：重做 = 精确重放同一条随机序列（同卡、同 offer、
+    // 同干员）。意图处理串行，撤回者操作间隙无人消耗 rngMeta，写回不影响别人。
+    rngMetaState: typeof m.rngMeta?.state === 'function' ? m.rngMeta.state() : null,
+    // 商店刷新 / 奖励 offer 抽卡走 rngShop：不回滚它 = 撤回后重刷可无限抽面（免费 SL）。
+    rngShopState: typeof m.rngShop?.state === 'function' ? m.rngShop.state() : null,
   };
 }
 
@@ -114,6 +122,10 @@ function restorePlayer(ps, snap) {
     const base = snap.diyLeft.get(id);
     if (base !== undefined) e.left = base;
   }
+  // 反 SL：随机数状态回滚——重做一次消耗随机的效果得到同样的结果，撤回不能当刷新用。
+  if (snap.rngMetaState !== null && typeof m.rngMeta?.setState === 'function') m.rngMeta.setState(snap.rngMetaState);
+  // 商店刷新同理：撤回恢复旧商店面 + rngShop 状态，重刷得到同样的面（免费 SL 堵死）。
+  if (snap.rngShopState !== null && typeof m.rngShop?.setState === 'function') m.rngShop.setState(snap.rngShopState);
   // 池缓存失效（deployMap 等派生缓存不涉及池，但求稳）+ 重算盟约 + 标脏
   ps.recompute();
   ps.dirty();

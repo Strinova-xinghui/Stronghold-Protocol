@@ -41,6 +41,8 @@ export function createRng(seed = 1) {
   };
   /** current internal state (for debugging / hashing) */
   rng.state = () => s;
+  /** restore an internal state captured with state() — undo / replay support (server/match/player/prepUndo.js). */
+  rng.setState = (v) => { s = Number(v) >>> 0 || 0x9e3779b9; };
   return rng;
 }
 

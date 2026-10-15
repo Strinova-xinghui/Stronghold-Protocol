@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeMatch } from '../test/match/harness.js';
 import { createRegistry } from '../server/match/effectsMeta.js';
+import { canPlace, placeClass } from '../server/match/board.js';
 import { resetCustomRules, CUSTOM_RULES_PATH } from '../server/match/customRules.js';
 
 const QUIET = { warn() {}, error() {}, info() {}, debug() {} };
@@ -183,6 +184,59 @@ describe('休整期撤回 · 开关与边界', () => {
     m.handle(a.playerId, { t: 'g.buy', slot });
     m.handle(a.playerId, { t: 'g.refresh' });
     assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    h.invariants();
+  });
+
+  test('反 SL：商店刷新撤回后重刷，得到同一面（免费刷商店堵死）', () => {
+    writeCfg({ prepUndo: { enabled: true, maxDepth: 4 } });
+    const h = makeMatch({ mode: 'solo', difficulty: 'NORMAL', humans: 1, seed: 909, registry: REG, fake: true });
+    h.start(); h.toPrep(1);
+    const m = h.m;
+    const a = [...m.players.values()].filter((p) => !p.isBot)[0];
+    a.funds = 500;
+    const face = () => a.shop.slots.map((s) => (s ? s.id : null)).join(',');
+    const f0 = face();
+    assert.ok(m.handle(a.playerId, { t: 'g.refresh' }).ok);
+    const f1 = face();
+    assert.notEqual(f1, f0, '刷新改变商店');
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok, '撤回');
+    assert.equal(face(), f0, '旧面恢复');
+    assert.ok(m.handle(a.playerId, { t: 'g.refresh' }).ok, '重刷');
+    assert.equal(face(), f1, '重刷得到同一面——SL 刷商店被堵死');
+  });
+
+  test('反 SL：随机效果（拟态物质随机同盟约干员）撤回后重做结果一致', () => {
+    writeCfg({ prepUndo: { enabled: true, maxDepth: 4 } });
+    const h = makeMatch({ mode: 'solo', difficulty: 'NORMAL', humans: 1, seed: 888, registry: REG, fake: true });
+    h.start(); h.toPrep(1);
+    const m = h.m;
+    const a = [...m.players.values()].filter((p) => !p.isBot)[0];
+    a.funds = 99;
+    const itemId = 'chess_item_5_05_e_a'; // 拟态物质（consume_on_equip，owned<2 → 随机同盟约干员）
+    assert.ok(m.gd.item(itemId), '拟态物质在数据中');
+    const ids = [...m.pool.entries.keys()].filter((id) => m.gd.chess(id));
+    const anyChess = ids.find((id) => Array.isArray(m.gd.chess(id).bonds) && m.gd.chess(id).bonds.length);
+    // 一个无同款副本的棋盘干员 → 装备走随机分支
+    const target = a.newPiece('chess', anyChess, { poolCopies: 1 });
+    const dmap = a.deployMap();
+    let at = null;
+    outer: for (let r = 9; r <= 12; r++) for (let c = 2; c <= 10; c++) { if (canPlace(dmap, placeClass(a, m.gd.chess(anyChess)), r, c)) { at = r + ',' + c; break outer; } }
+    a.board.set(at, target);
+    a.recompute();
+    const gotOf = () => (a.hand.find((p) => p && p.kind === 'chess' && p.id !== anyChess) || {}).id || null;
+    // 第一次装备
+    const it1 = a.newPiece('item', itemId);
+    a.hand[1] = it1;
+    assert.ok(m.handle(a.playerId, { t: 'g.equip', itemUid: it1.uid, targetUid: target.uid }).ok);
+    const got1 = gotOf();
+    assert.ok(got1, '随机分支生效（获得 ' + got1 + '）');
+    // 撤回 → 重做：结果必须一致（反 SL）
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    const it2 = a.newPiece('item', itemId);
+    a.hand[1] = it2;
+    assert.ok(m.handle(a.playerId, { t: 'g.equip', itemUid: it2.uid, targetUid: target.uid }).ok);
+    const got2 = gotOf();
+    assert.equal(got2, got1, '重装备得到同一干员（' + got1 + '），SL 刷随机被堵死');
     h.invariants();
   });
 
