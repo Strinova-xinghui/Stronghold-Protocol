@@ -475,9 +475,29 @@ inited 的 `sources` 声明透传；musicUrl 支持返回 string 或 {url}。loc
 浏览器流式解码即可（WebAudio 不要求全量）；② API 无 CORS ⇒ 必须服务器代理，但代理的只是几十 KB JSON；
 ③ lx 沙箱的 `request` 在浏览器跨域失败时由 `/music/proxy` 兜底（仅 JSON，音频一律拒绝走 CDN）。
 
-**验证**：tools/music-routes.test.mjs 4/4（开关/缓存/白名单/proxy 拒绝）、tools/music-player.test.mjs 7/7
-（曲目推导 + lx 沙箱全行为含坏脚本安全失败）、test/ui/player.e2e.test.js 1/1（无头 Edge 全流程：三 tab、
-点播上锁、回到自动解锁、塞壬代理请求、外部输入框）。economy/bonds/diy-shop 回归 27/27。
+**验证**：tools/music-routes.test.mjs 6/6、tools/music-player.test.mjs 7/7、test/ui/player.e2e.test.js 2/2
+（新增：专辑展开 + 点歌换链 + 搜索过滤 + 远程流式分支断言）。economy/bonds/diy-shop 回归 27/27。
+
+### 播放器三缺陷修复（2026-10-15，用户实测反馈「点歌 404 / 专辑不能展开 / 没有搜索」）
+
+1. **专辑展开 404（= 点不开 = 也没法点歌）**：客户端请求 `/album/:cid`（无 `/detail`），服务端白名单只放行
+   `/album/:cid/detail`（上游本身对无 detail 路径 404）。修复 = 两端同时收口：客户端改请求 `/detail`；
+   服务端白名单 `(/detail)?` 两种形态都兼容（同一份缓存），旧页面新服务器/新页面旧服务器互不打架。
+2. **点歌的第二个 404（潜伏）**：塞壬 `sourceUrl` 是 CDN **限时签名地址**——路径第二段 hex 是到期 unix 时刻
+   （实测签发后 ~3h），而 song JSON 曾按元数据 24h 缓存。修复 = 按 key 分级 TTL（albums/album 24h、song 1h），
+   并清掉云端已过期的 song 缓存文件。另修 `/music/proxy` 的 query 解析 bug（`new URL('http://x'+query)` 把参数
+   当路径，永远取不到 url 参数）与 **Windows 缓存文件名**（`album:8913.json` 的冒号被 NTFS 解释成交替数据流，
+   缓存静默失效——本地测试超时暴露）。
+3. **搜索**：内置 tab 与塞壬 tab 各加搜索框（`SearchBox`）。专辑列表本地即时过滤（名称/艺术家）；本地 0 命中
+   时防抖 350ms 走服务器 `/music/siren/search?kw=`（代理上游 `?keyword=`，只取 kw 参数、10min 短缓存、不落
+   用户输入原文）。上游搜索只按**专辑名**匹配（歌名不索引，实测），故 UI 文案是「搜索专辑 / 艺术家」。
+4. **56MB WAV 的隐藏炸弹**：原 playTrack 走 `_buffer`→`decodeAudioData` 全量解码（56MB WAV ≈ 数百 MB PCM，
+   手机端必 OOM）。新增远程地址分支：`_remoteUrl()` 判跨域绝对地址 → `_startBgmStream()` 用
+   `<audio crossOrigin=anonymous>` + `createMediaElementSource` 接进 bgmGain（只缓冲几 MB，淡入淡出/静音恢复
+   与既有管道共用）。同源内置 BGM 仍走 LRU 解码管道（可循环、intro 衔接）。CDN 实测 CORS=* + Range（206）。
+
+**上线方式（无闪断）**：云端 `matches:1`（有人在对局）⇒ 只 scp 覆盖静态文件（新客户端 + 旧服务端兼容），
+服务端 musicRoutes.js 随同放置，`~/deploy-music-fix.sh` 后台轮询 healthz，matches=0 时自动 restart。
 
 **已知边界**：manualBgm 锁只防 install 的自动切换；玩家在面板里另点一首会自然替换（预期行为）。
 塞壬曲目的 WAV 首播会等 CDN 传输（大文件，进度条由浏览器原生行为承担）。
