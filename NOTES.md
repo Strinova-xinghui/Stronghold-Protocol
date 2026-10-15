@@ -565,3 +565,18 @@ i18n en 100%、线上无头实测（URL 行在/空禁用/HTML 拒收/3 列 CSS �
 验证：music-player 16/16（lxSearch 3 用例）、music-routes 7/7（proxy 头注入 + 白名单转发）、
 e2e 3/3（新流程：加载脚本→拦截 /music/proxy 给确定性结果→搜索→点行→脚本收到搜索结果的 songmid
 取链播放）、回归 37/37、i18n en 100%（新 8 条四包全补）。提交 06f44e06 已推 mine。
+
+### 撤回 × 策略计数器漏洞（2026-10-15 用户实测：绮良白刷干员）
+
+**漏洞**：绮良【通关奖励】「每使用 20 资金获得随机干员」的进度存在 `ps.counters['band:kirara:acc']`，
+撤回快照没带 `counters` ⇒ 「买/刷新 → 撤回」资金返还但 acc 白攒，循环即可无限刷干员。
+**反证测试先红后绿**：临时注释 counters 快照行 → 6 个计数器用例全红（含「刷新→撤回 25 轮
+acc 恒 0」的白嫖路径）→ 恢复全绿。
+**修复**：`counters: clone(ps.counters)` 入快照 + 恢复时写回（纯 {string:number}，克隆安全）。
+受益者不止绮良：潘格尼尼 spent/done（累计 55 给 4 阶+）、克劳妮 chiave:refreshes（每 N 刷给
+盟约干员）、松鼠 sciurus:r（本回合首买特价）、商业包装方案 pack:uid（卖出计数）。
+与 rng 回滚同类边界：**凡「撤回后重做」不该变的东西，全部进快照**。
+**老坑复记**：`node --test` 多文件默认**并行**，自研测试都 writeCfg 同一个 config/custom-rules.json
+互相踩 → 33 红。自研套件必须 `--test-concurrency=1` 串行。踩坏后 `git checkout HEAD -- config/…`
+这次是对的（HEAD 已是 120 行完整版；旧教训「HEAD 是最小版」随提交推进已失效——恢复前先
+`git show HEAD:config/custom-rules.json | grep music` 验证）。
