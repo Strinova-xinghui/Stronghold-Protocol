@@ -500,4 +500,21 @@ inited 的 `sources` 声明透传；musicUrl 支持返回 string 或 {url}。loc
 服务端 musicRoutes.js 随同放置，`~/deploy-music-fix.sh` 后台轮询 healthz，matches=0 时自动 restart。
 
 **已知边界**：manualBgm 锁只防 install 的自动切换；玩家在面板里另点一首会自然替换（预期行为）。
-塞壬曲目的 WAV 首播会等 CDN 传输（大文件，进度条由浏览器原生行为承担）。
+塞壬曲目的 WAV 首播是流式（`<audio>` 边下边播），起播比内置 BGM 慢一拍属正常。
+
+### 点歌台全局化（2026-10-15，用户：「播放全局生效但只能局内改」）
+
+播放本来就全局（audio.js 单例，manualBgm 跨界面持续），缺的是**入口**。照 StatsHost 模式：
+- `player.js` 新增 `playerStore` + `openPlayer()/closePlayer()` + `<PlayerHost/>`（未开时渲染为空、
+  不加载 assets 清单）；main.js 的 App 挂 `<${PlayerHost}/>`（与 LoadoutHost/StatsHost 并列）。
+- 四入口统一 `openPlayer`：标题屏（`.title-player`，统计旁）、大厅（topbar 方形 signal 按钮）、
+  房间（统计旁「点歌」）、局内角落按钮（原来是局内局部 state，已删，改调全局）。
+- `PlayerPanel` 的 tracks 从 `useMemo(data.get)` 改 `useData('assets')`——局外首次打开清单可能未到，
+  到齐自动重渲染（openPlayer 先 data.load('assets')）。
+- 顺带：修一处动态拼接 msgid（`t('服务器搜索到 ' + n + ' 张…')` → `t('…{n}…', { n })`，否则永远翻不了）；
+  补齐播放器/撤回全部文案的 en/ja/ko/zh-TW 翻译，**en 达 100%**（`node tools/i18n.mjs check`）。
+  坑：`i18n.mjs seed` 有 `!HAN.test(tr)` 汉字守卫（防把中文当译文），ja/zh-TW 词条需绕过 seed 直接
+  按 writeCatalog 格式合并（`.cache/merge-i18n.cjs` 留档）。
+- 验证：e2e 3/3（新增「标题屏入口开面板、挂 .screen 之外、Esc 关、可重开」）、回归 27/27、
+  线上无头实测（点歌入口→298 专辑→展开→Esc）零报错。云端已闪断上线（matches=0 时执行，
+  build 1c8b20df3a8c）。
