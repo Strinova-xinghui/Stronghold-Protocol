@@ -236,6 +236,25 @@ test('全局点歌台：标题屏入口能开面板、能关闭', { skip: !enabl
     await c.page.click('.title-player');
     await c.page.waitForSelector('.player', { timeout: 8000 });
     await c.page.keyboard.press('Escape');
+    // 收藏持久化（favStore 初值须来自 favLoad，否则刷新即丢）：收藏塞壬一首 → 刷新 → 收藏 tab 仍在
+    await c.page.click('.title-player');
+    await c.page.waitForSelector('.player', { timeout: 8000 });
+    await c.page.$$eval('.ptab-btn', (els) => els[1].click()); // 塞壬
+    await c.page.waitForFunction(() => document.querySelectorAll('.ptab .ptrack').length > 50, { timeout: 25000 });
+    await c.page.click('.ptab .ptrack');
+    await c.page.waitForSelector('.pfav-row .pfav', { timeout: 20000 });
+    await c.page.click('.pfav-row .pfav');
+    await c.page.waitForFunction(() => JSON.parse(localStorage.getItem('sp_player_favs') || '[]').length === 1, { timeout: 5000 });
+    await c.page.reload({ waitUntil: 'domcontentloaded' });
+    await c.page.evaluate(async () => {
+      const [{ PlayerPanel }, preact] = await Promise.all([import('/js/ui/player.js'), import('/vendor/preact.module.js')]);
+      const root = document.createElement('div'); document.body.appendChild(root);
+      preact.render(preact.h(() => PlayerPanel({ open: true, onClose: () => {} })), root);
+    });
+    await c.page.waitForSelector('.player', { timeout: 10000 });
+    await c.page.$$eval('.ptab-btn', (els) => els[3].click()); // 收藏（外部分支四 tab：内置0/塞壬1/外部2/收藏3）
+    await c.page.waitForFunction(() => document.querySelectorAll('.plist .ptrack').length === 1, { timeout: 5000 });
+    assert.ok(await c.page.$('.plist .ptrack__name'), '刷新后收藏仍在（favStore 初始化）');
   } finally {
     await c.close().catch(() => {});
     await srv.stop().catch(() => {});
