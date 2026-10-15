@@ -518,3 +518,23 @@ inited 的 `sources` 声明透传；musicUrl 支持返回 string 或 {url}。loc
 - 验证：e2e 3/3（新增「标题屏入口开面板、挂 .screen 之外、Esc 关、可重开」）、回归 27/27、
   线上无头实测（点歌入口→298 专辑→展开→Esc）零报错。云端已闪断上线（matches=0 时执行，
   build 1c8b20df3a8c）。
+
+### 播放器追加（2026-10-15 晚，用户两点反馈）
+
+1. **lx 音源 URL 导入**：外部音源 tab 加一行「脚本直链 URL + URL 导入」按钮
+   （`fetchLxScript`，player-core.js）。浏览器直连优先（jsDelivr/raw 发 CORS=* 可直取），
+   失败走同源 `/music/proxy` 兜底（只转发 JSON/文本 ≤512KB，服务器零音频带宽）。
+   护栏：非 http(s) 拒、HTML 页拒（误贴仓库网页不进沙箱）、>512KB 拒；成功后填进文本框
+   （可再手改）并立即加载，URL 记忆在 localStorage（`sp_player_lx_url`）。
+2. **撤回按钮并排**：`.shopbar__tools` 网格 2 列 → `repeat(3, auto)`——冻结｜刷新｜撤回
+   同一行（撤回是后加的第三个按钮，2 列时换行到第二排）。mock 实测三键 top 全等（629），
+   右缘 1578 < 1600 无溢出；rem 体系随视口缩放，窄屏由 devices.css 的 scale 兜底。
+3. **🔑 SSH 绕过 Clash TUN 的新办法（2026-10-15 实测）**：Clash 开着时 `ssh -b 192.168.3.20`
+   （源地址绑定 WLAN 网卡）直接通——TUN 只劫持默认路由，绑定非 TUN 源地址的流量走物理网卡。
+   scp 用 `-o BindAddress=192.168.3.20`。比「让用户关 Clash」省事，下次 SSH 被掐先用它。
+   （本轮云端部署中途 SSH 掉线即此症状，HTTPS 全程正常。）
+
+验证：music-player 13/13（fetchLxScript 6 用例）、e2e 3/3（URL 行断言）、回归 33/33、
+i18n en 100%、线上无头实测（URL 行在/空禁用/HTML 拒收/3 列 CSS 已部署）零报错。
+已闪断上线 build 7ccc362f57fd（重启前 matches=0）。提交 c92b3540（连同 9d04073e/0da74f6a
+一起推送 mine——此前 GitHub 直连抖动积压）。
