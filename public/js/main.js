@@ -51,6 +51,7 @@ import { installDeviceSupport } from './ui/device.js';
 import { installShadow } from './ui/shadow.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { StatsHost } from './screens/stats.js';
+import { PlayerHost } from './ui/player.js'; // 自研音乐播放器（全局点歌台，2026-10-15）
 import { recordResult, installStatsRecorder } from './ui/stats.js';
 import { installLoadoutSync, installOwnershipSync, installDiySync } from './ui/loadoutSync.js';
 import { installSkinsSync } from './ui/skins.js';
@@ -329,6 +330,7 @@ function App() {
     <${GuideHost} />
     <${LoadoutHost} />
     <${StatsHost} />
+    <${PlayerHost} />
   </div>`;
 }
 

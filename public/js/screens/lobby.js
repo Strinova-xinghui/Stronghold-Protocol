@@ -19,6 +19,7 @@ import { html, Button, Icon, MicroLabel, Panel, TextField, PingPill, AvatarFrame
 import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
+import { openPlayer } from '../ui/player.js'; // 自研全局点歌台（2026-10-15）
 import { SettingsButton } from '../ui/settings.js';
 import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
@@ -330,6 +331,9 @@ export function LobbyScreen() {
       <div class="topbar__right">
         <${ResumeMatchButton} />
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
+        <${Tooltip} text=${t('音乐播放器')} placement="bottom">
+          <${Button} variant="secondary" size="sm" icon="signal" square=${true} class="music-entry" onClick=${openPlayer} aria-label=${t('音乐播放器')} />
+        <//>
         <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>
           <${AvatarFrame} size="sm" name=${me.name} seat=${0} self=${true} />
           <span class="me-chip__text">

@@ -16,6 +16,7 @@ import { NAME_MAX_LEN, APP_VERSION, DEV_BUILD } from '../../../shared/constants.
 import { html, Button, Icon, MicroLabel, TextField, PingPill } from '../ui/components.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
+import { openPlayer } from '../ui/player.js'; // 自研全局点歌台（2026-10-15）
 import { toast } from '../ui/toasts.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual } from '../store.js';
@@ -248,6 +249,7 @@ export function TitleScreen() {
     <div class="title-corner title-corner--tr">
       <div>
         <div class="title-corner__tools">
+          <${Button} variant="ghost" size="sm" icon="signal" class="title-stats title-player" onClick=${openPlayer} title=${t('音乐播放器')}>${t('点歌')}<//>
           <${Button} variant="ghost" size="sm" icon="chart" class="title-stats" onClick=${openStats} title=${t('统计数据')}>${t('统计')}<//>
           <${LangToggle} class="title-lang" />
         </div>

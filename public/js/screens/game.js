@@ -77,7 +77,7 @@ import { TopBar, liveLp, ownLeaks, uniteRemaining, tempInfo, tempReadyReason } f
 import { BondStrip, BondPopup } from '../ui/bondStrip.js';
 import { TeamPanel } from '../ui/teamPanel.js';
 import { ShopBar } from '../ui/shopBar.js';
-import { PlayerPanel } from '../ui/player.js'; // 自研音乐播放器（2026-10-15）
+import { openPlayer } from '../ui/player.js'; // 自研音乐播放器（2026-10-15；面板由 main.js 的 <PlayerHost/> 全局挂载）
 import { DetailPanel, resolveDetail } from '../ui/detailPanel.js';
 import { RewardOverlay } from '../ui/rewardOverlay.js';
 import { ChoiceOverlay } from '../ui/choiceOverlay.js';
@@ -195,7 +195,6 @@ function MatchScreen() {
   const [rewardMin, setRewardMin] = useState(false);
   const [emoteOpen, setEmoteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [playerOpen, setPlayerOpen] = useState(false); // 音乐播放器（自研，ui/player.js）
   const [exitOpen, setExitOpen] = useState(false);
   const [drag, setDrag] = useState(null);                // { uid, kind, id } while dragging a piece
   const [facing, setFacing] = useState(null);            // direction step: { uid, piece, row, col, grid, name }
@@ -1556,7 +1555,7 @@ function MatchScreen() {
         ${spectator ? null : html`<${EmoteWheel} open=${emoteOpen} onToggle=${setEmoteOpen} onSend=${(id) => actions.emote(id)} disabled=${conn.status !== 'online'} />`}
         <button type="button" class="gm__gear" aria-label=${t('设置')} title=${t('设置')} onClick=${() => setSettingsOpen(true)}><${GIcon} name="gear" /></button>
         <button type="button" class="gm__gear gm__guide" aria-label=${t('玩法说明')} title=${t('玩法说明')} onClick=${() => openGuide(0)}><${Icon} name="book" /></button>
-        <button type="button" class="gm__gear gm__music" aria-label=${t('音乐播放器')} title=${t('音乐播放器')} onClick=${() => setPlayerOpen(true)}><${Icon} name="signal" /></button>
+        <button type="button" class="gm__gear gm__music" aria-label=${t('音乐播放器')} title=${t('音乐播放器')} onClick=${openPlayer}><${Icon} name="signal" /></button>
         <${FullscreenButton} class="gm__gear gm__fs" />
       </div>
 
@@ -1605,7 +1604,6 @@ function MatchScreen() {
       onConfirm=${(uid) => closeReplace(uid)} onCancel=${() => closeReplace(null)} />` : null}
 
     <${SettingsModal} open=${settingsOpen} onClose=${() => setSettingsOpen(false)} />
-    <${PlayerPanel} open=${playerOpen} onClose=${() => setPlayerOpen(false)} />
     <${ExitModal} open=${exitOpen} onClose=${() => setExitOpen(false)} solo=${solo} />
   </div>`;
 }

@@ -3,11 +3,18 @@
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
 import { html, Icon, Button, Modal } from './components.js';
 import { audio } from '../audio.js';
-import { data } from '../data.js';
+import { data, useData } from '../data.js';
+import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
 import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
+
+// ---- 全局开关（main.js 挂 <${PlayerHost}/>，任何界面都能开点歌台；
+// 局内的角落按钮、标题/大厅/房间入口都调 openPlayer()。播放本身在 audio.js，本来就跨界面持续。）
+const playerStore = createStore({ open: false });
+export function openPlayer() { data.load('assets'); playerStore.set({ open: true }); }
+export const closePlayer = () => playerStore.set({ open: false });
 
 /** 播放一首内置曲目（audio.playTrack：intro → loop 循环，走 LRU 管道）。 */
 export function playBuiltin(track) {
@@ -118,7 +125,8 @@ export function PlayerPanel({ open, onClose }) {
   const [q, setQ] = useState('');
   const [remote, setRemote] = useState(null);
   const [sirenErr, setSirenErr] = useState('');
-  const tracks = useMemo(() => builtinTracks(data.get('assets')), []);
+  const assetsReady = useData('assets'); // 局外首次打开时清单可能还没到（openPlayer 触发加载）
+  const tracks = useMemo(() => builtinTracks(data.get('assets')), [assetsReady]);
   useEffect(() => {
     if (!open || tab !== 'siren' || albums) return;
     const ac = new AbortController();
@@ -185,7 +193,7 @@ export function PlayerPanel({ open, onClose }) {
         ${!album && shownAlbums ? (shownAlbums.length ? shownAlbums.map((a) => html`<${TrackRow} key=${a.cid} track=${{ name: a.name, artist: (a.artistes || []).join(' / ') }}
           cover=${a.coverUrl} playing=${false} hint=${albumBusy === a.cid ? t('加载中…') : t('点击查看曲目')}
           onPlay=${() => openAlbum(a)} />`) : html`<p class="phint">${t('列表里没有匹配的专辑。')}</p>`) : null}
-        ${!album && shownAlbums && qq && !shownAlbums.length && remote && remote.length ? html`<p class="phint">${t('服务器搜索到 ' + remote.length + ' 张相关专辑：')}</p>
+        ${!album && shownAlbums && qq && !shownAlbums.length && remote && remote.length ? html`<p class="phint">${t('服务器搜索到 {n} 张相关专辑：', { n: remote.length })}</p>
           ${remote.map((a) => html`<${TrackRow} key=${a.cid} track=${{ name: a.name, artist: (a.artistes || []).join(' / ') }}
             cover=${a.coverUrl} playing=${false} hint=${albumBusy === a.cid ? t('加载中…') : t('点击查看曲目')}
             onPlay=${() => openAlbum(a)} />`)}` : null}
@@ -193,4 +201,11 @@ export function PlayerPanel({ open, onClose }) {
       ${tab === 'custom' ? html`<${CustomSourceTab} onPlayUrl=${playUrl} />` : null}
     </div>
   <//>`;
+}
+
+/** 全局点歌台宿主 —— main.js 挂一次；未打开时渲染为空（不加载任何数据）。 */
+export function PlayerHost() {
+  const { open } = useStore((s) => s, Object.is, playerStore);
+  if (!open) return null;
+  return html`<${PlayerPanel} open=${true} onClose=${closePlayer} />`;
 }

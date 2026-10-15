@@ -156,3 +156,34 @@ test('塞壬 tab：专辑展开 + 点歌换链 + 搜索过滤 + 远程流式播�
     await srv.stop().catch(() => {});
   }
 });
+
+// ---- 全局点歌台（2026-10-15）：标题屏入口 → main.js 的 <PlayerHost/> 拉起面板，Esc 关闭 ----------------
+test('全局点歌台：标题屏入口能开面板、能关闭', { skip: !enabled, timeout: 120000 }, async () => {
+  const P = (await import('puppeteer-core')).default;
+  const srv = await startRealServer({ fast: { timerScale: 0.1, kit: 0 } });
+  const c = new Client(P, srv.base, 'global', { prefix: 'global' });
+  try {
+    await c.open(); // 未登录 ⇒ 标题屏
+    await c.page.waitForSelector('.title-player', { timeout: 15000 });
+    await c.page.click('.title-player');
+    await c.page.waitForSelector('.player', { timeout: 10000 });
+    // 面板挂在 .app-root 下（全局 Host），不是某个 screen 内部
+    const mounted = await c.page.evaluate(() => {
+      const p = document.querySelector('.player');
+      return !!(p && p.closest('.app-root') && !p.closest('.screen'));
+    });
+    assert.ok(mounted, '面板由全局 PlayerHost 挂载（screen 之外）');
+    assert.ok(await c.page.$('.psearch input'), '面板带搜索框');
+    const tabs = await c.page.$$eval('.ptab-btn', (els) => els.length);
+    assert.equal(tabs, 3, '三 tab 齐全');
+    await c.page.keyboard.press('Escape');
+    await c.page.waitForFunction(() => !document.querySelector('.player'), { timeout: 8000 });
+    // 重开（store 开关可重复）
+    await c.page.click('.title-player');
+    await c.page.waitForSelector('.player', { timeout: 8000 });
+    await c.page.keyboard.press('Escape');
+  } finally {
+    await c.close().catch(() => {});
+    await srv.stop().catch(() => {});
+  }
+});
