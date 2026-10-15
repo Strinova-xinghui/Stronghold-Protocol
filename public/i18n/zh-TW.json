@@ -1253,5 +1253,13 @@
   "拉取失败：": "拉取失敗：",
   "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "貼上 lx-music 自訂來源腳本（規範：lxmusic.toside.cn/desktop/custom-source），或透過 URL 匯入。腳本在瀏覽器本地執行，請求直連第三方，不經過遊戲伺服器。",
   "脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）": "腳本直連 URL（raw / jsDelivr 等，需 CORS 或純文字）",
-  "URL 导入": "URL 匯入"
+  "URL 导入": "URL 匯入",
+  "搜索失败：": "搜尋失敗：",
+  "取链音源": "取鏈音源",
+  "搜索源": "搜尋來源",
+  "输入歌名 / 歌手，回车搜索…": "輸入歌名 / 歌手，Enter 搜尋…",
+  "搜索中…": "搜尋中…",
+  "搜索": "搜尋",
+  "没有搜索结果。": "沒有搜尋結果。",
+  "高级：直接输入 songmid / ID 点播": "進階：直接輸入 songmid / ID 點播"
 }

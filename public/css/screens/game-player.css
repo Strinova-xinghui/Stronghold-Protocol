@@ -46,6 +46,18 @@
 /* URL 导入行：输入框吃掉剩余宽度，按钮贴右 */
 .prow .purl { flex: 2 1 2.2rem; min-width: 1.6rem; }
 
+/* 外部音源：搜索点歌 */
+.plabel { font-size: .13rem; color: var(--text-dim); white-space: nowrap; }
+.plist { max-height: 2.6rem; overflow-y: auto; display: flex; flex-direction: column; gap: .04rem; margin-top: .02rem; }
+.ptrack--lx { height: .46rem; }
+.ptrack--lx:disabled { opacity: .55; cursor: progress; }
+.ptrack__dur { flex: 0 0 auto; font-size: .12rem; color: var(--text-dim); font-variant-numeric: tabular-nums; padding: 0 .06rem; }
+.plx-adv { margin-top: .06rem; }
+.plx-adv summary { cursor: pointer; font-size: .13rem; color: var(--text-dim); padding: .03rem 0; user-select: none; }
+.plx-adv summary:hover { color: var(--text); }
+.plx-adv .prow { margin-top: .04rem; }
+
+
 .pcode {
   width: 100%; min-height: 1.6rem; padding: .08rem; resize: vertical;
   background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2); border-radius: .04rem;

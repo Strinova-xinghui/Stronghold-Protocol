@@ -22,6 +22,20 @@ const TTL_SEARCH = 10 * 60 * 1000;   // 搜索：临时结果，别把用户输�
 const FETCH_TIMEOUT_MS = 12000;
 const PROXY_MAX_BODY = 512 * 1024;
 
+/**
+ * /music/proxy 的平台头（lx 脚本搜索的 CORS 兜底）：很多音乐 API 缺了 Referer/Origin 直接 401/500。
+ * 浏览器 fetch 设不了这些受限头，由服务器按目标 host 注入（lx-music-desktop 同款映射，公开知识）。
+ * 客户端头只转发白名单三种（Cookie 支持登录态音源；其余防成开放头注入器）。
+ */
+const PROXY_HOST_HEADERS = [
+  { re: /(^|\.)music\.163\.com$/i, h: { Referer: 'https://music.163.com/', Origin: 'https://music.163.com' } },
+  { re: /(^|\.)qq\.com$/i, h: { Referer: 'https://y.qq.com/', Origin: 'https://y.qq.com' } },
+  { re: /(^|\.)kuwo\.cn$/i, h: { Referer: 'http://www.kuwo.cn/', Origin: 'http://www.kuwo.cn' } },
+  { re: /(^|\.)kugou\.com$/i, h: { Referer: 'https://www.kugou.com/', Origin: 'https://www.kugou.com' } },
+  { re: /(^|\.)migu\.cn$/i, h: { Referer: 'https://music.migu.cn/', Origin: 'https://music.migu.cn' } },
+];
+const PROXY_FWD_HEADERS = ['cookie', 'user-agent', 'referer'];
+
 /** 允许代理的白名单路径（严格匹配，绝不开放任意 URL；query 单独走 search）。 */
 const ALLOWED = [
   { re: /^\/albums$/, key: () => 'albums', ttl: TTL_META },
@@ -109,7 +123,17 @@ export async function handleMusicRoutes(req, res, parts, log, musicEnabled) {
     const target = u.searchParams.get('url') || '';
     if (!/^https?:\/\//.test(target)) { sendJson(req, res, 400, { error: 'bad url' }); return true; }
     try {
-      const rr = await fetch(target, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' };
+      try {
+        const host = new URL(target).hostname;
+        for (const rule of PROXY_HOST_HEADERS) if (rule.re.test(host)) Object.assign(headers, rule.h);
+        // 客户端可带 <wh> 名单内的头（拼在同一个 ?url= 里：&h_referer=…&h_cookie=…）
+        for (const [k, v] of u.searchParams.entries()) {
+          const hk = /^h_(.+)$/i.exec(k);
+          if (hk && PROXY_FWD_HEADERS.includes(hk[1].toLowerCase()) && v) headers[hk[1]] = v;
+        }
+      } catch { /* bad url already rejected above */ }
+      const rr = await fetch(target, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers });
       const ct = rr.headers.get('content-type') || '';
       if (!/json|text|xml|javascript|urlencoded/i.test(ct)) { sendJson(req, res, 415, { error: 'only json/text' }); return true; }
       const buf = await rr.arrayBuffer();

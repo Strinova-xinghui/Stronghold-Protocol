@@ -6,7 +6,7 @@ import { audio } from '../audio.js';
 import { data, useData } from '../data.js';
 import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
-import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
+import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, lxSearch, LX_SEARCH_SOURCES, fmtDur } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -51,10 +51,11 @@ function TrackRow({ track, playing, onPlay, cover, hint }) {
 }
 
 /** 搜索框（受控；type=search 原生带清除按钮，这里再补一个显式的）。 */
-function SearchBox({ value, onChange, placeholder }) {
+function SearchBox({ value, onChange, placeholder, onEnter }) {
   return html`<div class="psearch">
     <span class="psearch__ico"><${Icon} name="search" /></span>
-    <input type="search" value=${value} onInput=${(e) => onChange(e.target.value)} placeholder=${placeholder} aria-label=${placeholder} />
+    <input type="search" value=${value} onInput=${(e) => onChange(e.target.value)} placeholder=${placeholder} aria-label=${placeholder}
+      onKeyDown=${onEnter ? (e) => { if (e.key === 'Enter') { e.preventDefault(); onEnter(); } } : undefined} />
     ${value ? html`<button type="button" class="psearch__x" onClick=${() => onChange('')} aria-label=${t('清除')}><${Icon} name="close" /></button>` : null}
   </div>`;
 }
@@ -101,13 +102,31 @@ function CustomSourceTab({ onPlayUrl }) {
     } catch (e) { setErr(String(e && e.message ? e.message : e)); }
     setBusy(false);
   };
-  const play = async () => {
-    setErr(''); setBusy(true);
+  // —— 搜索点歌：输入关键词 → 内置源（网易云/酷狗）出结果 → 点一行 = 用当前脚本取链播放 ——
+  const [sk, setSk] = useState(() => { try { return localStorage.getItem('sp_player_lx_sk') || 'wy'; } catch { return 'wy'; } });
+  const [sq, setSq] = useState('');
+  const [results, setResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [pickBusy, setPickBusy] = useState('');
+  const doSearch = async () => {
+    const kw = sq.trim();
+    if (!kw) { setResults(null); return; }
+    setErr(''); setSearching(true);
+    try { setResults(await lxSearch(sk, kw)); }
+    catch (e) { setResults(null); setErr(t('搜索失败：') + String(e && e.message ? e.message : e)); }
+    setSearching(false);
+  };
+  useEffect(() => { try { localStorage.setItem('sp_player_lx_sk', sk); } catch { /* ignore */ } }, [sk]);
+  const playInfo = async (musicInfo, label) => {
+    setErr(''); setPickBusy(String(musicInfo.songmid));
     try {
-      const url = await lxMusicUrl(listeners, source, { songmid, name: songname || songmid }, null);
-      onPlayUrl(url, (songname || songmid || 'external').slice(0, 60));
+      const url = await lxMusicUrl(listeners, source, musicInfo, null);
+      onPlayUrl(url, label.slice(0, 60));
     } catch (e) { setErr(t('取链失败：') + String(e && e.message ? e.message : e)); }
-    setBusy(false);
+    setPickBusy('');
+  };
+  const play = async () => {
+    await playInfo({ source: sk, songmid: songmid.trim(), songName: songname || songmid, singerName: '' }, songname || songmid || 'external');
   };
   const meta = sources ? Object.entries(sources) : [];
   return html`<div class="ptab">
@@ -124,13 +143,38 @@ function CustomSourceTab({ onPlayUrl }) {
       ${err ? html`<span class="perr">${err}</span>` : null}
     </div>
     ${meta.length ? html`<div class="prow">
+      <span class="plabel">${t('取链音源')}<//>
       <select value=${source} onChange=${(e) => setSource(e.target.value)}>
         ${meta.map(([k, s]) => html`<option key=${k} value=${k}>${(s && s.name) || k}</option>`)}
       </select>
-      <input placeholder="songmid / ID" value=${songmid} onInput=${(e) => setSongmid(e.target.value)} />
-      <input placeholder=${t('歌名（可选）')} value=${songname} onInput=${(e) => setSongname(e.target.value)} />
-      <${Button} size="sm" disabled=${busy || !songmid.trim()} onClick=${play}>${t('点播')}<//>
+      <span class="plabel">${t('搜索源')}<//>
+      <select value=${sk} onChange=${(e) => setSk(e.target.value)}>
+        ${LX_SEARCH_SOURCES.map((s) => html`<option key=${s.key} value=${s.key}>${t(s.name)}</option>`)}
+      </select>
+    </div>
+    <div class="prow">
+      <${SearchBox} value=${sq} onChange=${setSq} onEnter=${doSearch} placeholder=${t('输入歌名 / 歌手，回车搜索…')} />
+      <${Button} size="sm" variant="primary" disabled=${searching || !sq.trim()} onClick=${doSearch}>${searching ? t('搜索中…') : t('搜索')}<//>
+    </div>
+    ${results ? html`<div class="plist">
+      ${results.length ? results.map((s) => html`<button key=${s.source + ':' + s.songmid} type="button" class=${cx('ptrack', 'ptrack--lx', pickBusy === String(s.songmid) && 'is-busy')} disabled=${!!pickBusy}
+        onClick=${() => playInfo(s, s.songName + ' - ' + s.singerName)}>
+        <span class="ptrack__meta">
+          <b class="ptrack__name">${s.songName}</b>
+          <small class="ptrack__sub">${[s.singerName, s.albumName].filter(Boolean).join(' · ')}</small>
+        </span>
+        ${s.interval ? html`<span class="ptrack__dur">${fmtDur(s.interval)}</span>` : null}
+        <span class="ptrack__play"><${Icon} name=${pickBusy === String(s.songmid) ? 'refresh' : 'play'} /></span>
+      </button>`) : html`<p class="phint">${t('没有搜索结果。')}</p>`}
     </div>` : null}
+    <details class="plx-adv">
+      <summary>${t('高级：直接输入 songmid / ID 点播')}<//>
+      <div class="prow">
+        <input placeholder="songmid / ID" value=${songmid} onInput=${(e) => setSongmid(e.target.value)} />
+        <input placeholder=${t('歌名（可选）')} value=${songname} onInput=${(e) => setSongname(e.target.value)} />
+        <${Button} size="sm" disabled=${busy || !songmid.trim()} onClick=${play}>${t('点播')}<//>
+      </div>
+    </details>` : null}
   </div>`;
 }
 /** 播放器主面板。 */

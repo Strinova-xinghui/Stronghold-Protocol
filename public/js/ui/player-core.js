@@ -266,3 +266,52 @@ function fnvHex(str) {
   }
   return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
 }
+// ---- 内置搜索（点歌台的"轮椅"：不用记 songmid，输入歌名直接搜）--------------------------------------
+// 搜索端点固定内置（不给用户自由填 URL），经服务器 /music/proxy 转发——平台 API 无 CORS 且要 Referer/Origin，
+// 由服务器注入（musicRoutes.js PROXY_HOST_HEADERS）。返回 KB 级 JSON，非音频，服务器成本可忽略。
+// 结果映射成 lx 的 musicInfo 形状：取链仍走用户加载的音源脚本（musicUrl action），版权与质量选择都在脚本侧。
+export const LX_SEARCH_SOURCES = [
+  { key: 'wy', name: '网易云' },
+  { key: 'kg', name: '酷狗' },
+];
+
+/** 经 /music/proxy 拉一个内置搜索端点并解析成 lx musicInfo 列表。 */
+export async function lxSearch(source, keyword, { signal, page = 0 } = {}) {
+  const kw = String(keyword || '').trim();
+  if (!kw) return [];
+  const enc = encodeURIComponent;
+  let url;
+  if (source === 'wy') url = 'https://music.163.com/api/search/get?s=' + enc(kw.slice(0, 64)) + '&type=1&offset=' + (page * 30) + '&limit=30';
+  else if (source === 'kg') url = 'https://songsearch.kugou.com/song_search_v2?keyword=' + enc(kw.slice(0, 64)) + '&page=' + (page + 1) + '&pagesize=30&userid=0&appid=101&clientver=&platform=WebFilter&filter=2&iscorrection=1&privilege_filter=0&area_code=1';
+  else throw new Error('unknown search source: ' + source);
+  const r = await fetch('/music/proxy?url=' + enc(url), { signal });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = JSON.parse(await r.text());
+  if (source === 'wy') {
+    return ((j.result && j.result.songs) || []).map((s) => ({
+      source: 'wy',
+      // lx 规范字段（自定义源脚本读这些）：songmid/songName/singerName/albumName/albumMid
+      songmid: String(s.id),
+      songName: s.name || '',
+      singerName: (s.artists || []).map((a) => a.name).join('/'),
+      albumName: (s.album && s.album.name) || '',
+      albumMid: s.album ? String(s.album.id) : '',
+      interval: Math.round((s.duration || 0) / 1000) || undefined,
+    }));
+  }
+  return ((j.data && j.data.lists) || []).map((s) => ({
+    source: 'kg',
+    songmid: s.FileHash || '',
+    songName: s.SongName || '',
+    singerName: s.SingerName || '',
+    albumName: s.AlbumName || '',
+    albumMid: s.AlbumID ? String(s.AlbumID) : '',
+    interval: s.Duration || undefined,
+  }));
+}
+
+/** 秒 → m:ss（列表右侧时长）。 */
+export function fmtDur(sec) {
+  const n = Number(sec) || 0;
+  return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+}

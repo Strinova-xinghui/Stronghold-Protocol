@@ -1303,5 +1303,13 @@
   "拉取失败：": "Fetch failed: ",
   "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "Paste an lx-music custom source script (spec: lxmusic.toside.cn/desktop/custom-source), or import one by URL. The script runs locally in your browser; its requests go straight to the third party, never through the game server.",
   "脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）": "Direct script URL (raw / jsDelivr etc., needs CORS or plain text)",
-  "URL 导入": "Import by URL"
+  "URL 导入": "Import by URL",
+  "搜索失败：": "Search failed: ",
+  "取链音源": "Link source",
+  "搜索源": "Search source",
+  "输入歌名 / 歌手，回车搜索…": "Song / artist, Enter to search…",
+  "搜索中…": "Searching…",
+  "搜索": "Search",
+  "没有搜索结果。": "No results.",
+  "高级：直接输入 songmid / ID 点播": "Advanced: play directly by songmid / ID"
 }

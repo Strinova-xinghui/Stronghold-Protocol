@@ -3,7 +3,7 @@
 // 用法: node --test tools/music-player.test.mjs
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader, fetchLxScript } from '../public/js/ui/player-core.js';
+import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader, fetchLxScript, lxSearch } from '../public/js/ui/player-core.js';
 
 describe('内置 BGM 曲目推导', () => {
   test('从 assets 清单推导 16 首（intro+loop 去重，loop 为准）', () => {
@@ -131,5 +131,45 @@ describe('fetchLxScript（URL 导入）', () => {
     const r = await fetchLxScript('https://x.example.com/big.js');
     assert.equal(r.ok, false);
     assert.match(r.error, /too large/);
+  });
+});
+
+describe('lxSearch（内置搜索点歌）', () => {
+  const orig = globalThis.fetch;
+  after(() => { globalThis.fetch = orig; });
+
+  test('wy：解析 result.songs → lx musicInfo 形状', async () => {
+    globalThis.fetch = async (u) => {
+      assert.ok(String(u).startsWith('/music/proxy?url='), '走服务器代理');
+      assert.ok(decodeURIComponent(String(u)).includes('music.163.com/api/search/get'), '目标=网易云搜索');
+      return { ok: true, status: 200, text: async () => JSON.stringify({ result: { songs: [
+        { id: 35093341, name: '光年之外', duration: 235505, artists: [{ name: 'G.E.M.邓紫棋' }], album: { id: 34061477, name: '光年之外' } },
+      ] } }) };
+    };
+    const list = await lxSearch('wy', '光年之外');
+    assert.equal(list.length, 1);
+    assert.equal(list[0].songmid, '35093341');
+    assert.equal(list[0].songName, '光年之外');
+    assert.equal(list[0].singerName, 'G.E.M.邓紫棋');
+    assert.equal(list[0].interval, 236);
+    assert.equal(list[0].source, 'wy');
+  });
+
+  test('kg：解析 data.lists → FileHash 作 songmid', async () => {
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ data: { lists: [
+      { SongName: '光年之外', SingerName: 'G.E.M.邓紫棋', FileHash: 'AA47B0', AlbumName: 'X', AlbumID: 1952211, Duration: 235 },
+    ] } }) });
+    const list = await lxSearch('kg', '光年之外');
+    assert.equal(list[0].songmid, 'AA47B0');
+    assert.equal(list[0].singerName, 'G.E.M.邓紫棋');
+    assert.equal(list[0].albumMid, '1952211');
+  });
+
+  test('空关键词不发请求；未知源抛错；HTTP 错误上抛', async () => {
+    globalThis.fetch = () => { throw new Error('should not be called'); };
+    assert.deepEqual(await lxSearch('wy', '   '), []);
+    await assert.rejects(() => lxSearch('bogus', 'x'));
+    globalThis.fetch = async () => ({ ok: false, status: 502, text: async () => '' });
+    await assert.rejects(() => lxSearch('wy', 'x'), /502/);
   });
 });

@@ -78,6 +78,51 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     assert.ok(await c.page.$('.pcode'), '外部音源脚本输入框在');
     assert.ok(await c.page.$('.prow .purl'), 'URL 导入输入框在');
     assert.ok(await c.page.$eval('.prow .purl', (el) => el.type === 'url'), 'URL 框是 type=url');
+    // —— 搜索点歌全流程：加载最小音源 → 搜索（拦截 /music/proxy 给出确定性结果）→ 点行取链播放 ——
+    await c.page.setRequestInterception(true);
+    c.page.on('request', (req) => {
+      const u = req.url();
+      if (u.includes('/music/proxy')) {
+        const wy = { result: { songs: [{ id: 123, name: '测试歌', duration: 200000, artists: [{ name: '某人' }], album: { id: 9, name: '某专' } }] } };
+        req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(wy) });
+        return;
+      }
+      req.continue();
+    });
+    const SCRIPT = [
+      "const { EVENT_NAMES, on, send } = globalThis.lx;",
+      "on(EVENT_NAMES.request, ({ action, info }) => {",
+      "  if (action !== 'musicUrl') return Promise.reject(new Error('bad action'));",
+      "  return Promise.resolve('https://example.com/e2e/' + info.musicInfo.songmid + '.mp3');",
+      "});",
+      "send(EVENT_NAMES.inited, { sources: { kw: { name: 'E2E源' } } });",
+    ].join('\n');
+    await c.page.evaluate(async (code) => {
+      const ta = document.querySelector('.pcode');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, code);
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }, SCRIPT);
+    await c.page.evaluate(() => { [...document.querySelectorAll('.prow .btn')].find((b) => b.textContent.includes('加载音源')).click(); });
+    await c.page.waitForSelector('.plist, .prow .psearch', { timeout: 8000 });
+    assert.ok(await c.page.$('.prow .psearch input'), '搜索框在（音源加载后）');
+    await c.page.type('.prow .psearch input', '测试歌');
+    await c.page.evaluate(() => { [...document.querySelectorAll('.prow .btn')].find((b) => b.textContent.trim() === '搜索').click(); });
+    await c.page.waitForSelector('.plist .ptrack--lx', { timeout: 8000 });
+    const rowText = await c.page.$eval('.plist .ptrack--lx .ptrack__name', (e) => e.textContent);
+    assert.equal(rowText, '测试歌', '搜索结果行渲染');
+    // 捕获 onPlayUrl（playTrack 桩）后点行
+    await c.page.evaluate(() => {
+      const { audio } = globalThis.__SP__;
+      window.__ext = [];
+      audio.playTrack = (t, l) => { window.__ext.push({ url: t && t.url, label: l }); };
+    });
+    await c.page.click('.plist .ptrack--lx');
+    await c.page.waitForFunction(() => window.__ext.length > 0, { timeout: 8000 });
+    const ext = await c.page.evaluate(() => window.__ext[0]);
+    assert.equal(ext.url, 'https://example.com/e2e/123.mp3', '点行 → 脚本 musicUrl 取链（songmid 来自搜索结果）');
+    assert.ok(String(ext.label).includes('测试歌'), 'label=' + ext.label);
+    await c.page.setRequestInterception(false);
   } finally {
     await c.close().catch(() => {});
     await srv.stop().catch(() => {});
