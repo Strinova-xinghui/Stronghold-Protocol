@@ -26,9 +26,10 @@ const sirenMeta = {}; // cid → { url, lyricUrl }（服务端 1h 缓存，二�
 const qCur = () => { const { items, index } = qGet(); return items[index] || null; };
 
 // ---- 收藏（localStorage；条目 = 元数据 + kind，重播时按 kind 现取链接）--------------------------------
-const favStore = createStore({ list: [] });
 const FAV_KEY = 'sp_player_favs';
 function favLoad() { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]').filter((x) => x && (x.kind === 'siren' || x.kind === 'builtin')).slice(0, 200); } catch { return []; } }
+// 初值必须来自 favLoad()：否则刷新后 store 空，下一次 favToggle 会用空列表覆盖 localStorage（收藏全丢）
+const favStore = createStore({ list: favLoad() });
 function favSave(list) { favStore.set({ list }); try { localStorage.setItem(FAV_KEY, JSON.stringify(list.slice(0, 200))); } catch { /* full */ } }
 function favToggle(f) {
   const list = favStore.get().list;
