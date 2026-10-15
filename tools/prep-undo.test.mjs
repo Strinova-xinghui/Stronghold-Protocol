@@ -376,3 +376,51 @@ describe('休整期撤回 · 效果计数器（绮良漏洞，用户 2026-10-15 
     assert.equal(a.hand.filter(Boolean).length, hand0, '一次干员都不该白给');
   });
 });
+
+describe('休整期撤回 · 效果可写持久字段（教鞭/机变/装置覆写，同一泄漏类）', () => {
+  test('教鞭（chess_item_6_03_m）：用→选卡→撤回 g.art，bounty/personalChoice/round.arts 全回滚', () => {
+    const { m, a } = setup(880);
+    const ART = 'chess_item_6_03_m';
+    assert.ok(m.gd.item(ART), '教鞭在数据里');
+    a.funds = 99;
+    const p = a.acquireItem(ART, { source: 'test' });
+    assert.ok(p, '教鞭进手牌');
+    const b0 = a.bounties.length;
+    const arts0 = a.round.arts;
+    const r = m.handle(a.playerId, { t: 'g.art', itemUid: p.uid, row: 10, col: 5 });
+    assert.ok(r.ok, '教鞭使用成功: ' + (r.detail || r.error || ''));
+    assert.ok(a.personalChoice, '开出三选一');
+    const pc = a.personalChoice;
+    const pick = m.handle(a.playerId, { t: 'g.choice', idx: 0, choiceId: pc.id });
+    assert.ok(pick.ok, '选卡成功: ' + (pick.detail || pick.error || ''));
+    assert.equal(a.bounties.length, b0 + 1, 'bounty +1');
+    assert.equal(a.round.arts, arts0 + 1, 'arts 计数 +1');
+    assert.ok(!a.hand.some((x) => x && x.uid === p.uid), '教鞭已消耗');
+    const u = m.handle(a.playerId, { t: 'g.undo' });
+    assert.ok(u.ok, '撤回 g.art 成功');
+    assert.equal(a.bounties.length, b0, '漏洞版：bounty 留着 = 教鞭回手再选一次，白刷行动合约');
+    assert.equal(a.personalChoice, null, 'personalChoice 清空');
+    assert.equal(a.round.arts, arts0, 'arts 计数回滚');
+    assert.ok(a.hand.some((x) => x && x.uid === p.uid), '教鞭回手');
+  });
+
+  test('通用：效果意图期间写入的 effects/counters/覆写随撤回回滚', () => {
+    const { m, a } = setup(881);
+    a.counters['t:probe'] = 3;
+    a.deviceOverrides = { turret: true };
+    a.deployCapMin = 5;
+    const eff0 = a.effects.length;
+    // 快照在 g.refresh 执行前拍（此刻 effects=eff0、overrides=turret、capMin=5）
+    assert.ok(m.handle(a.playerId, { t: 'g.refresh' }).ok);
+    // 模拟「意图执行期间的效果写入」（ctx.addEffect / setDeviceActive / setDeployCapAtLeast 的实际效果）
+    a.effects.push({ id: 'probe:1', key: 'effect:none', name: '探针', desc: '', iconKind: 'choice', battle: false, params: {}, data: {} });
+    a.counters['t:probe'] = 9;
+    a.deviceOverrides = { turret: false, shield: true };
+    a.deployCapMin = 8;
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    assert.equal(a.effects.length, eff0, '探针效果被撤回（快照值 eff0）');
+    assert.equal(a.counters['t:probe'], 3, 'counters 回到快照值');
+    assert.deepEqual(a.deviceOverrides, { turret: true }, '装置覆写回到快照值');
+    assert.equal(a.deployCapMin, 5, 'deployCapMin 回到快照值');
+  });
+});

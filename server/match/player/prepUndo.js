@@ -70,6 +70,20 @@ function snapshotPlayer(ps) {
     // 商业包装方案 pack:<uid>（卖出计数）。不随快照回滚 = 「买 → 撤回 → 再买」无限累计计数器白刷奖励
     // （撤回返还资金，acc 却留着）——与 rng 回滚同类的 SL 漏洞。纯 { string: number }，克隆安全。
     counters: clone(ps.counters),
+    // ---- 同类泄漏面（同一处审计，2026-10-15）：效果可写的持久字段，recompute() 不重建它们 ----
+    // ctx.addEffect/removeEffect（机变卡引用、玩偶 onEquip、金色/精锐引用）、ctx.addBounty（教鞭 g.art 的
+    // 选择、机变卡）、Match.offerBountyChoice 的 ps.personalChoice（g.art 开出的三选一）、
+    // ctx.setDeployCapAtLeast（deployCapBonus/Min）、ctx.setDeviceActive/setTileOverride、ctx.setBondCountBonus。
+    // 不快照 = 「用教鞭 → g.choice 选卡（不入撤回栈）→ 撤回 g.art」：教鞭回手而 bounty 留着 = 白刷行动合约。
+    // 全是纯数据（EffectRef / bounty record / 覆写表），structuredClone 安全。
+    effects: clone(ps.effects),
+    bounties: clone(ps.bounties),
+    personalChoice: clone(ps.personalChoice),
+    deployCapBonus: ps.deployCapBonus,
+    deployCapMin: ps.deployCapMin,
+    deviceOverrides: clone(ps.deviceOverrides),
+    tileOverrides: clone(ps.tileOverrides),
+    bondCountBonus: clone(ps.bondCountBonus),
     // ---- 池占用：自己每 base 的持有份数（恢复对账用，见上）----
     mineHeld,
     diyLeft,
@@ -108,6 +122,15 @@ function restorePlayer(ps, snap) {
   ps.round = snap.round;
   ps.stats = snap.stats;
   ps.counters = snap.counters; // 策略计数器随快照回滚（绮良 acc 等，见 snapshotPlayer 注释）
+  // 效果可写的持久字段一并回滚（见 snapshotPlayer 的同类泄漏面注释）。
+  ps.effects = snap.effects;
+  ps.bounties = snap.bounties;
+  ps.personalChoice = snap.personalChoice;
+  ps.deployCapBonus = snap.deployCapBonus;
+  ps.deployCapMin = snap.deployCapMin;
+  ps.deviceOverrides = snap.deviceOverrides;
+  ps.tileOverrides = snap.tileOverrides;
+  ps.bondCountBonus = snap.bondCountBonus;
   ps.prepsEnded = snap.prepsEnded;
   // 共享池对账：left = cap − 全场所有玩家的持有（A 恢复后的持有 = 恢复到字段里的手牌/棋盘 piece.poolCopies）。
   // 其他人同期的买卖不动——他们还持有的份数被自然减去；A 自己的持有随快照回滚。
