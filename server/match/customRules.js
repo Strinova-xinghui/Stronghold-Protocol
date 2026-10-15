@@ -33,12 +33,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -204,7 +204,19 @@ function normalize(raw) {
   const gr = raw.grant && typeof raw.grant === 'object' ? raw.grant : null;
   if (gr && gr.enabled) out.grant = Object.freeze({ enabled: true });
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant ? out : OFF;
+  // ---- 休整期撤回（prepUndo，自研 2026-10-15）：休整期内玩家自己的一切操作（刷新/买卖/装备/销毁/移动/升级商店…）
+  //      均可撤回，含资源返还（资金、卡池占用、DIY 库存）。快照式实现：每个可撤回意图执行前深快照，
+  //      g.undo 弹栈恢复。enabled=false 时 g.undo 一律拒绝——原版没有任何撤回，全关 = 原汁原味。
+  const pu = raw.prepUndo && typeof raw.prepUndo === 'object' ? raw.prepUndo : null;
+  if (pu && pu.enabled) {
+    out.prepUndo = Object.freeze({
+      enabled: true,
+      // 撤回栈上限（每回合每玩家）：防止极端情况无限连按囤快照（快照含整块玩家状态，1 条 ≈ 几 KB）
+      maxDepth: Math.max(1, Math.min(64, Math.trunc(numOr(pu.maxDepth, 32)))),
+    });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant || out.prepUndo ? out : OFF;
 }
 
 /**

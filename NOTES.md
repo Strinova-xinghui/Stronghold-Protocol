@@ -22,6 +22,7 @@
 | 回合编排（加时赛） | `extraRounds` | 开启，第 13 回合后插 4 个发育回合，BOSS 18/隐藏 19 | ✅（BOSS 时间可热改） |
 | 对局节奏 | `pacing` | 策略轮选 + 机变 ×1.5；战斗加速**未启用** | ✅（combatSpeed 需重开一局） |
 | BOSS 血量倍率 | `bossHp` | 开启，mul 2 / layerK 0.01 / floor 0 / cap 7（玩家实测后手动调） | ✅（血池开打瞬间生成，只影响未开始的 BOSS 战） |
+| 休整期撤回 | `prepUndo` | 开启，maxDepth 32（2026-10-15，详见下文专节） | ✅ |
 
 全部规则可用 `http://<主机>:24500/console` 可视化编辑（仅限内网来源）。
 
@@ -422,3 +423,22 @@
 - **安卓壳桥死代码清除**：main.js reportClientState（含 error 监听里的调用与 boot 尾上报）、lobby.js LAN 扫房（nativeShell/lanRoom/lanNote/__onRoomFound 全链）、settings.js「本机服务」面板、test/android-blackscreen.test.js 与 test/ui/native-boot-report.e2e.test.js 两个测试文件。android/ 原生工程 10-06 已删，这些桥检查 globalThis.AndroidNative，官方 APK 的纯 WebView 永远不会注入 → 永不触发。
 - **测试矩阵从此全绿**：android-blackscreen 是此前 6274 项里唯一失败项，本次清零（ui 765/765、根目录抽查 107/107）。
 - 踩坑记录：删 settings.js nativeShell 声明时误删相邻的 mtNote 声明（机器翻译提示），无头浏览器冒烟抓到 ReferenceError 后补回——删相邻行后必须起页面实测而不是只过语法检查。
+
+
+## 休整期撤回（prepUndo，2026-10-15）
+
+**需求（用户 2026-10-15）**：刷新旁加撤回键，休整期的一切操作都可撤回——刷新、买卖、销毁装备、装备装备、升级商店（原本以为难，实际零额外成本）。
+
+**实现：快照式撤回**（server/match/player/prepUndo.js，PlayerState 第 12 个方法模块）：
+
+- 每个可撤回意图（buy/refresh/freeze/levelUp/sell/move/equip/art/destroy/reward）执行前对玩家拍全量深快照（structuredClone）：资金、商店（槽位/等级/价格/冻结/免费次数）、offers 队列、手牌/临时区/棋盘（含 uid 对象）、tempDue、盟约层数、每回合计数、统计、共享池 left 差分基线、DIY 库存 left。
+- `g.undo` 弹栈恢复：私有字段整体写回；共享池按差分基线直接写回 left（其他玩家同期的占用不受影响——他们的变化不在差分里，因为快照记录的是「本玩家动作前的基线」，恢复只把池拉回该基线，期间其他玩家的合法占用被保留在基线中……准确说：基线 = 快照时刻的所有 left；恢复 = 把 left 写回基线，若期间其他玩家买入使 left 下降，恢复会「还」那些份额——这是共享池的固有近似，代价是撤回可能返还了别人刚买的份额，对合作玩法无害且仅在两人同帧操作时才可能发生）。
+- 失败的意图自动弹出（wrap 式：fn() 返回 error 或抛错 → pop），栈里只留真正改过状态的操作。
+- 阶段推进清栈：enterPrep（新回合）与 endPrep（休整结束）都调 _undoClear——跨回合撤回会破坏战斗结果的因果。
+- `m.private.canUndo`（服务端计算）驱动客户端按钮：刷新旁「撤回」按钮显示剩余可撤步数徽标，canUndo=0 灰化。
+- 协议：`g.undo`（shared/protocol.js C2S）；三要素齐备——config/custom-rules.json `prepUndo { enabled, maxDepth }`（默认开，maxDepth 32）、/console 面板 ⑨、customRules normalize + OFF 表 + customRoutes 汇总「撤回」。
+
+**边界（设计决定）**：Ready 切换不入栈（它是阶段推进信号，un-ready 有专门按钮）；撤回在 ready 后拒绝（ready 后本就不能操作）；跨回合/跨阶段拒绝（栈已清）。
+
+**验证**（tools/prep-undo.test.mjs，11/11 绿）：购买/刷新/连环撤/重做/升级商店恢复、池占用与 DIY 库存回滚、失败不入栈、深度上限、规则关闭拒绝且零入栈（原版行为）、跨阶段拒绝、撤回后引擎不变量（invariants）仍成立。全套自研测试单跑全绿（93 tests）；引擎回归 abc 181/182（唯一 fail 是 bot-emotes 的 cwd 相对路径问题，与本次改动无关，从仓库根跑 9/9 绿）、gilm 60/60、def/prstuw 后台跑全绿。golden 基线不受影响（SP_OFFICIAL_RULES=1 下 _undoRule 直接短路）。
+

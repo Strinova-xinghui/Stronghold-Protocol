@@ -14,6 +14,8 @@ export class MatchPrep {
     const alive = this.alivePlayers();
     for (const ps of alive) {
       ps.ready = false;
+      // 自研 prepUndo：新休整期开始，上一回合的撤回栈作废（跨回合撤回会破坏战斗结果因果）
+      if (typeof ps._undoClear === 'function') ps._undoClear();
       // Items gained as the previous prep ended waited unmerged (acquireItem deferMerge). Merge them now, before
       // this prep's onPrepStart grants and before the player acts — not in endPrep, which runs in the same prep
       // that granted them and would take an equipped copy off for the fight about to start.
@@ -136,6 +138,8 @@ export class MatchPrep {
     this.setDeadline(0);
     const alive = this.alivePlayers();
     for (const ps of alive) this.dispatch(ps, 'onPrepEnd', { round: this.round });
+    // 自研 prepUndo：休整期结束，撤回栈作废（进入战斗后再恢复状态 = 破坏战斗输入）
+    for (const ps of alive) if (typeof ps._undoClear === 'function') ps._undoClear();
     for (const ps of alive) ps.endPrep();
     const r = this.round;
     if (r === this.gd.bossRound) {

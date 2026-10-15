@@ -24,21 +24,24 @@ export class MatchIntents {
       case 'g.bandSkip': return this.skipBand(ps);
       // the strategy highlighted in the draft screen (what a timed-out turn takes, timeoutBand)
       case 'g.bandFocus': return this.bandFocus(ps, msg.bandId ?? null);
-      case 'g.buy': return ps.buy(msg.slot);
-      case 'g.refresh': return ps.refresh();
-      case 'g.freeze': return ps.freeze();
-      case 'g.levelUp': return ps.levelUp();
-      case 'g.sell': return ps.sell(msg.uid);
+      // 自研 prepUndo：可撤回意图包一层快照（规则关/非 PREP 时零开销直通；失败自动弹出不留栈）
+      case 'g.buy': return ps._undoWrap('buy', msg, () => ps.buy(msg.slot));
+      case 'g.refresh': return ps._undoWrap('refresh', msg, () => ps.refresh());
+      case 'g.freeze': return ps._undoWrap('freeze', msg, () => ps.freeze());
+      case 'g.levelUp': return ps._undoWrap('levelUp', msg, () => ps.levelUp());
+      case 'g.sell': return ps._undoWrap('sell', msg, () => ps.sell(msg.uid));
       // dir: the deploy wheel's facing (DESIGN §3; absent ⇒ PlayerState reads to.dir, then RIGHT)
-      case 'g.move': return ps.move(msg.uid, msg.to, msg.dir);
-      case 'g.equip': return ps.equip(msg.itemUid, msg.targetUid, msg.replaceUid ?? null);
-      case 'g.art': return ps.useArt(msg.itemUid, msg.row, msg.col, msg.dir);
-      case 'g.destroy': return ps.destroy(msg.uid);
-      case 'g.reward': return ps.pickReward(msg.idx);
+      case 'g.move': return ps._undoWrap('move', msg, () => ps.move(msg.uid, msg.to, msg.dir));
+      case 'g.equip': return ps._undoWrap('equip', msg, () => ps.equip(msg.itemUid, msg.targetUid, msg.replaceUid ?? null));
+      case 'g.art': return ps._undoWrap('art', msg, () => ps.useArt(msg.itemUid, msg.row, msg.col, msg.dir));
+      case 'g.destroy': return ps._undoWrap('destroy', msg, () => ps.destroy(msg.uid));
+      case 'g.reward': return ps._undoWrap('reward', msg, () => ps.pickReward(msg.idx));
       case 'g.choice': return msg.choiceId !== undefined
         ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)
         : this.pickCard(ps, msg.idx);
       case 'g.ready': return ps.setReady(!!msg.ready);
+      // 休整期撤回（自研 prepUndo）：弹栈恢复上一次可撤回操作
+      case 'g.undo': return ps.undo();
       case 'g.prepWait': return this.prepWait(ps, !!msg.on); // 休整期等待投票（自研）
       case 'g.emote': return this.emote(ps, msg.id);
       // playerId: the player tapped (a shared field names two) — the watch preference (item 56)

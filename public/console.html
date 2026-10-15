@@ -206,6 +206,16 @@
       <p class="hint">层数折算：<code>layerMul = min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))</code>，layerSum = 全场活人的盟约层数总和（主 BOSS 开打时取值，隐秘核心沿用）。默认 <code>layerK=0.0005</code> ⇒ 每 200 层 +10% 血量；<code>layerFloor</code> 可把官方水位以内的层数免计；<code>layerCap=5</code> 封顶防爆炸。</p>
     </div>
   </section>
+  <!-- ⑨ 休整期撤回（自研 2026-10-15） -->
+  <section class="panel" data-panel="prepUndo">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="prepUndo"> 休整期撤回（prepUndo）</label></h2>
+      <p class="desc">休整期内玩家自己的一切操作（刷新/买卖/装备/销毁/移动/升级商店）都可撤回，含资源返还（资金、卡池占用、DIY 库存）。游戏内商店栏「刷新」旁出现「撤回」按钮，显示可撤步数，可连续撤到本回合开始。<b>关掉 = 原版没有任何撤回。</b></p>
+      <div class="row">
+        <label class="f">撤回栈上限 maxDepth<input type="number" data-f="prepUndo.maxDepth" min="1" max="64"></label>
+      </div>
+    </div>
+  </section>
   <!-- ⑧ 发放棋子/装备（自研 2026-10-09：实时为指定玩家添加，无需重启） -->
   <section class="panel" data-panel="__grant">
     <div class="card">
@@ -345,6 +355,7 @@ function setStat(d) {
 
   if (d.rules?.bossHp) on.push('BOSS 血量');
   if (d.rules?.grant) on.push('GM 发放');
+  if (d.rules?.prepUndo) on.push('撤回');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -367,10 +378,11 @@ function ensureShape() {
   cfg.pacing = cfg.pacing || { enabled: true, bandDraftMul: 1, spDraftMul: 1, prepMul: 1, combatSpeed: null };
   cfg.bossHp = cfg.bossHp || { enabled: true, mul: 1, layerK: 0.0005, layerFloor: 0, layerCap: 5 };
   cfg.grant = cfg.grant || { enabled: true };
+  cfg.prepUndo = cfg.prepUndo || { enabled: true, maxDepth: 32 };
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['prepUndo','休整期撤回'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';

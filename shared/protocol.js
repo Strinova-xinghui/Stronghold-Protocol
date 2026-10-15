@@ -463,6 +463,9 @@ export const C2S = {
   'g.equip': { itemUid: isUid, targetUid: isUid, replaceUid: nullable(isUid), $optional: ['replaceUid'] },
   'g.art': { itemUid: isUid, row: (v) => isInt(v, 0, GEO.ROWS - 1), col: (v) => isInt(v, 0, GEO.COLS - 1), dir: isDir, $optional: ['dir'] },
   'g.destroy': { uid: isUid },
+  // 休整期撤回（自研，2026-10-15）：撤回本玩家本休整期的上一次可撤回操作（刷新/买卖/装备/销毁/移动/升级…）。
+  // 服务端快照式实现（server/match/player/prepUndo.js）；规则关闭（config/custom-rules.json prepUndo.enabled=false）时拒绝。
+  'g.undo': {},
   'g.reward': { idx: (v) => isInt(v, 0, 5) },
   'g.choice': { idx: (v) => isInt(v, 0, 5), choiceId: isId, $optional: ['choiceId'] },
   'g.ready': { ready: isBool },

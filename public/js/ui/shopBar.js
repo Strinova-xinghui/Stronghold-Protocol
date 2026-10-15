@@ -294,7 +294,7 @@ export function RewardCards({ offer, priv, editable, onPick, onDetail, onLater, 
  *   reward?: any, onReward?: (idx:number)=>void, onRewardLater?: Function, offBonds?: Set<string>|null }} props — offBonds:
  *   the bonds this mode never activates (gameLogic modeOffBonds), struck through on the operator cards
  */
-export function ShopBar({ priv, editable, collapsed, refreshBusy = false, onCollapse, onBuy, onLevel, onRefresh, onFreeze, onDetail, onDetailClose, onRefuse, barRef,
+export function ShopBar({ priv, editable, collapsed, refreshBusy = false, onCollapse, onBuy, onLevel, onRefresh, onFreeze, onUndo, onDetail, onDetailClose, onRefuse, barRef,
   reward = null, onReward, onRewardLater, onArm = null, offBonds = null }) {
   const shop = priv?.shop || {};
   const slots = Array.isArray(shop.slots) ? shop.slots : [];
@@ -302,6 +302,8 @@ export function ShopBar({ priv, editable, collapsed, refreshBusy = false, onColl
   const itemSlots = slots.map((s, i) => ({ s, i })).filter(({ s }) => s && s.kind === 'item');
   const frozen = !!shop.frozen;
   const funds = Number(priv?.funds) || 0;
+  // 自研 prepUndo：本休整期可撤回的操作数
+  const canUndo = editable ? Math.max(0, Number(priv?.canUndo) || 0) : 0;
   const remaining = Math.max(0, (priv?.deployCap ?? 8) - (priv?.deployCount ?? 0));
   const lvReason = shopBlockReason('levelUp', { priv, editable });
   const refReason = shopBlockReason('refresh', { priv, editable });
@@ -361,6 +363,12 @@ export function ShopBar({ priv, editable, collapsed, refreshBusy = false, onColl
         <span>${t('刷新')}</span>
         ${free > 0 ? html`<span class="toolbtn__free">${t('免费 ×{free}', { free })}</span>` : html`<${HexBadge} value=${shop.refreshPrice ?? 1} tone=${refReason || refreshBusy ? 'dark' : 'gold'} size="sm" />`}
         <kbd>${hk.refresh}</kbd>
+      </button>
+      <button type="button" class="toolbtn toolbtn--undo" disabled=${!canUndo} onClick=${onUndo}
+        title=${canUndo ? t('撤回上一步（可连续撤 {n} 步）', { n: canUndo }) : t('没有可撤回的操作')}>
+        <${Icon} name="undo" />
+        <span>${t('撤回')}</span>
+        ${canUndo > 0 ? html`<span class="toolbtn__free toolbtn__free--undo">${canUndo}</span>` : null}
       </button>
     </div>
     <div class="shopbar__row">

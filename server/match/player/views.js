@@ -92,6 +92,10 @@ export class PlayerViews {
       hand: this.hand.map((p) => (p ? this.pieceView(p) : null)),
       temp: this.temp.map((p) => (p ? this.pieceView(p) : null)),
       board,
+      // 自研 prepUndo：当前可撤回的操作数（0 = 按钮灰）；规则关闭时恒 0
+      canUndo: (() => {
+        try { return (this._undoRule && this.m.phase === PHASE.PREP && !this.ready) ? this._undoStack.length : 0; } catch { return 0; }
+      })(),
       // The stage's 外勤医疗 reserve medic is present during prep, but is not a draggable board piece.
       prepMapChars: this.m.prepMapChars(this),
       deployCap: this.deployCap,

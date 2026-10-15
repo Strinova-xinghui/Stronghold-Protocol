@@ -36,6 +36,10 @@
 .toolbtn__img { width: .34rem; height: .34rem; object-fit: contain; }
 .toolbtn .icon { width: .24rem; height: .24rem; }
 .toolbtn--amber { --tb: var(--amber); }
+/* 自研 prepUndo：撤回按钮（刷新旁，左弯箭头 + 剩余可撤步数徽标） */
+.toolbtn--undo { --tb: var(--mint-400); }
+.toolbtn--undo:disabled { --tb: var(--line-3); }
+.toolbtn__free--undo { background: var(--mint-500); color: var(--text-on-mint); }
 .toolbtn--ice.is-on { background: var(--ice); color: #0b1822; }
 .toolbtn--ice.is-on kbd { color: #28435a; border-color: #5d88aa; }
 .toolbtn--ice.is-on:hover:not(:disabled) { background: #c2e5ff; color: #0b1822; box-shadow: 0 0 .22rem rgba(159, 212, 255, .6); }
