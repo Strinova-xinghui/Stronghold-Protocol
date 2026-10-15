@@ -1250,5 +1250,9 @@
   "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source）。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "lx-music カスタムソーススクリプトを貼り付けてください（仕様：lxmusic.toside.cn/desktop/custom-source）。スクリプトはブラウザ内でローカル実行され、リクエストは第三者へ直接送信され、ゲームサーバーを通りません。",
   "/**\n * @name 我的音源\n * @version 1.0.0\n */\nconst { EVENT_NAMES, request, on, send } = globalThis.lx\n…": "/**\n * @name マイソース\n * @version 1.0.0\n */\nconst { EVENT_NAMES, request, on, send } = globalThis.lx\n…",
   "游戏内置配乐（随客户端已下载，零额外流量）。播放中不受阶段切换影响，点「回到自动 BGM」恢复。": "ゲーム内蔵 BGM（クライアントと同時にダウンロード済み、追加トラフィックなし）。フェーズ切り替えでも再生が続きます。「自動 BGM に戻す」で自動に戻ります。",
-  "塞壬唱片官方 OST（monster-siren.hypergryph.com）。曲目元数据经服务器缓存，音频由浏览器直连官方 CDN。": "セレーンレコード公式 OST（monster-siren.hypergryph.com）。曲メタデータはサーバーがキャッシュし、音声は公式 CDN へブラウザが直接接続します。"
+  "塞壬唱片官方 OST（monster-siren.hypergryph.com）。曲目元数据经服务器缓存，音频由浏览器直连官方 CDN。": "セレーンレコード公式 OST（monster-siren.hypergryph.com）。曲メタデータはサーバーがキャッシュし、音声は公式 CDN へブラウザが直接接続します。",
+  "拉取失败：": "取得失敗：",
+  "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "lx-music カスタムソーススクリプトを貼り付けるか、URL から読み込んでください（仕様：lxmusic.toside.cn/desktop/custom-source）。スクリプトはブラウザ内でローカル実行され、リクエストは第三者へ直接送信され、ゲームサーバーを通りません。",
+  "脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）": "スクリプト直リンク URL（raw / jsDelivr 等、CORS またはプレーンテキスト必須）",
+  "URL 导入": "URL から読み込み"
 }

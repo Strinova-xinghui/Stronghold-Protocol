@@ -76,6 +76,8 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     await c.page.$$eval('.ptab-btn', (els) => els[2].click());
     await c.page.waitForSelector('.pcode', { timeout: 5000 });
     assert.ok(await c.page.$('.pcode'), '外部音源脚本输入框在');
+    assert.ok(await c.page.$('.prow .purl'), 'URL 导入输入框在');
+    assert.ok(await c.page.$eval('.prow .purl', (el) => el.type === 'url'), 'URL 框是 type=url');
   } finally {
     await c.close().catch(() => {});
     await srv.stop().catch(() => {});

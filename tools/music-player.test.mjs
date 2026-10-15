@@ -1,9 +1,9 @@
 // 音乐播放器客户端逻辑单测：builtinTracks（曲目推导）+ lx 脚本沙箱（loadLxScript/parseLxHeader/lxMusicUrl）。
 // 浏览器模块在 Node 下直接 import（无 DOM 依赖的部分）。
 // 用法: node --test tools/music-player.test.mjs
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader } from '../public/js/ui/player-core.js';
+import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader, fetchLxScript } from '../public/js/ui/player-core.js';
 
 describe('内置 BGM 曲目推导', () => {
   test('从 assets 清单推导 16 首（intro+loop 去重，loop 为准）', () => {
@@ -77,5 +77,59 @@ describe('lx-music 自定义源脚本兼容层', () => {
 
   test('空源请求报错', async () => {
     await assert.rejects(() => lxMusicUrl(null, 'kw', {}, null));
+  });
+});
+describe('fetchLxScript（URL 导入）', () => {
+  const orig = globalThis.fetch;
+  const SCRIPT = '/** @name X */ send';
+  after(() => { globalThis.fetch = orig; });
+
+  test('非 http(s) 直接拒绝（不打网络）', async () => {
+    globalThis.fetch = () => { throw new Error('should not be called'); };
+    const r = await fetchLxScript('ftp://x/y.js');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /http\(s\)/);
+    const r2 = await fetchLxScript('javascript:alert(1)');
+    assert.equal(r2.ok, false);
+  });
+
+  test('直连成功：返回脚本文本', async () => {
+    globalThis.fetch = async (u) => { assert.ok(String(u).includes('good.js')); return { ok: true, status: 200, text: async () => SCRIPT }; };
+    const r = await fetchLxScript('https://cdn.example.com/good.js');
+    assert.equal(r.ok, true);
+    assert.equal(r.code, SCRIPT);
+  });
+
+  test('直连失败（CORS）→ 走 /music/proxy 兜底', async () => {
+    const seen = [];
+    globalThis.fetch = async (u) => {
+      seen.push(String(u));
+      if (String(u).startsWith('https://')) throw new TypeError('Failed to fetch'); // 浏览器 CORS 失败的形态
+      return { ok: true, status: 200, text: async () => SCRIPT };
+    };
+    const r = await fetchLxScript('https://blocked.example.com/src.js');
+    assert.equal(r.ok, true, 'proxy 兜底成功');
+    assert.ok(seen[1].startsWith('/music/proxy?url='), '第二发是同源 proxy：' + seen[1]);
+    assert.ok(seen[1].includes(encodeURIComponent('https://blocked.example.com/src.js')));
+  });
+
+  test('HTML 页面（误贴仓库网页）拒收，不进沙箱', async () => {
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => '<!DOCTYPE html><html><body>repo</body></html>' });
+    const r = await fetchLxScript('https://github.com/some/repo/blob/main/src.js');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /HTML/);
+  });
+
+  test('HTTP 错误 + proxy 也失败 → 报错', async () => {
+    globalThis.fetch = async () => { throw new TypeError('net fail'); };
+    const r = await fetchLxScript('https://x.example.com/a.js');
+    assert.equal(r.ok, false);
+  });
+
+  test('超大响应拒绝（>512KB）', async () => {
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => 'a'.repeat(513 * 1024) });
+    const r = await fetchLxScript('https://x.example.com/big.js');
+    assert.equal(r.ok, false);
+    assert.match(r.error, /too large/);
   });
 });

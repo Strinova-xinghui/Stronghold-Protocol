@@ -16,7 +16,9 @@
    on bench slots 5–9. */
 .gm__hud > .shopbar { pointer-events: none; }
 .shopbar__row, .shopbar__tools > button { pointer-events: auto; }
-.shopbar__tools { display: grid; grid-template-columns: auto auto; justify-content: end; align-items: center; gap: .06rem .12rem; }
+/* 冻结 / 刷新 / 撤回 三个按钮并排一行（撤回自研加入后由 2 列改 3 列；剩余可放置角色仍跨整行在上）。
+   rem 体系随视口缩放，三键宽度按同比例缩小；右对齐下多余宽度向左溢出到商店行上方的空域，不会盖棋盘。 */
+.shopbar__tools { display: grid; grid-template-columns: repeat(3, auto); justify-content: end; align-items: center; gap: .06rem .12rem; }
 .shopbar__remain {
   grid-column: 1 / -1; justify-self: end; pointer-events: none;
   font-size: .16rem; color: var(--text-md); padding: .04rem .14rem; background: rgba(8, 11, 10, .78);

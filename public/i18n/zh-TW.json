@@ -1249,5 +1249,9 @@
   "服务器搜索到 {n} 张相关专辑：": "伺服器搜尋到 {n} 張相關專輯：",
   "撤回上一步（可连续撤 {n} 步）": "撤回上一步（可連續撤 {n} 步）",
   "没有可撤回的操作": "沒有可撤回的操作",
-  "撤回": "撤回"
+  "撤回": "撤回",
+  "拉取失败：": "拉取失敗：",
+  "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "貼上 lx-music 自訂來源腳本（規範：lxmusic.toside.cn/desktop/custom-source），或透過 URL 匯入。腳本在瀏覽器本地執行，請求直連第三方，不經過遊戲伺服器。",
+  "脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）": "腳本直連 URL（raw / jsDelivr 等，需 CORS 或純文字）",
+  "URL 导入": "URL 匯入"
 }

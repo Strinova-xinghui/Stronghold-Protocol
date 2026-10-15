@@ -203,6 +203,34 @@ export async function loadLxScript(code, { timeoutMs = 15000 } = {}) {
   return { ok: true, sources: res.sources, listeners };
 }
 
+/**
+ * 通过 URL 导入 lx 脚本（lx-music-desktop 的「订阅」同款交互）：先浏览器直连
+ * （jsDelivr / GitHub raw 这类发 CORS=* 的直链能拿到），失败走同源 /music/proxy 兜底
+ * （服务器只转发 JSON/文本 ≤512KB，音频一律拒——服务器成本仍是零）。
+ * @returns {Promise<{ ok: boolean, code?: string, error?: string }>}
+ */
+export async function fetchLxScript(url, signal) {
+  const u = String(url || '').trim();
+  if (!/^https?:\/\//i.test(u)) return { ok: false, error: 'http(s) URL required' };
+  const grab = async (target) => {
+    const r = await fetch(target, { signal, redirect: 'follow' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.text();
+  };
+  let code = null;
+  try {
+    code = await grab(u);
+  } catch (e) {
+    try { code = await grab('/music/proxy?url=' + encodeURIComponent(u)); }
+    catch (e2) { return { ok: false, error: String((e2 && e2.message) || (e && e.message) || e2) }; }
+  }
+  if (code.length > 512 * 1024) return { ok: false, error: 'script too large (>512KB)' };
+  // 常见误贴：仓库网页 / 目录页的 HTML —— 那不是脚本，直链应是 raw 文本
+  if (/^\s*<(!doctype|html)/i.test(code)) return { ok: false, error: 'HTML page, not a script (use a raw/direct link)' };
+  if (!code.trim()) return { ok: false, error: 'empty response' };
+  return { ok: true, code };
+}
+
 /** 解析脚本头注释（@name/@description/@version/@author/@homepage）。 */
 export function parseLxHeader(code) {
   const head = String(code || '').slice(0, 2000);

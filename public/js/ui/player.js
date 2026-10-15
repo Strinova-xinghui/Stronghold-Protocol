@@ -6,7 +6,7 @@ import { audio } from '../audio.js';
 import { data, useData } from '../data.js';
 import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
-import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
+import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -72,18 +72,32 @@ function CustomSourceTab({ onPlayUrl }) {
   const [listeners, setListeners] = useState(null);
   const [err, setErr] = useState('');
   const [source, setSource] = useState('');
+  const [url, setUrl] = useState(() => { try { return localStorage.getItem('sp_player_lx_url') || ''; } catch { return ''; } });
   const [songmid, setSongmid] = useState('');
   const [songname, setSongname] = useState('');
   const [busy, setBusy] = useState(false);
+  const apply = async (text) => {
+    const res = await loadLxScript(text);
+    if (!res.ok) { setErr(res.error || t('加载失败')); setSources(null); setListeners(null); return; }
+    setSources(res.sources); setListeners(res.listeners);
+    const keys = Object.keys(res.sources || {});
+    setSource(keys[0] || '');
+    try { localStorage.setItem('sp_player_lx_script', text); } catch { /* ignore */ }
+  };
   const load = async () => {
     setErr(''); setBusy(true);
+    try { await apply(code); } catch (e) { setErr(String(e && e.message ? e.message : e)); }
+    setBusy(false);
+  };
+  // 通过 URL 添加：拉取脚本 → 填进文本框（可再手改）→ 立即加载
+  const loadUrl = async () => {
+    setErr(''); setBusy(true);
     try {
-      const res = await loadLxScript(code);
-      if (!res.ok) { setErr(res.error || t('加载失败')); setSources(null); setListeners(null); return; }
-      setSources(res.sources); setListeners(res.listeners);
-      const keys = Object.keys(res.sources || {});
-      setSource(keys[0] || '');
-      try { localStorage.setItem('sp_player_lx_script', code); } catch { /* ignore */ }
+      const got = await fetchLxScript(url);
+      if (!got.ok) { setErr(t('拉取失败：') + (got.error || '')); setBusy(false); return; }
+      setCode(got.code);
+      try { localStorage.setItem('sp_player_lx_url', url.trim()); } catch { /* ignore */ }
+      await apply(got.code);
     } catch (e) { setErr(String(e && e.message ? e.message : e)); }
     setBusy(false);
   };
@@ -97,7 +111,12 @@ function CustomSourceTab({ onPlayUrl }) {
   };
   const meta = sources ? Object.entries(sources) : [];
   return html`<div class="ptab">
-    <p class="phint">${t('粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source）。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。')}</p>
+    <p class="phint">${t('粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。')}</p>
+    <div class="prow">
+      <input class="purl" type="url" value=${url} onInput=${(e) => setUrl(e.target.value)}
+        placeholder=${t('脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）')} spellcheck=${false} />
+      <${Button} size="sm" disabled=${busy || !/^https?:\/\//i.test(url.trim())} onClick=${loadUrl}>${t('URL 导入')}<//>
+    </div>
     <textarea class="pcode" value=${code} onInput=${(e) => setCode(e.target.value)} spellcheck=${false}
       placeholder=${t('/**\n * @name 我的音源\n * @version 1.0.0\n */\nconst { EVENT_NAMES, request, on, send } = globalThis.lx\n…')}></textarea>
     <div class="prow">

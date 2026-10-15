@@ -1299,5 +1299,9 @@
   "撤回上一步（可连续撤 {n} 步）": "Undo the last step ({n} undoable)",
   "没有可撤回的操作": "Nothing to undo",
   "撤回": "Undo",
-  "游戏内置配乐（随客户端已下载，零额外流量）。播放中不受阶段切换影响，点「回到自动 BGM」恢复。": "Built-in game BGM (already downloaded with the client — no extra traffic). It keeps playing across phases; press Back to auto BGM to hand control back."
+  "游戏内置配乐（随客户端已下载，零额外流量）。播放中不受阶段切换影响，点「回到自动 BGM」恢复。": "Built-in game BGM (already downloaded with the client — no extra traffic). It keeps playing across phases; press Back to auto BGM to hand control back.",
+  "拉取失败：": "Fetch failed: ",
+  "粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。": "Paste an lx-music custom source script (spec: lxmusic.toside.cn/desktop/custom-source), or import one by URL. The script runs locally in your browser; its requests go straight to the third party, never through the game server.",
+  "脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）": "Direct script URL (raw / jsDelivr etc., needs CORS or plain text)",
+  "URL 导入": "Import by URL"
 }

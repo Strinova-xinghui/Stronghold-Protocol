@@ -42,6 +42,10 @@
   border-radius: .04rem; color: var(--text); font-size: .13rem;
 }
 .prow input { flex: 1; min-width: 1.2rem; }
+
+/* URL 导入行：输入框吃掉剩余宽度，按钮贴右 */
+.prow .purl { flex: 2 1 2.2rem; min-width: 1.6rem; }
+
 .pcode {
   width: 100%; min-height: 1.6rem; padding: .08rem; resize: vertical;
   background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2); border-radius: .04rem;
