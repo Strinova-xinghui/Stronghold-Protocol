@@ -2,7 +2,7 @@
 // 职责边界（用户约束：不给服务器带来过分的性能/带宽开销）：
 //   * 只代理塞壬唱片的 JSON API（/api/albums、/api/album/:cid/detail、/api/song/:cid、/api/search）——元数据合计几十 KB；
 //   * 音频（res*.hycdn.cn）与封面（web.hycdn.cn）CORS=* 且支持 Range ⇒ 客户端直连 CDN，服务器零带宽；
-//   * 外置音源（lx-music 脚本）的第三方请求默认在浏览器直发；CORS 失败时由 /music/proxy 兜底转发（仅 JSON/小体）。
+//   * 外部音源（lx-music 脚本）与 /music/proxy 已于 2026-10-16 移除（用户决定），本路由只剩塞壬元数据代理。
 // 缓存：磁盘 .cache/music/{key}.json。albums/album 24 h；song 1 h（sourceUrl 是官方 CDN 的限时签名地址，
 // 路径第二段 hex 即签发后约 3 h 的到期时刻，缓存过久会让浏览器直连音频时 403/404）；search 10 min。
 // 路由由 server/http/routes.js 在静态服务前调用（自研钩子，与 customRoutes 同模式）。
@@ -20,21 +20,7 @@ const TTL_META = 24 * 3600 * 1000;   // 专辑列表 / 专辑详情：几乎不�
 const TTL_SONG = 3600 * 1000;        // 单曲：内含限时签名音频地址
 const TTL_SEARCH = 10 * 60 * 1000;   // 搜索：临时结果，别把用户输入堆满磁盘
 const FETCH_TIMEOUT_MS = 12000;
-const PROXY_MAX_BODY = 512 * 1024;
 
-/**
- * /music/proxy 的平台头（lx 脚本搜索的 CORS 兜底）：很多音乐 API 缺了 Referer/Origin 直接 401/500。
- * 浏览器 fetch 设不了这些受限头，由服务器按目标 host 注入（lx-music-desktop 同款映射，公开知识）。
- * 客户端头只转发白名单三种（Cookie 支持登录态音源；其余防成开放头注入器）。
- */
-const PROXY_HOST_HEADERS = [
-  { re: /(^|\.)music\.163\.com$/i, h: { Referer: 'https://music.163.com/', Origin: 'https://music.163.com' } },
-  { re: /(^|\.)qq\.com$/i, h: { Referer: 'https://y.qq.com/', Origin: 'https://y.qq.com' } },
-  { re: /(^|\.)kuwo\.cn$/i, h: { Referer: 'http://www.kuwo.cn/', Origin: 'http://www.kuwo.cn' } },
-  { re: /(^|\.)kugou\.com$/i, h: { Referer: 'https://www.kugou.com/', Origin: 'https://www.kugou.com' } },
-  { re: /(^|\.)migu\.cn$/i, h: { Referer: 'https://music.migu.cn/', Origin: 'https://music.migu.cn' } },
-];
-const PROXY_FWD_HEADERS = ['cookie', 'user-agent', 'referer'];
 
 /** 允许代理的白名单路径（严格匹配，绝不开放任意 URL；query 单独走 search）。 */
 const ALLOWED = [
@@ -115,35 +101,6 @@ export async function handleMusicRoutes(req, res, parts, log, musicEnabled) {
     const r = await sirenFetch(sub, parts.query, log);
     if (!r.ok) { sendJson(req, res, r.status || 502, { code: -1, msg: 'music api unavailable' }); return true; }
     sendJson(req, res, 200, r.data, { 'Cache-Control': sub === '/search' ? 'no-store' : 'public, max-age=3600' });
-    return true;
-  }
-  if (p === '/music/proxy') {
-    // lx 脚本 CORS 兜底：只允许 http(s) URL，且仅转发 JSON/文本（音频一律拒绝——CDN 直连即可）
-    const u = new URL('http://x/?' + (parts.query || ''));
-    const target = u.searchParams.get('url') || '';
-    if (!/^https?:\/\//.test(target)) { sendJson(req, res, 400, { error: 'bad url' }); return true; }
-    try {
-      const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' };
-      try {
-        const host = new URL(target).hostname;
-        for (const rule of PROXY_HOST_HEADERS) if (rule.re.test(host)) Object.assign(headers, rule.h);
-        // 客户端可带 <wh> 名单内的头（拼在同一个 ?url= 里：&h_referer=…&h_cookie=…）
-        for (const [k, v] of u.searchParams.entries()) {
-          const hk = /^h_(.+)$/i.exec(k);
-          if (hk && PROXY_FWD_HEADERS.includes(hk[1].toLowerCase()) && v) headers[hk[1]] = v;
-        }
-      } catch { /* bad url already rejected above */ }
-      const rr = await fetch(target, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers });
-      const ct = rr.headers.get('content-type') || '';
-      if (!/json|text|xml|javascript|urlencoded/i.test(ct)) { sendJson(req, res, 415, { error: 'only json/text' }); return true; }
-      const buf = await rr.arrayBuffer();
-      if (buf.byteLength > PROXY_MAX_BODY) { sendJson(req, res, 413, { error: 'too large' }); return true; }
-      res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
-      res.end(Buffer.from(buf));
-    } catch (e) {
-      log?.warn?.('[music] proxy failed: ' + (e && e.message));
-      sendJson(req, res, 502, { error: 'proxy failed' });
-    }
     return true;
   }
   return false;

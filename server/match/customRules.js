@@ -216,7 +216,7 @@ function normalize(raw) {
     });
   }
 
-  // ---- 音乐播放器（music，自研 2026-10-15）：/music/siren/* 元数据代理与 /music/proxy 兜底的总闸。
+  // ---- 音乐播放器（music，自研 2026-10-15）：/music/siren/* 塞壬元数据代理的总闸（外部音源/proxy 已于 2026-10-16 移除）。
   //      enabled=false 时路由不挂载（404）——原版没有任何播放器，全关 = 原汁原味。音频/封面始终 CDN 直连
   //      （浏览器流量），服务器侧只有几十 KB 的 JSON 缓存读取。
   const mu = raw.music && typeof raw.music === 'object' ? raw.music : null;

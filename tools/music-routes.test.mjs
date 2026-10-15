@@ -1,4 +1,5 @@
 // 音乐播放器服务器路由单测：/music/siren/* 白名单代理 + 磁盘缓存 + 开关行为。
+// （/music/proxy 兜底路由已随外部源移除。）
 // 真实网络不可用的测试环境用 node:test 的 mock（fetch 桩）。
 // 用法: node --test tools/music-routes.test.mjs
 import { test, describe, mock, before, after } from 'node:test';
@@ -100,31 +101,6 @@ describe('音乐播放器路由 /music/*', () => {
     assert.ok(!seen.some((u) => u.includes('169.254')), '绝不透传任意参数');
     const nope = await get(server, '/music/siren/whatever');
     assert.equal(nope.status, 404);
-    server.close();
-  });
-
-
-  test('/music/proxy：平台头注入（163/QQ 无 Referer 会 401/500）+ 客户端头白名单转发', async () => {
-    let seenHeaders = null;
-    globalThis.fetch = async (url, opts) => { seenHeaders = (opts && opts.headers) || {}; return { ok: true, status: 200, headers: new Map([['content-type','application/json']]), arrayBuffer: async () => new Uint8Array(Buffer.from('{"ok":1}')).buffer }; };
-    const server = await startServer({ startedAt: Date.now(), customRules: () => ({ music: { enabled: true } }) });
-    const r = await get(server, '/music/proxy?url=' + encodeURIComponent('https://music.163.com/api/search/get?s=x'));
-    assert.equal(r.status, 200);
-    assert.equal(seenHeaders.Referer, 'https://music.163.com/', '网易云注入自身 Referer');
-    assert.equal(seenHeaders.Origin, 'https://music.163.com');
-    const r2 = await get(server, '/music/proxy?url=' + encodeURIComponent('https://c.y.qq.com/x') + '&h_cookie=' + encodeURIComponent('TSID=abc'));
-    assert.equal(r2.status, 200);
-    assert.equal(seenHeaders.Referer, 'https://y.qq.com/', 'QQ 注入 y.qq.com Referer');
-    assert.equal(seenHeaders.cookie, 'TSID=abc', 'cookie 白名单转发（登录态音源）');
-    await get(server, '/music/proxy?url=' + encodeURIComponent('https://c.y.qq.com/x') + '&h_host=' + encodeURIComponent('evil.example.com'));
-    assert.equal(seenHeaders.host, undefined, 'host 不在白名单，不转发');
-    server.close();
-  });
-
-  test('/music/proxy：非 http(s) 拒绝，音频 content-type 拒绝', async () => {
-    const server = await startServer({ startedAt: Date.now(), customRules: () => ({ music: { enabled: true } }) });
-    const bad = await get(server, '/music/proxy?url=ftp://x/y');
-    assert.equal(bad.status, 400, '只允许 http(s)');
     server.close();
   });
 });

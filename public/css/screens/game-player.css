@@ -50,8 +50,8 @@
 /* 外部音源：搜索点歌 */
 .plabel { font-size: .13rem; color: var(--text-dim); white-space: nowrap; }
 .plist { max-height: 2.6rem; overflow-y: auto; display: flex; flex-direction: column; gap: .04rem; margin-top: .02rem; }
-.ptrack--lx { height: .46rem; }
-.ptrack--lx:disabled { opacity: .55; cursor: progress; }
+.ptrack--fav { height: .46rem; }
+.ptrack--fav:disabled { opacity: .55; cursor: progress; }
 .ptrack__dur { flex: 0 0 auto; font-size: .12rem; color: var(--text-dim); font-variant-numeric: tabular-nums; padding: 0 .06rem; }
 .plx-adv { margin-top: .06rem; }
 .plx-adv summary { cursor: pointer; font-size: .13rem; color: var(--text-dim); padding: .03rem 0; user-select: none; }

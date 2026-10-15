@@ -6,7 +6,7 @@ import { audio } from '../audio.js';
 import { data, useData } from '../data.js';
 import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
-import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, lxSearch, lxLyric, wyLyric, LX_SEARCH_SOURCES, fmtDur, parseLrc, lrcIndex } from './player-core.js';
+import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, parseLrc, lrcIndex } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -28,7 +28,7 @@ const qCur = () => { const { items, index } = qGet(); return items[index] || nul
 // ---- 收藏（localStorage；条目 = 元数据 + kind，重播时按 kind 现取链接）--------------------------------
 const favStore = createStore({ list: [] });
 const FAV_KEY = 'sp_player_favs';
-function favLoad() { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]').slice(0, 200); } catch { return []; } }
+function favLoad() { try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]').filter((x) => x && (x.kind === 'siren' || x.kind === 'builtin')).slice(0, 200); } catch { return []; } }
 function favSave(list) { favStore.set({ list }); try { localStorage.setItem(FAV_KEY, JSON.stringify(list.slice(0, 200))); } catch { /* full */ } }
 function favToggle(f) {
   const list = favStore.get().list;
@@ -36,26 +36,12 @@ function favToggle(f) {
   if (i >= 0) favSave(list.filter((x) => x.key !== f.key));
   else favSave([f, ...list]);
 }
-/** 收藏条目 → 队列项：按 kind 现场重建 url()/lyric()（塞壬/lx 都重新换链，网易云走内置）。 */
+/** 收藏条目 → 队列项：按 kind 现场重建 url()/lyric()（塞壬重新换链；外部源收藏已废弃）。 */
 function favItem(f) {
   if (f.kind === 'siren') return sirenItem({ cid: f.mid, name: f.title, artistes: f.artist ? [f.artist] : [] }, { name: f.album, coverUrl: f.cover });
   if (f.kind === 'builtin') return builtinItem({ key: f.key, name: f.title, url: f.url, scene: f.album });
-  const mi = { source: f.source, songmid: f.mid, songName: f.title, singerName: f.artist, albumName: f.album };
-  return { ...mi, ...lxItemLazy(mi, f.source) };
+  return null; // 外部源收藏（kind=wy/kg/ext）随外部源移除而废弃 → 过滤
 }
-// 收藏重播外部曲目：打开收藏 tab 时若脚本已加载用其 listeners；未加载则报错提示
-let lxLive = { listeners: null, source: '' }; // CustomSourceTab 挂载时更新
-function lxItemLazy(mi, source) {
-  return {
-    key: 'ext:' + (mi.source || source) + ':' + mi.songmid, title: mi.songName || mi.songmid, artist: mi.singerName || '', album: mi.albumName || '', cover: null,
-    url: async () => {
-      if (!lxLive.listeners) throw new Error(t('先在「外部音源」加载脚本后再播收藏'));
-      return lxMusicUrl(lxLive.listeners, lxLive.source || source, mi, null);
-    },
-    lyric: async () => (lxLive.listeners ? await lxLyric(lxLive.listeners, lxLive.source || source, mi) : null) || (mi.source === 'wy' ? await wyLyric(mi.songmid) : null),
-  };
-}
-
 /** 播队列第 i 首：取 URL → 流式 playTrack → 异步取歌词。 */
 async function qPlayAt(i) {
   const { items } = qGet();
@@ -106,31 +92,10 @@ function sirenItem(s, album) {
     lyric: async () => { const d = sirenMeta[s.cid] || await sirenSongUrl(s.cid); sirenMeta[s.cid] = d; return d.lyricUrl ? (await fetch(d.lyricUrl)).text() : null; },
   };
 }
-/** lx 搜索结果 → 队列项（取链/歌词都走用户脚本；wy 结果脚本没实现 lyric 时退回网易云官方词）。 */
-function lxItem(mi, listeners, source) {
-  return {
-    key: 'ext:' + (mi.source || source) + ':' + mi.songmid, title: mi.songName || mi.songmid, artist: mi.singerName || '', album: mi.albumName || '', cover: null,
-    url: () => lxMusicUrl(listeners, source, mi, null),
-    lyric: async () => (await lxLyric(listeners, source, mi)) || (mi.source === 'wy' ? await wyLyric(mi.songmid) : null),
-  };
-}
-
-/** 兼容旧导出：单点播放（e2e 与外部调用）。 */
-export function playBuiltin(track) {
-  if (!track) return;
-  qPlayList([builtinItem(track)], 0);
-}
-export async function playSirenSong(cid, name, signal) {
-  const info = await sirenSongUrl(cid, signal);
-  if (!info.url) throw new Error('no audio url');
-  audio.playTrack({ url: info.url }, 'siren:' + cid + ':' + name);
-}
-
 // ---- 播放器面板 ----------------------------------------------------------------------------------------
 const TABS = [
   { key: 'builtin', label: '内置 BGM' },
   { key: 'siren', label: '塞壬唱片 OST' },
-  { key: 'custom', label: '外部音源' },
   { key: 'fav', label: '收藏' },
 ];
 
@@ -164,117 +129,6 @@ function matchAlbum(a, q) {
   return String(a.name || '').toLowerCase().includes(q) || (a.artistes || []).some((x) => String(x).toLowerCase().includes(q));
 }
 
-/** 外部音源 tab：粘贴 lx 脚本 → 加载 → 输入歌曲信息点播。 */
-function CustomSourceTab({ favAdd, favHas }) {
-  useStore((s) => s, Object.is, qStore);
-  useStore((s) => s, Object.is, favStore); // 队列变化时重渲染（当前行高亮）
-  const [code, setCode] = useState(() => { try { return localStorage.getItem('sp_player_lx_script') || ''; } catch { return ''; } });
-  const [sources, setSources] = useState(null);
-  const [listeners, setListeners] = useState(null);
-  const [err, setErr] = useState('');
-  const [source, setSource] = useState('');
-  const [url, setUrl] = useState(() => { try { return localStorage.getItem('sp_player_lx_url') || ''; } catch { return ''; } });
-  const [songmid, setSongmid] = useState('');
-  const [songname, setSongname] = useState('');
-  const [busy, setBusy] = useState(false);
-  const apply = async (text) => {
-    const res = await loadLxScript(text);
-    if (!res.ok) { setErr(res.error || t('加载失败')); setSources(null); setListeners(null); return; }
-    setSources(res.sources); setListeners(res.listeners);
-    const keys = Object.keys(res.sources || {});
-    setSource(keys[0] || '');
-    lxLive = { listeners: res.listeners, source: keys[0] || '' }; // 收藏重播外部曲目用
-    try { localStorage.setItem('sp_player_lx_script', text); } catch { /* ignore */ }
-  };
-  const load = async () => {
-    setErr(''); setBusy(true);
-    try { await apply(code); } catch (e) { setErr(String(e && e.message ? e.message : e)); }
-    setBusy(false);
-  };
-  // 通过 URL 添加：拉取脚本 → 填进文本框（可再手改）→ 立即加载
-  const loadUrl = async () => {
-    setErr(''); setBusy(true);
-    try {
-      const got = await fetchLxScript(url);
-      if (!got.ok) { setErr(t('拉取失败：') + (got.error || '')); setBusy(false); return; }
-      setCode(got.code);
-      try { localStorage.setItem('sp_player_lx_url', url.trim()); } catch { /* ignore */ }
-      await apply(got.code);
-    } catch (e) { setErr(String(e && e.message ? e.message : e)); }
-    setBusy(false);
-  };
-  // —— 搜索点歌：输入关键词 → 内置源（网易云/酷狗）出结果 → 点一行 = 用当前脚本取链播放 ——
-  const [sk, setSk] = useState(() => { try { return localStorage.getItem('sp_player_lx_sk') || 'wy'; } catch { return 'wy'; } });
-  const [sq, setSq] = useState('');
-  const [results, setResults] = useState(null);
-  const [searching, setSearching] = useState(false);
-  const doSearch = async () => {
-    const kw = sq.trim();
-    if (!kw) { setResults(null); return; }
-    setErr(''); setSearching(true);
-    try { setResults(await lxSearch(sk, kw)); }
-    catch (e) { setResults(null); setErr(t('搜索失败：') + String(e && e.message ? e.message : e)); }
-    setSearching(false);
-  };
-  useEffect(() => { try { localStorage.setItem('sp_player_lx_sk', sk); } catch { /* ignore */ } }, [sk]);
-  // 点一行 = 整页结果排进队列播这行（播完自动连播）；取链/歌词都在 qPlayAt 里异步做
-  const playInfo = (musicInfo, list) => {
-    setErr('');
-    qPlayList((list || [musicInfo]).map((mi) => lxItem(mi, listeners, source)), list ? list.indexOf(musicInfo) : 0);
-  };
-  const play = () => playInfo({ source: sk, songmid: songmid.trim(), songName: songname || songmid, singerName: '' });
-  const meta = sources ? Object.entries(sources) : [];
-  return html`<div class="ptab">
-    <p class="phint">${t('粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。')}</p>
-    <div class="prow">
-      <input class="purl" type="url" value=${url} onInput=${(e) => setUrl(e.target.value)}
-        placeholder=${t('脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）')} spellcheck=${false} />
-      <${Button} size="sm" disabled=${busy || !/^https?:\/\//i.test(url.trim())} onClick=${loadUrl}>${t('URL 导入')}<//>
-    </div>
-    <textarea class="pcode" value=${code} onInput=${(e) => setCode(e.target.value)} spellcheck=${false}
-      placeholder=${t('/**\n * @name 我的音源\n * @version 1.0.0\n */\nconst { EVENT_NAMES, request, on, send } = globalThis.lx\n…')}></textarea>
-    <div class="prow">
-      <${Button} size="sm" variant="primary" disabled=${busy || !code.trim()} onClick=${load}>${t('加载音源')}<//>
-      ${err ? html`<span class="perr">${err}</span>` : null}
-    </div>
-    ${meta.length ? html`<div class="prow">
-      <span class="plabel">${t('取链音源')}<//>
-      <select value=${source} onChange=${(e) => { setSource(e.target.value); lxLive = { listeners, source: e.target.value }; }}>
-        ${meta.map(([k, s]) => html`<option key=${k} value=${k}>${(s && s.name) || k}</option>`)}
-      </select>
-      <span class="plabel">${t('搜索源')}<//>
-      <select value=${sk} onChange=${(e) => setSk(e.target.value)}>
-        ${LX_SEARCH_SOURCES.map((s) => html`<option key=${s.key} value=${s.key}>${t(s.name)}</option>`)}
-      </select>
-    </div>
-    <div class="prow">
-      <${SearchBox} value=${sq} onChange=${setSq} onEnter=${doSearch} placeholder=${t('输入歌名 / 歌手，回车搜索…')} />
-      <${Button} size="sm" variant="primary" disabled=${searching || !sq.trim()} onClick=${doSearch}>${searching ? t('搜索中…') : t('搜索')}<//>
-    </div>
-    ${results ? html`<div class="plist">
-      ${results.length ? results.map((s) => { const key = 'ext:' + (s.source || source) + ':' + s.songmid; return html`<div key=${key} class="pfav-row">
-        <button type="button" class=${cx('ptrack', 'ptrack--lx', (qCur() || {}).key === key && 'is-on')} onClick=${() => playInfo(s, results)}>
-          <span class="ptrack__meta">
-            <b class="ptrack__name">${s.songName}</b>
-            <small class="ptrack__sub">${[s.singerName, s.albumName].filter(Boolean).join(' · ')}</small>
-          </span>
-          ${s.interval ? html`<span class="ptrack__dur">${fmtDur(s.interval)}</span>` : null}
-          <span class="ptrack__play"><${Icon} name="play" /></span>
-        </button>
-        <button type="button" class=${cx('pfav', favHas(key) && 'is-on')} title=${t('收藏')} aria-label=${t('收藏')}
-          onClick=${() => favAdd({ key, title: s.songName, artist: s.singerName, album: s.albumName, kind: s.source || 'ext', mid: s.songmid, source: s.source || source })}><${Icon} name=${favHas(key) ? 'heartFill' : 'heart'} /><//>
-      </div>`}) : html`<p class="phint">${t('没有搜索结果。')}</p>`}
-    </div>` : null}
-    <details class="plx-adv">
-      <summary>${t('高级：直接输入 songmid / ID 点播')}<//>
-      <div class="prow">
-        <input placeholder="songmid / ID" value=${songmid} onInput=${(e) => setSongmid(e.target.value)} />
-        <input placeholder=${t('歌名（可选）')} value=${songname} onInput=${(e) => setSongname(e.target.value)} />
-        <${Button} size="sm" disabled=${busy || !songmid.trim()} onClick=${play}>${t('点播')}<//>
-      </div>
-    </details>` : null}
-  </div>`;
-}
 // ---- 播放控制条（进度/暂停/上下曲/循环/滚动歌词）+ 停止（全功能播放器 2026-10-16）----
 const fmtMM = (sec) => { const s = Math.max(0, Math.floor(sec || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
@@ -362,10 +216,10 @@ function FavTab() {
   if (!list.length) return html`<div class="ptab"><p class="phint">${t('还没有收藏。在搜索结果或曲目行右侧点 ♥ 收藏。')}</p></div>`;
   const items = list.map(favItem);
   return html`<div class="ptab">
-    <p class="phint">${t('收藏（本机保存，最多 200 首）。外部音源的收藏需要先在「外部音源」加载脚本后才能取链。')}</p>
+    <p class="phint">${t('收藏（本机保存，最多 200 首）')}</p>
     <div class="plist">
       ${list.map((f, i) => html`<div key=${f.key} class="pfav-row">
-        <button type="button" class=${cx('ptrack', 'ptrack--lx', cur && cur.key === f.key && 'is-on')} onClick=${() => qPlayList(items, i)}>
+        <button type="button" class=${cx('ptrack', 'ptrack--fav', cur && cur.key === f.key && 'is-on')} onClick=${() => qPlayList(items, i)}>
           <span class="ptrack__art">${f.cover ? html`<img src=${f.cover} alt="" loading="lazy" />` : html`<${Icon} name="signal" />`}</span>
           <span class="ptrack__meta">
             <b class="ptrack__name">${f.title}</b>
@@ -458,7 +312,6 @@ export function PlayerPanel({ open, onClose }) {
             cover=${a.coverUrl} playing=${false} hint=${albumBusy === a.cid ? t('加载中…') : t('点击查看曲目')}
             onPlay=${() => openAlbum(a)} />`)}` : null}
       </div>` : null}
-      ${tab === 'custom' ? html`<${CustomSourceTab} favAdd=${favToggle} favHas=${(k) => favStore.get().list.some((x) => x.key === k)} />` : null}
       ${tab === 'fav' ? html`<${FavTab} />` : null}
       <${ControlBar} />
     </div>

@@ -1,5 +1,5 @@
 // 音乐播放器 UI e2e（无头浏览器）：title 路由直接挂 PlayerPanel（UI 自包含，只依赖 audio + assets 清单）。
-// 验证：三 tab 渲染、内置曲目列表、点播上 manualBgm 锁、回到自动解锁、塞壬代理请求、外部音源输入框。
+// 验证：三 tab（内置/塞壬/收藏）、内置点播上锁 + 控制条、回到自动解锁、塞壬代理、外部音源已移除。
 // 2026-10-15 补：专辑展开（点专辑→曲目列表，detail 请求 200）、点歌（song 换链 200 + playTrack 收到 CDN 地址）、
 // 搜索框（本地过滤 + 服务器兜底）、远程流式播放（_startBgmStream 走 <audio>，不进 _buffer 解码管道）。
 // 用法: SP_E2E=1 CHROME_PATH=<edge|chrome> node --test test/ui/player.e2e.test.js
@@ -26,7 +26,7 @@ async function mountPanel(c) {
   await c.page.waitForSelector('.player', { timeout: 10000 });
 }
 
-test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 + 外部音源输入框', { skip: !enabled, timeout: 120000 }, async () => {
+test('音乐播放器：三 tab + 内置点播锁 + 控制条 + 回到自动 + 塞壬代理 + 外部源已移除', { skip: !enabled, timeout: 120000 }, async () => {
   const P = (await import('puppeteer-core')).default;
   const srv = await startRealServer({ fast: { timerScale: 0.1, kit: 0 } });
   const c = new Client(P, srv.base, 'player', { prefix: 'player' });
@@ -45,7 +45,7 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     });
     await c.page.waitForSelector('.player', { timeout: 10000 });
     const tabs = await c.page.$$eval('.ptab-btn', (els) => els.map((e) => e.textContent.trim()));
-    assert.equal(tabs.length, 4, '四个 tab（含收藏）: ' + tabs.join('/'));
+    assert.equal(tabs.length, 3, '三个 tab（外部源已移除）: ' + tabs.join('/'));
     const n = await c.page.$$eval('.ptab .ptrack', (els) => els.length);
     assert.ok(n > 0, '内置曲目 ' + n + ' 首');
     await c.page.evaluate(() => {
@@ -64,72 +64,27 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     assert.ok(lock.manual, 'manualBgm 上锁');
     assert.ok(String(lock.label).startsWith('builtin:'), 'label=' + lock.label);
     assert.ok(String(lock.url).includes('/audio/bgm/'), 'url=' + lock.url);
+    // 控制条（统一队列驱动）：进度条 + ≥5 控制钮 + 当前曲名
+    await c.page.waitForSelector('.pctrl', { timeout: 8000 });
+    assert.ok(await c.page.$('.pctrl__seek'), '进度条在');
+    const nBtn = await c.page.evaluate(() => document.querySelectorAll('.pctrl__btns .pbtn').length);
+    assert.ok(nBtn >= 5, '控制按钮 ≥5，实际 ' + nBtn);
     const btns = await c.page.$$('.player__tabs .btn');
     await btns[btns.length - 1].click();
     const unlocked = await c.page.evaluate(() => !!globalThis.__SP__.audio.manualBgm);
     assert.equal(unlocked, false, '回到自动解锁');
+    await c.page.waitForFunction(() => !document.querySelector('.pctrl'), { timeout: 5000 }, );
     const sirenHits = [];
     c.page.on('response', (r) => { if (new URL(r.url()).pathname.startsWith('/music/siren')) sirenHits.push(r.status()); });
     await c.page.$$eval('.ptab-btn', (els) => els[1].click());
     await c.page.waitForFunction(() => document.querySelectorAll('.ptab .ptrack').length > 0, { timeout: 15000 });
     assert.ok(sirenHits.length > 0, '塞壬代理请求: ' + sirenHits.join(','));
+    // 外部音源已移除（2026-10-16 用户决定）：第三个 tab 是收藏，脚本输入框不复存在
     await c.page.$$eval('.ptab-btn', (els) => els[2].click());
-    await c.page.waitForSelector('.pcode', { timeout: 5000 });
-    assert.ok(await c.page.$('.pcode'), '外部音源脚本输入框在');
-    assert.ok(await c.page.$('.prow .purl'), 'URL 导入输入框在');
-    assert.ok(await c.page.$eval('.prow .purl', (el) => el.type === 'url'), 'URL 框是 type=url');
-    // —— 搜索点歌全流程：加载最小音源 → 搜索（拦截 /music/proxy 给出确定性结果）→ 点行取链播放 ——
-    await c.page.setRequestInterception(true);
-    c.page.on('request', (req) => {
-      const u = req.url();
-      if (u.includes('/music/proxy')) {
-        const wy = { result: { songs: [{ id: 123, name: '测试歌', duration: 200000, artists: [{ name: '某人' }], album: { id: 9, name: '某专' } }] } };
-        req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(wy) });
-        return;
-      }
-      req.continue();
-    });
-    const SCRIPT = [
-      "const { EVENT_NAMES, on, send } = globalThis.lx;",
-      "on(EVENT_NAMES.request, ({ action, info }) => {",
-      "  if (action !== 'musicUrl') return Promise.reject(new Error('bad action'));",
-      "  return Promise.resolve('https://example.com/e2e/' + info.musicInfo.songmid + '.mp3');",
-      "});",
-      "send(EVENT_NAMES.inited, { sources: { kw: { name: 'E2E源' } } });",
-    ].join('\n');
-    await c.page.evaluate(async (code) => {
-      const ta = document.querySelector('.pcode');
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(ta, code);
-      ta.dispatchEvent(new Event('input', { bubbles: true }));
-    }, SCRIPT);
-    await c.page.evaluate(() => { [...document.querySelectorAll('.prow .btn')].find((b) => b.textContent.includes('加载音源')).click(); });
-    await c.page.waitForSelector('.plist, .prow .psearch', { timeout: 8000 });
-    assert.ok(await c.page.$('.prow .psearch input'), '搜索框在（音源加载后）');
-    await c.page.type('.prow .psearch input', '测试歌');
-    await c.page.evaluate(() => { [...document.querySelectorAll('.prow .btn')].find((b) => b.textContent.trim() === '搜索').click(); });
-    await c.page.waitForSelector('.plist .ptrack--lx', { timeout: 8000 });
-    const rowText = await c.page.$eval('.plist .ptrack--lx .ptrack__name', (e) => e.textContent);
-    assert.equal(rowText, '测试歌', '搜索结果行渲染');
-    // 捕获 onPlayUrl（playTrack 桩）后点行
-    await c.page.evaluate(() => {
-      const { audio } = globalThis.__SP__;
-      window.__ext = [];
-      audio.playTrack = (t, l) => { window.__ext.push({ url: t && t.url, label: l }); };
-    });
-    await c.page.click('.plist .ptrack--lx');
-    await c.page.waitForFunction(() => window.__ext.length > 0, { timeout: 8000 });
-    const ext = await c.page.evaluate(() => window.__ext[0]);
-    assert.equal(ext.url, 'https://example.com/e2e/123.mp3', '点行 → 脚本 musicUrl 取链（songmid 来自搜索结果）');
-    assert.ok(String(ext.label).startsWith('ext:wy:'), 'label(队列 key)=' + ext.label);
-    // 控制条出现并显示当前曲名 + 进度条 + 播放/暂停钮
-    await c.page.waitForSelector('.pctrl', { timeout: 8000 });
-    assert.equal(await c.page.$eval('.pctrl__title', (e) => e.textContent), '测试歌', '控制条显示当前曲名');
-    assert.ok(await c.page.$('.pctrl__seek'), '进度条在');
-    const nBtn = await c.page.evaluate(() => document.querySelectorAll('.pctrl__btns .pbtn').length);
-    assert.ok(nBtn >= 5, '控制按钮 ≥5，实际 ' + nBtn);
-    assert.ok(await c.page.$('.plist .ptrack--lx.is-on'), '当前播放行高亮');
-    await c.page.setRequestInterception(false);
+    assert.equal(await c.page.$('.pcode'), null, '脚本输入框已移除');
+    assert.equal(await c.page.$('.purl'), null, 'URL 导入框已移除');
+    assert.ok(await c.page.$('.ptab .phint'), '收藏 tab 渲染（空收藏提示）');
+    assert.ok(!(await c.page.evaluate(() => !!document.querySelector('.pctrl'))), '队列已停 → 控制条隐藏');
   } finally {
     await c.close().catch(() => {});
     await srv.stop().catch(() => {});
@@ -229,7 +184,7 @@ test('全局点歌台：标题屏入口能开面板、能关闭', { skip: !enabl
     assert.ok(mounted, '面板由全局 PlayerHost 挂载（screen 之外）');
     assert.ok(await c.page.$('.psearch input'), '面板带搜索框');
     const tabs = await c.page.$$eval('.ptab-btn', (els) => els.length);
-    assert.equal(tabs, 4, '四 tab 齐全（内置/塞壬/外部/收藏）');
+    assert.equal(tabs, 3, '三 tab 齐全（内置/塞壬/收藏）');
     await c.page.keyboard.press('Escape');
     await c.page.waitForFunction(() => !document.querySelector('.player'), { timeout: 8000 });
     // 重开（store 开关可重复）

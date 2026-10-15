@@ -1326,5 +1326,6 @@
   "还没有收藏。在搜索结果或曲目行右侧点 ♥ 收藏。": "No favorites yet. Tap ♥ on a track row to save it.",
   "取消收藏": "Remove favorite",
   "先在「外部音源」加载脚本后再播收藏": "Load a source script in the External tab before playing this favorite",
-  "收藏（本机保存，最多 200 首）。外部音源的收藏需要先在「外部音源」加载脚本后才能取链。": "Favorites (stored on this device, up to 200). External-source favorites need the source script loaded in the External tab first."
+  "收藏（本机保存，最多 200 首）。外部音源的收藏需要先在「外部音源」加载脚本后才能取链。": "Favorites (stored on this device, up to 200). External-source favorites need the source script loaded in the External tab first.",
+  "收藏（本机保存，最多 200 首）": "Favorites (stored on this device, up to 200)"
 }

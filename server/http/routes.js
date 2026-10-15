@@ -79,8 +79,8 @@ export function createRequestHandler({ serveStatic, health, log, custom, trustPr
     // 自研路由（customRoutes.js，2026-10-08 起）：/monitor 监控台、/console 规则控制台（含 POST API）、
     // /lan/room 房间探测。它们自带方法与内网来源校验，所以排在全站 GET/HEAD 检查之前；未命中返回 false 落回静态。
     if (await handleCustomRoutes({ req, res, parts, deps: { ...health, publicDir: custom?.publicDir, log } })) return;
-    // 自研音乐播放器（musicRoutes.js）：/music/siren/*（塞壬 JSON 元数据代理，磁盘缓存）与 /music/proxy（lx 脚本
-    // CORS 兜底）。音频/封面走 CDN 直连不经此路由。music 规则关闭（custom-rules.json music.enabled=false）时
+    // 自研音乐播放器（musicRoutes.js）：/music/siren/*（塞壬 JSON 元数据代理，磁盘缓存）。音频/封面走 CDN 直连不经此路由。
+    // （外部音源的 /music/proxy 兜底路由已随 2026-10-16「去掉外部源」移除。）music 规则关闭（music.enabled=false）时
     // 内部直接 false 落回静态（404 = 原版没有播放器）。
     if (await handleMusicRoutes(req, res, parts, log, musicEnabled(health))) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
