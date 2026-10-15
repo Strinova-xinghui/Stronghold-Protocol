@@ -538,3 +538,30 @@ inited 的 `sources` 声明透传；musicUrl 支持返回 string 或 {url}。loc
 i18n en 100%、线上无头实测（URL 行在/空禁用/HTML 拒收/3 列 CSS 已部署）零报错。
 已闪断上线 build 7ccc362f57fd（重启前 matches=0）。提交 c92b3540（连同 9d04073e/0da74f6a
 一起推送 mine——此前 GitHub 直连抖动积压）。
+
+### 外部音源「搜索点歌」（2026-10-15 深夜，用户：「没有搜索点歌太难用」）
+
+**痛点**：lx 脚本只认 songmid，让玩家手敲 ID 等于没有轮椅。**方案**：搜索内置、取链仍走脚本——
+
+- `player-core.js` 新增 `lxSearch(source, kw)`：内置网易云（wy）/ 酷狗（kg）两个搜索端点，
+  固定 URL 经 `/music/proxy` 转发（不给用户自由填 URL 的口子）。结果映射成 lx 规范 musicInfo
+  （songmid/songName/singerName/albumName/albumMid/interval），点一行 → 当前脚本的 musicUrl 取链
+  → 流式播放。版权与音质选择都留在脚本侧（我们只搜元数据，不碰音频）。
+- **为什么必须服务器转发**：平台 API 全无 CORS 且缺 Referer/Origin 直接 401/500（实测网易云裸连
+  404「接口未找到」），浏览器 fetch 又设不了这两个受限头。musicRoutes.js 的 proxy 因此新增
+  PROXY_HOST_HEADERS（163/qq/kuwo/kugou/migu 按 host 注入自家 Referer+Origin）+ 客户端头白名单
+  转发（cookie/UA/referer 三种，`&h_cookie=` 传——登录态音源可用；host 等其余一律不转，防头注入）。
+  返回的是 KB 级 JSON，非音频，服务器成本可忽略（用户 100GB/月预算内）。
+- **QQ 音乐没做**：新端点 musicu.fcg 要 g_tk 签名（无签名返回空列表），老端点 client_search_cp
+  一律 500——留给脚本侧（很多音源自带 tx 搜索）。酷我 abslist 文本格式解析成本高，同理放弃。
+- UI：音源加载后出现「搜索源 + 取链音源」双下拉 + 搜索框（回车触发）+ 结果列表（歌名/歌手·专辑/时长，
+  点击取链，取链中行禁用防连点）；原 songmid 手输收进 `<details>` 高级折叠。
+- 坑：**部署时有人在打（matches:1, humans:4）**——用户明确「打完再上线」。做法：8 个文件先传
+  `~/staging-music/`（对局中零暴露、无中间态），云端 `music-deploy-wait.sh` 每 20s 轮询 healthz，
+  matches=0 才 `cp -r staging → sp-025` + restart + 自检 search 端点。⚠️ 启动等待脚本时
+  `pkill -f music-deploy-wait.sh` 会把自己的 ssh 会话命令行也匹配上连带自杀（输出为空即此症状），
+  改用 `setsid nohup bash … < /dev/null &` 直接起。
+
+验证：music-player 16/16（lxSearch 3 用例）、music-routes 7/7（proxy 头注入 + 白名单转发）、
+e2e 3/3（新流程：加载脚本→拦截 /music/proxy 给确定性结果→搜索→点行→脚本收到搜索结果的 songmid
+取链播放）、回归 37/37、i18n en 100%（新 8 条四包全补）。提交 06f44e06 已推 mine。
