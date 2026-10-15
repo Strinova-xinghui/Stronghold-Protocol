@@ -33,12 +33,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -216,7 +216,13 @@ function normalize(raw) {
     });
   }
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant || out.prepUndo ? out : OFF;
+  // ---- 音乐播放器（music，自研 2026-10-15）：/music/siren/* 元数据代理与 /music/proxy 兜底的总闸。
+  //      enabled=false 时路由不挂载（404）——原版没有任何播放器，全关 = 原汁原味。音频/封面始终 CDN 直连
+  //      （浏览器流量），服务器侧只有几十 KB 的 JSON 缓存读取。
+  const mu = raw.music && typeof raw.music === 'object' ? raw.music : null;
+  if (mu && mu.enabled) out.music = Object.freeze({ enabled: true });
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant || out.prepUndo || out.music ? out : OFF;
 }
 
 /**

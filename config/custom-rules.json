@@ -1,6 +1,119 @@
 {
+  "_说明": "自研规则热更配置。改完本文件立即生效（无需重启服务器）。enabled=false 或删除本文件 = 原版行为。",
+  "_热更边界": "本文件只控制规则「参数」；规则逻辑在 server/ 代码里，改动逻辑仍需重启。",
   "rewardOffer": {
-    "enabled": false,
-    "slots": []
+    "_说明": "干员三选一定向（weight 概率加权）（晋升奖励/免费挑选）。slots 按候选位置映射：slot 0 = 第一张，slot 1 = 第二张…未列出的位置保持纯随机。",
+    "_kind": "mainCount = 激活人数最多的主盟约（核心盟约激活阈值 3）；maxLayers = 层数最多的副盟约。",
+    "_mode": "weight（2026-10-07 用户改）：三选一不再指定命中，只把主/副盟约干员的权重 ×mult（柔和概率提升）",
+    "enabled": true,
+    "slots": [
+      {
+        "slot": 0,
+        "kind": "mainCount",
+        "minCount": 3,
+        "mult": 2.6,
+        "mode": "weight"
+      }
+    ]
+  },
+  "itemOffer": {
+    "_说明": "装备甄选：提高「与目标盟约同阵营、可参与变形同构体转职」的装备出率（数据判定 giveBondId === 目标盟约）。只作用于商店装备槽。",
+    "_覆盖": "14 个阵营各有 1 件可出的转职装备：坚守盾牌T1、维式重锤T1、萨尔贡浓茶T2、不屈弹射器T2、炎国短刀T3、阿戈尔重刃T3、奥术法阵T3、精准狙击镜T3、叙拉古正装T3、迅捷作战粮T3、突袭手雷T3、卡西米尔竞技旗T4、拉特兰桥夹T4、谢拉格不融冰T5",
+    "_minRound": "从第几回合起生效（含）。0 = 全程生效。",
+    "_targetBond": "mainCount（默认，当前激活人数最多的盟约）或固定盟约 id（如 yanShip）",
+    "_onTierMiss": "当前 tier 层没有该阵营装备时：fallback（默认，退到最近的含该装备的层，保证命中）| random（保持层级，退回随机）",
+    "_mode": "filter（默认，必须是该阵营装备）| weight（只提高其权重，不限定）",
+    "enabled": true,
+    "minRound": 6,
+    "mult": 2.6,
+    "mode": "weight",
+    "targetBond": "mainCount",
+    "minCount": 3,
+    "onTierMiss": "fallback"
+  },
+  "prepDebt": {
+    "_说明": "休整期负债规则 v3：净负债 net = Σmax(0,−lp) − Σmax(0,lp−Ā)（Ā=26，全策略排除歌利亚45的平均向上取整）。net>0 每满一份 Ā 敌人 HP ×(1+k)，封顶 cap；net<0 每份 ×(1−k2)，下限 floor；net=0 ⇒ ×1。只有真正负血才算负债，高出血是存款。",
+    "enabled": true,
+    "k": 0.3,
+    "k2": 0.15,
+    "cap": 1.05,
+    "floor": 0.85
+  },
+  "roundLottery": {
+    "_说明": "回合抽奖（2026-10-08）：指定回合给玩家送装备抽奖，复用凯瑟琳「定向投放」的商店栏 pick-one 面板。rolls = 该回合推几轮独立抽奖，choices = 每轮几选 1（rolls=2, choices=5 ⇒ 两轮独立 5 选 1）。rounds = 回合表，每项 { round, minTier, maxTier? }：minTier = 装备池最低阶（1=全阶混池，2=去 T1，3=去 T1/T2…），maxTier 默认 6（全阶；填 \"shopLevel\" 则按该玩家商店等级限制上限）。includeBots 默认 false = 不给 AI 发。",
+    "enabled": true,
+    "rolls": 2,
+    "choices": 5,
+    "label": "军备抽奖",
+    "includeBots": false,
+    "rounds": [
+      {
+        "round": 3,
+        "minTier": 1
+      },
+      {
+        "round": 6,
+        "minTier": 2
+      },
+      {
+        "round": 10,
+        "minTier": 3
+      }
+    ]
+  },
+  "extraRounds": {
+    "_说明": "回合编排（2026-10-08）：延后 BOSS，给玩家更多发育回合。insertAfter 之后插入 count 个发育回合（原 BOSS/隐藏 BOSS/最后回合全部顺延 count）。插入回合**复用 templateRound 的波次与时长**，但敌人组合从 poolTemplates 里逐回合随机挑（同档不同编排 = 多样性），难度按 curve 策略。官方 data/ 零改动。",
+    "_curve": "stretchShape（形状保持的横向拉伸：第 r 回合取官方 r×13/17 处的 k，**全程 ≤ 官方**，最柔和——用户 2026-10-08 定稿）| stretch（线性重排：端点不变但前中期略陡）| append（接着 k 递增 ×1.2/回合）| smooth（平摊一级）| flat（不涨）",
+    "_公式": "官方反解：hp = curveBase × curveRate^k，atk = curveBaseAtk × curveRateAtk^k（k = config 里 enemyScale[回合].kHp/kAtk，已验证 0.8×1.2^k 与表逐值吻合）。",
+    "_poolTemplates": "怪组多样性池（波次模板 id）。留空 = 只用 templateRound 自己的模板（4 个回合完全一样）。后期 h04/h05/h06 敌种相同、仅数量与编排不同，适合当同档池。",
+    "enabled": true,
+    "insertAfter": 13,
+    "count": 4,
+    "templateRound": 13,
+    "curve": "stretchShape",
+    "curveBase": 0.8,
+    "curveRate": 1.2,
+    "curveBaseAtk": 0.8,
+    "curveRateAtk": 1.1,
+    "mixPerRound": true,
+    "poolTemplates": [
+      "act1autochess_h04",
+      "act1autochess_h05",
+      "act1autochess_h06"
+    ]
+  },
+  "pacing": {
+    "_说明": "对局节奏（2026-10-08）：**分项加时**，只改时长不改难度。bandDraftMul = 策略轮选每轮时长倍率（1.5 = 30 秒 → 45 秒）；spDraftMul = 机变每轮时长倍率；prepMul = 休整期时长倍率。**前两项热改立即生效**（下一个轮次用新值），休整期同理。",
+    "_combatSpeed": "对局速度（游戏秒/现实秒）。官方强制 2×，默认不启用（null/省略 = 用官方 2）。填 >0 即启用（如 3 = 3 倍速，战斗更快推进）。⚠️ **不热改**：战斗时间轴按开局速度换算，中途变速会让游戏内时间与现实时间错位——改完需**重开一局**。",
+    "enabled": true,
+    "bandDraftMul": 1.5,
+    "spDraftMul": 1.5,
+    "prepMul": 1,
+    "combatSpeed": null
+  },
+  "_调参记录": "2026-10-07 用户要求「甄选概率同比提高 30%」：mult 2→2.6（实测装备甄选出率 17.83%→22.25%，即 ×1.248≈+25%；干员 filter 模式本身即 100% 命中，mult 不参与）。",
+  "bossHp": {
+    "_说明": "BOSS 血量倍率（2026-10-08）：最终系数 = mul × min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))。layerSum = 本局所有活人的盟约层数总和（主 BOSS/隐藏 BOSS 开打时取值）。BOSS 血池在开打瞬间生成——改配置对**尚未开始**的 BOSS 战生效。",
+    "_layerFloor": "层数免计水位：官方 13 回合水位以内的部分不加压（设 0 = 全部计入）。发育回合攒下的超出部分才加压。",
+    "_默认值": "layerK=0.0005 ⇒ 每 200 层 +10% 血量；layerCap=5 封顶防爆炸。",
+    "enabled": true,
+    "mul": 2,
+    "layerK": 0.01,
+    "layerFloor": 0,
+    "layerCap": 7
+  },
+  "grant": {
+    "_说明": "GM 实时发放总开关（2026-10-12 补）：/console「发放棋子/装备/发钱」面板的闸。enabled=false 时发放接口一律 403——原版没有任何 GM 发放能力，全关 = 原汁原味才彻底成立。",
+    "enabled": true
+  },
+  "prepUndo": {
+    "_说明": "休整期撤回（2026-10-15）：休整期内玩家自己的一切操作（刷新/买卖/装备/销毁/移动/升级商店）都可撤回，含资源返还（资金、卡池占用、DIY 库存）与随机流回滚（rngMeta/rngShop，防 SL）。快照式实现：每个可撤回操作执行前拍玩家全量快照，g.undo 弹栈恢复。撤回栈在阶段切换/回合推进时清空。enabled=false 时 g.undo 一律拒绝。",
+    "_maxDepth": "撤回栈上限（每回合每玩家）。快照含整块玩家状态，1 条 ≈ 几 KB，32 条足够覆盖一次休整期的全部操作。",
+    "enabled": true,
+    "maxDepth": 32
+  },
+  "music": {
+    "_说明": "音乐播放器（2026-10-15）：内置音源（游戏 BGM + 塞壬唱片官方 OST）+ 外置音源（lx-music 自定义源脚本，浏览器本地执行）。服务器只代理塞壬 JSON 元数据（磁盘缓存 .cache/music，TTL 24h，命中零外网）；音频/封面 CORS=* 由浏览器直连 CDN，服务器零带宽；外置音源的第三方请求也全部从玩家机器直出。enabled=false 时 /music/* 一律 404——原版没有播放器，全关 = 原汁原味。",
+    "enabled": true
   }
 }

@@ -1,0 +1,50 @@
+/* ==========================================================================================
+   screens/game-player.css — 自研音乐播放器（ui/player.js, 2026-10-15）。
+   三个 tab：内置 BGM（本地曲目，零流量）/ 塞壬唱片 OST（元数据服务器缓存 + 音频 CDN 直连）/
+   外部音源（lx-music 自定义源脚本，浏览器本地执行）。
+   ========================================================================================== */
+
+.player { display: flex; flex-direction: column; gap: .12rem; min-height: 4rem; max-height: 60vh; }
+.player__tabs { display: flex; align-items: center; gap: .06rem; padding-bottom: .08rem; border-bottom: 1px solid var(--line-2); }
+.ptab-btn {
+  height: .34rem; padding: 0 .14rem; background: transparent; border: 1px solid transparent; border-radius: .04rem;
+  color: var(--text-md); font-size: .16rem; font-weight: 700; letter-spacing: .08em; cursor: pointer;
+}
+.ptab-btn:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+.ptab-btn.is-on { color: var(--mint-400); border-color: var(--mint-700); background: rgba(95, 224, 185, .08); }
+.player .grow { flex: 1; }
+
+.ptab { display: flex; flex-direction: column; gap: .06rem; overflow-y: auto; padding: .06rem .02rem; }
+.phint { margin: 0 0 .06rem; font-size: .13rem; line-height: 1.5; color: var(--text-dim); }
+.perr { margin: .04rem 0; font-size: .13rem; color: #ff8f8f; }
+
+.ptrack {
+  display: flex; align-items: center; gap: .1rem; width: 100%; padding: .06rem .1rem;
+  background: rgba(255, 255, 255, .03); border: 1px solid var(--line-2); border-radius: .06rem;
+  color: var(--text); cursor: pointer; text-align: left; transition: background var(--t-fast), border-color var(--t-fast);
+}
+.ptrack:hover { background: rgba(255, 255, 255, .07); }
+.ptrack.is-on { border-color: var(--mint-500); background: rgba(95, 224, 185, .1); }
+.ptrack__art {
+  flex: 0 0 auto; width: .44rem; height: .44rem; display: grid; place-items: center; overflow: hidden;
+  background: rgba(0, 0, 0, .35); border-radius: .04rem; color: var(--text-dim);
+}
+.ptrack__art img { width: 100%; height: 100%; object-fit: cover; }
+.ptrack__meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .02rem; }
+.ptrack__name { font-size: .15rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptrack__sub { font-size: .12rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptrack__play { flex: 0 0 auto; color: var(--text-dim); }
+.ptrack.is-on .ptrack__play { color: var(--mint-400); }
+
+.prow { display: flex; align-items: center; gap: .08rem; flex-wrap: wrap; }
+.prow select, .prow input {
+  height: .3rem; padding: 0 .08rem; background: rgba(0, 0, 0, .3); border: 1px solid var(--line-2);
+  border-radius: .04rem; color: var(--text); font-size: .13rem;
+}
+.prow input { flex: 1; min-width: 1.2rem; }
+.pcode {
+  width: 100%; min-height: 1.6rem; padding: .08rem; resize: vertical;
+  background: rgba(0, 0, 0, .35); border: 1px solid var(--line-2); border-radius: .04rem;
+  color: var(--text); font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: .12rem; line-height: 1.5;
+}
+.gm__music .icon { color: var(--mint-400); }

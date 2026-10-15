@@ -206,6 +206,13 @@
       <p class="hint">层数折算：<code>layerMul = min(layerCap, 1 + layerK × max(0, layerSum − layerFloor))</code>，layerSum = 全场活人的盟约层数总和（主 BOSS 开打时取值，隐秘核心沿用）。默认 <code>layerK=0.0005</code> ⇒ 每 200 层 +10% 血量；<code>layerFloor</code> 可把官方水位以内的层数免计；<code>layerCap=5</code> 封顶防爆炸。</p>
     </div>
   </section>
+  <!-- ⑩ 音乐播放器（自研 2026-10-15） -->
+  <section class="panel" data-panel="music">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="music"> 音乐播放器（music）</label></h2>
+      <p class="desc">内置音源（游戏 BGM 16 首 + 塞壬唱片官方 OST 专辑）+ 外置音源（lx-music 自定义源脚本，浏览器本地执行，Apache-2.0 规范兼容）。服务器只缓存塞壬 JSON 元数据（<code>.cache/music</code>，TTL 24h，命中零外网）；音频/封面 CORS=* 由浏览器直连 CDN，服务器零带宽。<b>关掉 = 原版没有任何播放器。</b></p>
+    </div>
+  </section>
   <!-- ⑨ 休整期撤回（自研 2026-10-15） -->
   <section class="panel" data-panel="prepUndo">
     <div class="card">
@@ -356,6 +363,7 @@ function setStat(d) {
   if (d.rules?.bossHp) on.push('BOSS 血量');
   if (d.rules?.grant) on.push('GM 发放');
   if (d.rules?.prepUndo) on.push('撤回');
+  if (d.rules?.music) on.push('播放器');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -379,10 +387,11 @@ function ensureShape() {
   cfg.bossHp = cfg.bossHp || { enabled: true, mul: 1, layerK: 0.0005, layerFloor: 0, layerCap: 5 };
   cfg.grant = cfg.grant || { enabled: true };
   cfg.prepUndo = cfg.prepUndo || { enabled: true, maxDepth: 32 };
+  cfg.music = cfg.music || { enabled: true };
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['prepUndo','休整期撤回'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['prepUndo','休整期撤回'],['music','音乐播放器'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';

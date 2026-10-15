@@ -15,6 +15,7 @@
 import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
 import { buildTag } from './buildTag.js';
 import { handleCustomRoutes } from './customRoutes.js';
+import { handleMusicRoutes } from './musicRoutes.js'; // 自研音乐播放器代理（/music/*，2026-10-15）
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
 import { clientAddress, isLocalIp } from '../net.js';
 
@@ -53,6 +54,18 @@ const wantsTraffic = (query) => /(?:^|&)traffic(?:=(?:1|true|yes))?(?:&|$)/i.tes
  *   trustProxy: whose forwarding headers name the client (net.js clientAddress; the server's TRUST_PROXY)
  * @returns {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void}
  */
+/**
+ * 自研音乐播放器总开关（custom-rules.json music.enabled，热更）。失败/未配置 ⇒ false（原版行为）。
+ * @param {{ customRules?: (opts?: any) => any }} health 宿主注入的规则读取器（server/index.js 传入）
+ */
+function musicEnabled(health) {
+  try {
+    const get = health && typeof health.customRules === 'function' ? health.customRules : null;
+    if (!get) return false;
+    return !!get().music;
+  } catch { return false; }
+}
+
 export function createRequestHandler({ serveStatic, health, log, custom, trustProxy = 'auto' }) {
   async function handleRequest(req, res) {
     const url = req.url || '/';
@@ -66,6 +79,10 @@ export function createRequestHandler({ serveStatic, health, log, custom, trustPr
     // 自研路由（customRoutes.js，2026-10-08 起）：/monitor 监控台、/console 规则控制台（含 POST API）、
     // /lan/room 房间探测。它们自带方法与内网来源校验，所以排在全站 GET/HEAD 检查之前；未命中返回 false 落回静态。
     if (await handleCustomRoutes({ req, res, parts, deps: { ...health, publicDir: custom?.publicDir, log } })) return;
+    // 自研音乐播放器（musicRoutes.js）：/music/siren/*（塞壬 JSON 元数据代理，磁盘缓存）与 /music/proxy（lx 脚本
+    // CORS 兜底）。音频/封面走 CDN 直连不经此路由。music 规则关闭（custom-rules.json music.enabled=false）时
+    // 内部直接 false 落回静态（404 = 原版没有播放器）。
+    if (await handleMusicRoutes(req, res, parts, log, musicEnabled(health))) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');

@@ -442,3 +442,42 @@
 
 **验证**（tools/prep-undo.test.mjs，11/11 绿）：购买/刷新/连环撤/重做/升级商店恢复、池占用与 DIY 库存回滚、失败不入栈、深度上限、规则关闭拒绝且零入栈（原版行为）、跨阶段拒绝、撤回后引擎不变量（invariants）仍成立。全套自研测试单跑全绿（93 tests）；引擎回归 abc 181/182（唯一 fail 是 bot-emotes 的 cwd 相对路径问题，与本次改动无关，从仓库根跑 9/9 绿）、gilm 60/60、def/prstuw 后台跑全绿。golden 基线不受影响（SP_OFFICIAL_RULES=1 下 _undoRule 直接短路）。
 
+
+## 音乐播放器（music，2026-10-15）
+
+**需求（用户 2026-10-15）**：内置播放器，音源分内置（游戏 BGM + 塞壬唱片官网 OST）与外置（lx-music 自定义源
+脚本，用户粘贴后点播）；约束：不增加服务器流量/内存开销，外置音源参考 lx-music-desktop（Apache-2.0）。
+
+**三源架构**：
+
+| 音源 | 元数据 | 音频 | 服务器成本 |
+| --- | --- | --- | --- |
+| 内置 BGM（16 首） | assets.json 清单（已随客户端） | 本地文件（已下载） | **0** |
+| 塞壬唱片 OST（298 专辑） | `/music/siren/*` 服务器代理，磁盘缓存 `.cache/music`（TTL 24h，命中零外网） | 浏览器直连 `res*.hycdn.cn`（CORS=* + Range） | **仅几十 KB JSON 缓存读** |
+| 外置音源（lx 脚本） | 浏览器内沙箱执行（`globalThis.lx` API 兼容层） | 第三方请求从玩家机器直发（CORS 失败走 `/music/proxy` 兜底，仅 JSON/文本 ≤512KB） | **0** |
+
+**零内存**：所有播放复用 audio.js 既有管道（`_buffer` → 64MB LRU → 淡入淡出）——新增的只有 `playTrack(track, label)`
+一个入口与 `manualBgm` 锁字段。install 的自动 BGM 在 manualBgm 期间让位（玩家点「回到自动 BGM」解锁）。
+
+**文件**：
+- `public/js/ui/player-core.js` — 纯逻辑层（Node 可单测）：builtinTracks 曲目推导、塞壬 API 客户端、
+  lx 脚本沙箱（loadLxScript/parseLxHeader/lxMusicUrl，`new Function` 临时挂 globalThis.lx，执行后摘除）；
+- `public/js/ui/player.js` — UI 层（PlayerPanel 三 tab + TrackRow + CustomSourceTab 脚本粘贴/点播）；
+- `server/http/musicRoutes.js` — `/music/siren/*` 白名单代理（albums/album:cid/song:cid，路径穿越 404）+
+  `/music/proxy` CORS 兜底（拒音频/二进制），挂载于 routes.js（music.enabled 热读，关掉 = 404 原版行为）；
+- `public/css/screens/game-player.css` — 面板样式；入口在 game.js 角落按钮区（`.gm__music`，signal 图标）。
+
+**lx-music 兼容范围**：EVENT_NAMES（request/inited/updateAlert）、on/send/request（fetch 版）、utils.buffer
+（TextEncoder 垫片）、utils.crypto.md5（FNV-1a 非安全替身，注释标明）、utils.zlib 抛错（不用）。
+inited 的 `sources` 声明透传；musicUrl 支持返回 string 或 {url}。local 源的 lyric/pic 未实现（播放器只用 musicUrl）。
+
+**坑**：① 塞壬单曲是 **WAV 无损（~56MB）**——绝不能走服务器；好在 sourceUrl 直链 CORS=* + Range，
+浏览器流式解码即可（WebAudio 不要求全量）；② API 无 CORS ⇒ 必须服务器代理，但代理的只是几十 KB JSON；
+③ lx 沙箱的 `request` 在浏览器跨域失败时由 `/music/proxy` 兜底（仅 JSON，音频一律拒绝走 CDN）。
+
+**验证**：tools/music-routes.test.mjs 4/4（开关/缓存/白名单/proxy 拒绝）、tools/music-player.test.mjs 7/7
+（曲目推导 + lx 沙箱全行为含坏脚本安全失败）、test/ui/player.e2e.test.js 1/1（无头 Edge 全流程：三 tab、
+点播上锁、回到自动解锁、塞壬代理请求、外部输入框）。economy/bonds/diy-shop 回归 27/27。
+
+**已知边界**：manualBgm 锁只防 install 的自动切换；玩家在面板里另点一首会自然替换（预期行为）。
+塞壬曲目的 WAV 首播会等 CDN 传输（大文件，进度条由浏览器原生行为承担）。

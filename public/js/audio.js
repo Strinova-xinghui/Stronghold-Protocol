@@ -614,6 +614,8 @@ export class AudioManager {
     this.wantBgm = null;      // desired key (kept while locked)
     this.bgm = null;          // { key, loopUrl, nodes: [{src, gain}], gain }
     this.bgmToken = 0;
+    /** 自研播放器（music player）：手动播放锁——非 null 时阶段自动 BGM 不覆盖（ui/player.js）。 */
+    this.manualBgm = null;
     this.units = new Map();   // battle unit id → defId
     this.pendingSkill = new Map(); // unit id → the 'skill' tuple that arrived before the unit was known (see _track)
     this.lastAttacker = new Map(); // target id → { def, at, skillIndex, skillActive } of the hostile attack aimed at it (its impact sound,
@@ -752,7 +754,12 @@ export class AudioManager {
     this._applyVolumes();
     if (this.volumes.muted || this.volumes.sfx <= 0) this.stopBondCue();
     // the music became audible again: download and start the track the screen wants now (none was fetched meanwhile)
-    if (wasSilent && !this.bgmSilent && this.ctx && this.wantBgm) { const k = this.wantBgm; this.wantBgm = null; this.playBgm(k); }
+    if (wasSilent && !this.bgmSilent && this.ctx) {
+      // 自研播放器：静音期间记住的手动曲优先恢复，否则放阶段自动 BGM
+      const man = this.manualBgm;
+      if (man) { this.manualBgm = null; this.playTrack(man, man.label); return; }
+      if (this.wantBgm) { const k = this.wantBgm; this.wantBgm = null; this.playBgm(k); }
+    }
     if (this.landWarm && this.ctx && !this.volumes.muted && this.volumes.sfx > 0) this.warmLandings();
   }
 
@@ -882,6 +889,39 @@ export class AudioManager {
       this._startBgm(key, track, token);
     } catch (err) { this._warn('bgm', err); }
   }
+
+  /**
+   * 自研播放器（music player）：手动播放一个音轨 { url, introUrl? }，上 manualBgm 锁。
+   * 与自动 BGM 共用同一条 _buffer → LRU → 淡入淡出管道（零新增机制、零新增内存预算）。
+   * @param {{ url: string, introUrl?: string|null }} track
+   * @param {string} [label] 供日志/UI 的曲目标识
+   */
+  playTrack(track, label = 'manual') {
+    try {
+      if (!this.ctx || !track || typeof track.url !== 'string' || !track.url) return;
+      if (this.bgmSilent) {
+        // 静音期只记住选择（与自动 BGM 一致）：解除静音时 startManualTrack 再放
+        this.manualBgm = { ...track, label };
+        this.wantBgm = null;
+        this._fadeOutBgm();
+        return;
+      }
+      this.manualBgm = { ...track, label };
+      this.wantBgm = null;
+      const token = ++this.bgmToken;
+      this._fadeOutBgm();
+      this._startBgm('manual:' + label, { intro: track.introUrl || null, loop: track.url }, token);
+    } catch (err) { this._warn('playTrack', err); }
+  }
+
+  /** 自研播放器：解除手动锁，交还阶段自动 BGM（重新触发一次自动选择由调用方负责）。 */
+  clearManualBgm() {
+    this.manualBgm = null;
+    this.wantBgm = null;
+  }
+
+  /** 自研播放器：当前是否锁着手动播放。 */
+  get manualPlaying() { return !!this.manualBgm; }
 
   async _startBgm(key, track, token) {
     const [intro, loop] = await Promise.all([track.intro ? this._buffer(track.intro) : null, this._buffer(track.loop)]);
@@ -1442,6 +1482,9 @@ export function installAudio(deps) {
             // A new prep gain can precede its m.public phase update. Cancel only the previous battle's cue.
             audio.stopBondCue('battle');
           }
+          // 自研播放器（music player）：手动播放期间锁住自动切换（玩家点了「回到自动」才解锁，ui/player.js）。
+          // 自动 BGM 仍按阶段更新（install 订阅继续跑），只是不覆盖手动选择的那首。
+          if (audio.manualBgm) return;
           // 开战 BGM: the round's own track out of bgm.combatAlts (骑士之日 / 无畏者 are fixed per round, not drawn),
           // so every client of a room hears the same one, a mid-fight re-render (or a teammate view) never switches,
           // and the next round moves on by the table. 联防 shares its round ⇒ same key ⇒ the loop keeps playing.

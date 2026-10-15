@@ -41,6 +41,7 @@ import { createTrafficCounter } from './http/traffic.js';
 import { createAssetIndex } from './http/assetIndex.js';
 import { createManifestViews } from './http/assetViews.js';
 import { answerClientError } from './http/common.js';
+import { getCustomRules } from './match/customRules.js'; // 自研：规则热读（音乐播放器开关等）
 import { lanUrls, displayHost, isProcessEntry, runMain } from './http/boot.js';
 
 // The public API of this module (tests and tools import it from here); the code lives in ./http/.
@@ -90,7 +91,9 @@ export async function startServer(opts = {}) {
   buildTag();
 
   const traffic = createTrafficCounter();
-  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views }, custom: { publicDir }, log, trustProxy: network.opts.trustProxy }));
+  // 自研音乐播放器（2026-10-15）：把规则读取器挂进 health，routes.js 的 /music/* 路由据此开关（music.enabled）。
+  // 热更：customRules 带 mtime 缓存，不需要重启。
+  const server = http.createServer(createRequestHandler({ serveStatic, health: { startedAt, network, registry, lobby, traffic, assetIndex, views, customRules: () => getCustomRules({ log }) }, custom: { publicDir }, log, trustProxy: network.opts.trustProxy }));
   server.on('clientError', answerClientError);
   const wss = attachWebSocket(server, { network, log, traffic });
 

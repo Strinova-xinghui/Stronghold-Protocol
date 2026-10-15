@@ -480,6 +480,7 @@ async function consoleApiWrite(req, res, log) {
     if (rules.bossHp) on.push(t('BOSS 血量'));
     if (rules.grant) on.push(t('GM 发放'));
     if (rules.prepUndo) on.push(t('撤回'));
+    if (rules.music) on.push(t('播放器'));
     log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
     sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? t('生效中：{0}', { 0: on.join(' / ') }) : t('全部关闭（原版行为）') });
   } catch (e) {
