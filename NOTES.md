@@ -580,3 +580,24 @@ acc 恒 0」的白嫖路径）→ 恢复全绿。
 互相踩 → 33 红。自研套件必须 `--test-concurrency=1` 串行。踩坏后 `git checkout HEAD -- config/…`
 这次是对的（HEAD 已是 120 行完整版；旧教训「HEAD 是最小版」随提交推进已失效——恢复前先
 `git show HEAD:config/custom-rules.json | grep music` 验证）。
+### 去掉外部音源（2026-10-16 凌晨，用户决定：「去掉外部源，但保留已实现的全功能播放器」）
+
+**连带裁定**：「搜索点歌」（网易云/酷狗）是外部源的子功能——搜索结果取播放链接必须靠 lx 脚本
+（实测无脚本就没有免费直链：酷狗 playresource 端点已死、网易云 outer 返回 HTML；服务器代理音频
+又违反零流量红线）。所以砍外部源 = 搜索点歌一起走；**塞壬 tab 自带专辑检索，仍是完整曲库**。
+
+- 删除面（净 -641 行，提交 0ae4d636）：player-core 的 lx 沙箱/fetchLxScript/lxSearch/wyLyric/lxLyric/
+  fmtDur/parseLxHeader/fnvHex；player.js 的 CustomSourceTab/lxItem/lxItemLazy/lxLive/favItem ext 分支/
+  custom tab（4→3）；服务端 `/music/proxy` 路由 + PROXY_HOST_HEADERS/PROXY_FWD_HEADERS（唯一调用方
+  消失，顺手收回 SSRF 攻击面）；三套测试对应 describe；console/配置注释同步。
+- **保留全套**：统一队列（点一首 = 当前可见列表排队列、播完自动连播）、控制条（进度/暂停/上下曲/
+  循环三态）、滚动歌词（塞壬官方 .lrc 直连）、收藏 tab、塞壬搜索、UI 出界修复。
+- 收藏兼容：favLoad 过滤 `kind=siren|builtin`，localStorage 里遗留的 ext 收藏静默丢弃（不炸不占）。
+- 🐛 顺手修真 bug：**favStore 初值漏调 favLoad()** —— 收藏刷新即丢，且下一次 favToggle 会拿空
+  列表覆盖 localStorage（全丢）。e2e 加「收藏→reload→仍在」回归锁（提交 cbcf4cd8）。
+- ⚠️ 工具坑（一夜踩两次，记死）：`String.replace(pat, 串)` 的替换串里 `$$` 转义成 `$` —— 测试里
+  `$$eval` 被写成 `$eval`（单元素回调拿不到数组 → undefined/崩）。**替换串一律用 `(() => str)` 函数形式**。
+
+验证：music 单测 11/11、e2e 3/3（外部源已移除断言 + 持久化锁）、prep-undo 22/22（`--test-concurrency=1`
+串行老规矩）、meta 8/8、i18n en 100%（stale 干净）。云端两次闪断上线（matches=0），线上实测
+/music/proxy→404、/music/siren/albums→200、bundle 无 CustomSourceTab、favLoad 已水合、build 04fb27bfc60e。
