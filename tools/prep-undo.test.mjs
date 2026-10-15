@@ -267,3 +267,112 @@ describe('休整期撤回 · 开关与边界', () => {
 // 还原配置
 test.after?.(undefined);
 process.on('exit', () => { fs.writeFileSync(CUSTOM_RULES_PATH, original); });
+
+// ---- 消费计数器撤回（2026-10-15 用户实测漏洞）：绮良【通关奖励】每花 20 资金给随机干员，
+// counters 不在快照里 ⇒ 买/刷→撤回→再买 无限累计 acc ⇒ 白刷干员。修复 = counters 入快照。
+describe('休整期撤回 · 策略计数器（绮良/潘格尼尼/克劳妮/商业包装）', () => {
+  /** solo 局指定策略推进到 PREP R1。 */
+  function setupBand(bandId, seed = 141) {
+    writeCfg({ prepUndo: { enabled: true, maxDepth: 32 } });
+    const h = makeMatch({ mode: 'solo', difficulty: 'NORMAL', humans: 1, seed, registry: REG, fake: true });
+    h.start();
+    h.toPrep(1, { band: bandId });
+    const m = h.m;
+    const a = [...m.players.values()].find((p) => !p.isBot);
+    a.funds = 99;
+    return { m, a, h };
+  }
+
+  test('绮良：买→撤回后 acc 计数器回滚（撤回不能白刷干员）', () => {
+    const { m, a } = setupBand('band_kirara', 141);
+    assert.equal(a.counters['band:kirara:acc'] || 0, 0, '起始 acc=0');
+    const slot = buyableChessSlot(a);
+    assert.ok(Number.isInteger(slot));
+    const price = a.shop.slots[slot].basePrice;
+    assert.ok(m.handle(a.playerId, { t: 'g.buy', slot }).ok);
+    assert.ok((a.counters['band:kirara:acc'] || 0) > 0, '绮良策略生效：买一次 acc 增长（价格 ' + price + '）');
+    assert.ok(a.hand.filter(Boolean).length >= 1, '买入后手牌至少 1 个');
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok, '撤回成功');
+    assert.equal(a.counters['band:kirara:acc'] || 0, 0, '撤回后 acc 回滚到 0（漏洞版：停在 ' + price + '，反复撤回=白刷）');
+    assert.equal(a.hand.filter(Boolean).length, 0, '手牌回到买入前（空）');
+  });
+
+  test('绮良：acc=19 时买→撤回，acc 与触发奖励都精确回滚', () => {
+    const { m, a } = setupBand('band_kirara', 142);
+    a.counters['band:kirara:acc'] = 19;
+    const slot = buyableChessSlot(a);
+    const price = a.shop.slots[slot].basePrice;
+    const hand0 = a.hand.filter(Boolean).length;
+    assert.ok(m.handle(a.playerId, { t: 'g.buy', slot }).ok);
+    // 19+price ≥ 20：触发发干员，acc 变为 19+price-20
+    assert.ok(a.hand.filter(Boolean).length > hand0 - 1, '触发检查（发干员进手牌/临时区）');
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    assert.equal(a.counters['band:kirara:acc'], 19, 'acc 回到 19（漏洞版：' + (19 + price - 20) + '，下次买 ' + (21 - price) + ' 就能再刷）');
+    assert.equal(a.hand.filter(Boolean).length, hand0, '白送的干员随撤回收回');
+  });
+
+  test('通用：counters 全量随快照回滚（任意策略/效果计数器）', () => {
+    const { m, a } = setupBand('band_kirara', 143);
+    a.counters['t:manual'] = 7;
+    assert.ok(m.handle(a.playerId, { t: 'g.refresh' }).ok);
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    assert.equal(a.counters['t:manual'], 7, '手动计数器不受撤回影响地回滚到快照值');
+  });
+});
+
+describe('休整期撤回 · 效果计数器（用户 2026-10-15 报：绮良【通关奖励】刷新再撤回白攒计数器）', () => {
+  test('绮良：刷新→撤回循环不涨 band:kirara:acc，不白送干员', () => {
+    const { m, a } = setup(777);
+    a.bandId = 'band_kirara'; // 【通关奖励】每使用 20 资金获得 1 名随机干员（acc 计数器在 ps.counters）
+    a.recompute();
+    a.funds = 300; // 够 20+ 次刷新（refreshPrice 1）
+    const hand0 = a.hand.filter(Boolean).length;
+    const price = m.gd.refreshPrice || 1;
+    const loops = Math.ceil(20 / price) + 5; // 阈值 20 资金 + 余量
+    for (let i = 0; i < loops; i++) {
+      const r = m.handle(a.playerId, { t: 'g.refresh' });
+      assert.ok(r.ok, '第 ' + i + ' 次刷新成功');
+      const u = m.handle(a.playerId, { t: 'g.undo' });
+      assert.ok(u.ok, '第 ' + i + ' 次撤回成功');
+    }
+    assert.equal(a.counters['band:kirara:acc'] || 0, 0, 'acc 计数器随撤回回滚（漏洞表现：一路涨到 20 白送干员）');
+    assert.equal(a.funds, 300, '资金没漏（撤回已覆盖）');
+    assert.equal(a.hand.filter(Boolean).length, hand0, '没有白送的干员进手牌');
+  });
+
+  test('潘格尼尼：累计花费计数器同样回滚（55 阈值不靠 SL 凑）', () => {
+    const { m, a } = setup(778);
+    a.bandId = 'band_paganini'; // 【定制铳械】累计花费 55 后给 1 名 4 阶+ 拉特兰精锐
+    a.recompute();
+    a.funds = 300;
+    const price = m.gd.refreshPrice || 1;
+    const loops = Math.ceil(55 / price) + 3;
+    for (let i = 0; i < loops; i++) {
+      assert.ok(m.handle(a.playerId, { t: 'g.refresh' }).ok);
+      assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
+    }
+    assert.equal(a.counters['band:paganini:spent'] || 0, 0, 'spent 计数器回滚');
+    assert.equal(a.counters['band:paganini:done'] || 0, 0, 'done 标志未点亮');
+  });
+});
+
+describe('休整期撤回 · 效果计数器（绮良漏洞，用户 2026-10-15 报告）', () => {
+  test('绮良「每花 20 资金给随机干员」：刷新→撤回循环不得白嫖累加计数器', () => {
+    const { m, a } = setup(207);
+    a.bandId = 'band_kirara';
+    const step = (m.gd.band('band_kirara').params || {}).coin_cnt || 20;
+    const hand0 = a.hand.filter(Boolean).length;
+    const accSeen = [];
+    // 每次刷新花 1 元、撤回返还 1 元：钱一分没花。若 acc 不随撤回回滚，
+    // 刷 step 轮就把 acc 白攒满 → 凭空多一个随机干员（无限刷干员）。
+    for (let i = 0; i < step + 5; i++) {
+      const r = m.handle(a.playerId, { t: 'g.refresh' });
+      assert.ok(r.ok, 'refresh ' + i + ': ' + JSON.stringify(r));
+      const u = m.handle(a.playerId, { t: 'g.undo' });
+      assert.ok(u.ok, 'undo ' + i + ': ' + JSON.stringify(u));
+      accSeen.push(a.counters['band:kirara:acc'] || 0);
+    }
+    assert.ok(accSeen.every((x) => x === 0), 'acc 必须恒 0（撤回回滚计数器），实际: ' + accSeen.join(','));
+    assert.equal(a.hand.filter(Boolean).length, hand0, '一次干员都不该白给');
+  });
+});

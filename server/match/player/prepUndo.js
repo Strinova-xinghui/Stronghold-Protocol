@@ -64,6 +64,12 @@ function snapshotPlayer(ps) {
     layers: clone(ps.layers),
     round: clone(ps.round),
     stats: clone(ps.stats),
+    // ---- 策略/效果计数器（用户 2026-10-15 实测漏洞：绮良【通关奖励】「每使用 20 资金获得随机干员」）----
+    // ctx.counter/incCounter/setCounter 的存储（server/match/effectsMeta.js）：绮良 band:kirara:acc、
+    // 潘格尼尼 band:paganini:spent/done、克劳妮 band:chiave:refreshes、松鼠 band:sciurus:r、
+    // 商业包装方案 pack:<uid>（卖出计数）。不随快照回滚 = 「买 → 撤回 → 再买」无限累计计数器白刷奖励
+    // （撤回返还资金，acc 却留着）——与 rng 回滚同类的 SL 漏洞。纯 { string: number }，克隆安全。
+    counters: clone(ps.counters),
     // ---- 池占用：自己每 base 的持有份数（恢复对账用，见上）----
     mineHeld,
     diyLeft,
@@ -101,6 +107,7 @@ function restorePlayer(ps, snap) {
   ps.layers = snap.layers;
   ps.round = snap.round;
   ps.stats = snap.stats;
+  ps.counters = snap.counters; // 策略计数器随快照回滚（绮良 acc 等，见 snapshotPlayer 注释）
   ps.prepsEnded = snap.prepsEnded;
   // 共享池对账：left = cap − 全场所有玩家的持有（A 恢复后的持有 = 恢复到字段里的手牌/棋盘 piece.poolCopies）。
   // 其他人同期的买卖不动——他们还持有的份数被自然减去；A 自己的持有随快照回滚。
