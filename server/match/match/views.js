@@ -12,6 +12,10 @@ import { bountySpawns, previewOf } from '../waves.js';
 import { timelineAt } from '../fields.js';
 import { bossFieldPlacement } from '../finalAssault.js';
 import { battleProgress } from '../../sim/spec.js';
+// 自研 bossBgm（2026-10-16）：BOSS 战 / 指定回合 BGM 替换——本回合作战期用哪首自定义曲目，由服务器在
+// m.public.bgmTrack 下发（与 debt/pacing 同一热读口径，mtime 改配置下一帧视图即生效）。零素材成本：
+// track 只是 loop 文件名的 stem，客户端 resolveBgm 从它查已就位的 assets 清单；未命中 = 不下发该字段。
+import { getCustomRules, bossBgmTrackFor } from '../customRules.js';
 
 /** A reported capsule numerator clamped to its denominator, else null (unknown — never a fabricated 0). */
 const finiteOrNull = (v, cap = Infinity) => {
@@ -147,6 +151,16 @@ export class MatchViews {
         avgHp: this._debtAvgHp,
         debt, savings, net: debt - savings,
       };
+    }
+    // BOSS 战 / 指定回合 BGM 替换（自研 bossBgm 2026-10-16）：命中本回合作战期规则时下发曲目 stem。
+    // 作战期 = COMBAT（普通回合）与 FINAL_ASSAULT / HIDDEN_CORE（BOSS 回合作战期）。联防 UNITE **不替换**：
+    // 官方本就给联防单独放「蚀刻章」（bgm.unite），与回合日程无关——保持官方语义。
+    // 未命中（含规则全关）= 不发该字段，m.public 逐字节与官方一致；命中时多一条 ≤64 字节的字符串。
+    if (this.phase === PHASE.COMBAT || this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) {
+      let bbRules = null;
+      try { bbRules = getCustomRules({ log: this.log }); } catch { bbRules = null; }
+      const track = bossBgmTrackFor(bbRules, this.round);
+      if (track) v.bgmTrack = track;
     }
     // 最终攻势 / 隐秘核心: when the overtime drain starts (ms epoch; `deadline` is the level's 120 s countdown)
     if ((this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) && this.overtimeAt) v.overtimeAt = this.overtimeAt;

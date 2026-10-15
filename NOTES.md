@@ -601,3 +601,48 @@ acc 恒 0」的白嫖路径）→ 恢复全绿。
 验证：music 单测 11/11、e2e 3/3（外部源已移除断言 + 持久化锁）、prep-undo 22/22（`--test-concurrency=1`
 串行老规矩）、meta 8/8、i18n en 100%（stale 干净）。云端两次闪断上线（matches=0），线上实测
 /music/proxy→404、/music/siren/albums→200、bundle 无 CustomSourceTab、favLoad 已水合、build 04fb27bfc60e。
+
+## BOSS 战 / 指定回合 BGM 替换（bossBgm，2026-10-16，队友 boss-bgm）
+
+**需求**：休整期/作战期选 BGM 的官方日程固定（1–7 无畏者 / 8+ 骑士之日，BOSS 用领袖曲）。允许房主把
+「BOSS 回合（加时赛 18/19，未开则 14/15）作战期」或「任意第 N 回合作战期」换成指定曲目；未命中 = 官方
+日程逐字节不变。可多条规则。
+
+**设计决策**
+- **服务器下发，客户端不各自算**：作战期用哪首写进 `m.public.bgmTrack`（views.js publicView，命中才发，
+  未命中/全关 = 不发该字段 ⇒ 与官方逐字节一致）。1–6 人联机所有人听同一首、断线重连/中途渲染都稳定。
+  与 prepWait/debt 同一套「自研字段塞进 m.public，老客户端多余字段无副作用」的通道，shared/protocol.js
+  的 S2C 只是文档表（无字段白名单校验），**两端协议零改动**。
+- **零内存零流量红线**：曲目只引用 `data/assets.json` 已有的 loop 文件名 stem（如 `m_bat_rglk1phantomcastle`），
+  音频早随素材在 `public/assets`。服务器 = 每次视图多一次整数查表 + 命中时多吐一个 ≤64 字节字符串；
+  **绝不**把音频转码/复制/预载进服务器。客户端 `resolveBgm` 按 stem 从清单查 {intro,loop}，查不到 ⇒ null ⇒
+  回落官方日程（绝不静音/404），所以服务器侧只做宽松格式校验 `/^[a-z0-9_]{1,64}$/`（不解析 1.6MB 清单）。
+- **BOSS 语义对齐 extraRounds**：round 是**对局实际回合号**——开了加时赛 bossRound=18/hiddenRound=19，没开
+  官方 14/15。kind 字段（boss|round）仅控制台语义标注，命中只看 round（热读 bossRound 会在顺延中变，绑定
+  实际号最稳）。联防 UNITE **不替换**（官方本就给它单独放「蚀刻章」，与回合日程无关）。
+- 三要素齐：config/custom-rules.json 新增 `bossBgm` 段（默认 enabled:false）；customRules.js OFF+normalize+
+  导出纯函数 `bossBgmTrackFor(rules, round)`；console.html 新面板（data-panel="bossBgm" + data-en 开关 + 规则行编辑
+  （回合/kind/track，track 下拉候选从 /data/assets.json 懒加载枚举 bgm+bossBgm 的 loop stem，实测 33 个）；
+  customRoutes.js consoleApiRead/Write 两处汇总行加 `t('BOSS音乐')`。
+
+**踩坑与验证要点（供下次）**
+- 端到端测 `m.public` 帧：`h.drive(() => lastPub(...))` 判**帧**存在，别判 `m.phase`——phase 赋值先于
+  flush，帧晚一 tick（判 phase 会抽到 0 帧的空窗）。热更回落直接调 `m.publicView()`（视图构建器现读
+  customRules），绕开 PUBLIC_THROTTLE 广播时序，断言更干净。
+- `bossBgmTrackFor` 对入参做 Number 归一（views 传 this.round 恒整数），所以 `bossBgmTrackFor(r,'18')` 命中——
+  宽容无害，别当 bug 断言成 null。
+- `h.run(pred,{maxSteps})` 走 `sched.runUntil`：传 `()=>false` 会跑满 maxSteps（3M）卡死，别拿它「推进一 tick」。
+- console 面板 `el()` 用 setAttribute 兜底，datalist/label 任意属性可建。verify-console-ui 标签页硬编码数（原 9）
+  随面板增长已改 12 并加注释；bossBgm 规则行断言用相对计数（`bbBefore+1`），因为提交配置自带 2 条示例规则。
+
+**验证数据**（本机 PORT=24598，线上未碰）
+- boss-bgm.test.mjs 15/15（normalize 边界/命中纯函数/客户端 bgmKeyFor+stemBgmKey+resolveBgm 真实清单交叉/
+  端到端 COMBAT+FA18+HC19+联防不替换+局中热更+SP_OFFICIAL_RULES 全关+全关=官方逐字节）
+- 四套件串行（--test-concurrency=1）48/48：boss-bgm+prep-undo+music-player+music-routes
+- 自研 8 套件串行 92/92 全绿；check-missing-imports 通过；i18n en 100%（server t() 汇总行不进 en used 集，
+  与既有 BOSS血量/播放器 同构，无新增游戏内 UI 字符串）
+- verify-console-ui 34/34（新增 BOSS 音乐页 6 项：开关/添加/规则行/候选载入33/开关联动/还原干净）
+- golden --fast：diy-138 一处 MISMATCH，**stash 基线对照数字逐字节相同**（206.83→208.37、rngDraws 159→0）
+  ⇒ 历史遗留，与本次无关；roster/bonds/fields/matches/standins 全 match ⇒ 官方基线路径零 delta。
+- config/custom-rules.json 跑完 verify 与备份逐字节一致（示例规则保留、enabled 仍 false = 官方行为）。
+

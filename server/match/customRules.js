@@ -33,12 +33,12 @@ export const DEFAULT_EXCLUDE = Object.freeze(['soloShip', 'visiShip', 'miraShip'
 let cache = null;
 let warned = false;
 
-const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null });
+const OFF = Object.freeze({ rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null, bossBgm: null });
 
 const numOr = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
 
 function normalize(raw) {
-  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null };
+  const out = { rewardOffer: null, itemOffer: null, prepDebt: null, roundLottery: null, extraRounds: null, pacing: null, bossHp: null, grant: null, prepUndo: null, music: null, bossBgm: null };
   if (!raw || typeof raw !== 'object') return OFF;
 
   // ---- 干员三选一定向（rewardOffer）----
@@ -222,7 +222,34 @@ function normalize(raw) {
   const mu = raw.music && typeof raw.music === 'object' ? raw.music : null;
   if (mu && mu.enabled) out.music = Object.freeze({ enabled: true });
 
-  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant || out.prepUndo || out.music ? out : OFF;
+  // ---- BOSS 战 / 指定回合 BGM 替换（bossBgm，自研 2026-10-16）：把 BOSS 回合（extraRounds 顺延后的
+  //      bossRound=18 / hiddenRound=19，未开加时赛则为官方 14/15）或任意指定回合的**作战期**换成指定曲目。
+  //      rules 每条 { round, track }：round = 对局回合号（含加时赛顺延后的实际回合）；track = 曲目 stem
+  //      （loop 文件名去 _loop.mp3，如 m_bat_rglk1phantomcastle；客户端 assets 清单已就位，服务器零素材）。
+  //      可选 kind: 'boss' | 'round'——仅作语义标注（BOSS 回合 = 最终攻势/隐秘核心的作战/开打期），命中仍按
+  //      round 号；同回合多条 = 前者生效（列表序）。未命中任何规则 = 官方日程逐字节不变（audio.js bgmKeyFor）。
+  //      曲目合法性：服务器不解析 1.6 MB 的 data/assets.json（零新增内存/流量红线）——宽松校验 stem 格式
+  //      /^[a-z0-9_]{1,64}$/（manifest 里全部 loop stem 都符合），真正的存在性由客户端 resolveBgm 兜底：
+  //      清单里没有该 stem ⇒ 回落官方 key（'boss'/'combat' 日程），绝不静音、绝不 404。
+  const bb = raw.bossBgm && typeof raw.bossBgm === 'object' ? raw.bossBgm : null;
+  if (bb && bb.enabled) {
+    const src = Array.isArray(bb.rules) ? bb.rules : [];
+    const STEMS = /^[a-z0-9_]{1,64}$/;
+    const list = [];
+    for (const r0 of src) {
+      if (!r0 || typeof r0 !== 'object') continue;
+      const round = Math.trunc(numOr(r0.round, 0));
+      if (!(round >= 1) || round > 200) continue;              // 非法 round 丢弃
+      const track = typeof r0.track === 'string' ? r0.track.trim() : '';
+      if (!STEMS.test(track)) continue;                        // 非法 track 丢弃（宽松格式校验，见上注释）
+      const kind = r0.kind === 'boss' || r0.kind === 'round' ? r0.kind : 'round';
+      list.push(Object.freeze({ round, track, kind }));
+      if (list.length >= 64) break;                            // 硬上限：视图字段最多 64 条（防滥用撑大 m.public）
+    }
+    if (list.length) out.bossBgm = Object.freeze({ enabled: true, rules: Object.freeze(list) });
+  }
+
+  return out.rewardOffer || out.itemOffer || out.prepDebt || out.roundLottery || out.extraRounds || out.pacing || out.bossHp || out.grant || out.prepUndo || out.music || out.bossBgm ? out : OFF;
 }
 
 /**
@@ -255,6 +282,26 @@ export function getCustomRules({ log = null } = {}) {
 
 /** 测试用：丢弃缓存。 */
 export function resetCustomRules() { cache = null; warned = false; }
+
+/**
+ * BOSS 战 / 指定回合 BGM 替换（bossBgm，自研 2026-10-16）的**命中纯函数**：本回合作战期用哪首自定义曲目。
+ * 列表序取首条命中（同回合多条规则 = 先配的生效）。规则关闭 / 未命中 ⇒ null（官方日程不变）。
+ * 服务器唯一新增开销 = 每次 m.public 视图构建多这一次整数查找 + 命中时多下发一个 ≤64 字节的字符串字段；
+ * 音频文件本身已在客户端 assets 清单（public/assets 素材管道零改动），零内存零流量红线成立。
+ * @param {{ bossBgm?: { enabled: boolean, rules: readonly { round: number, track: string, kind: string }[] } | null }} rules getCustomRules() 的产物
+ * @param {number} round 对局回合号（extraRounds 顺延后的**实际**回合：BOSS=18 / 隐藏核心=19；未开加时赛则官方 14/15）
+ * @returns {string|null} 曲目 stem（loop 文件名去 _loop.mp3）或 null
+ */
+export function bossBgmTrackFor(rules, round) {
+  const bb = rules && rules.bossBgm;
+  if (!bb || !bb.enabled || !Array.isArray(bb.rules)) return null;
+  const r = Number(round);
+  if (!Number.isFinite(r)) return null;
+  for (const rule of bb.rules) {
+    if (rule.round === r) return rule.track;
+  }
+  return null;
+}
 
 /**
  * 写回配置（自研控制台 /console 用）。**校验后再落盘**：非法 JSON 结构或写盘失败都抛错，绝不写坏文件。

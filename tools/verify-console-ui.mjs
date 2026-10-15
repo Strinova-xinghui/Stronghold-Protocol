@@ -16,7 +16,8 @@ await page.goto(`http://127.0.0.1:${PORT}/console`, { waitUntil: 'networkidle2',
 await new Promise((r) => setTimeout(r, 1200));
 
 check('页面标题正确', (await page.title()).includes('规则控制台'));
-check('9 个标签页渲染', (await page.$$('.tab')).length === 9);
+// 标签页数随自研面板增长（2026-10-16 bossBgm 后 = 12）；低于 12 说明面板掉了
+check('12 个标签页渲染', (await page.$$('.tab')).length === 12, `实际 ${(await page.$$('.tab')).length}`);
 check('状态胶囊显示生效中', /生效中/.test(await page.$eval('#stat', (e) => e.textContent)));
 check('三选一表单有候选位规则', (await page.$$('#roSlots .sub')).length >= 1);
 check('抽奖表单有回合项', (await page.$$('#rlRounds .sub')).length >= 3, `rounds=${(await page.$$('#rlRounds .sub')).length}`);
@@ -34,6 +35,37 @@ await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.t
 await new Promise((r) => setTimeout(r, 300));
 check('BOSS 血量页有 mul', !!(await page.$('input[data-f="bossHp.mul"]')));
 check('BOSS 血量页有 layerK', !!(await page.$('input[data-f="bossHp.layerK"]')));
+
+// BOSS 音乐替换页（自研 bossBgm 2026-10-16）：开关 + 添加规则 + 曲目候选懒加载 + 规则行编辑
+await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('BOSS 音乐'))?.click());
+await new Promise((r2) => setTimeout(r2, 300));
+check('BOSS 音乐页有开关', !!(await page.$('input[data-en="bossBgm"]')));
+check('BOSS 音乐页有添加按钮', !!(await page.$('#bbAdd')));
+const bbBefore = (await page.$$('#bbRules .sub')).length;   // 已提交配置里带的示例规则数
+await page.click('#bbAdd');
+await new Promise((r2) => setTimeout(r2, 300));
+check('BOSS 音乐页添加规则行', (await page.$$('#bbRules .sub')).length === bbBefore + 1, `前=${bbBefore} 后=${(await page.$$('#bbRules .sub')).length}`);
+// 曲目候选应从 /data/assets.json 懒加载（datalist option 数 > 5）
+const dlOpts = await page.evaluate(() => document.querySelectorAll('#bbRules datalist option').length);
+check('BOSS 音乐页曲目候选载入', dlOpts >= 5, `候选=${dlOpts}`);
+await page.evaluate(() => { const cb = document.querySelector('input[data-en="bossBgm"]'); cb.checked = true; cb.dispatchEvent(new Event('change', { bubbles: true })); });
+await page.click('#save');
+await new Promise((r2) => setTimeout(r2, 1500));
+const apiBb = await (await fetch(`http://127.0.0.1:${PORT}/console/api`)).json();
+check('API 确认 bossBgm 开启且规则下发', apiBb.rules?.bossBgm?.enabled === true && Array.isArray(apiBb.rules?.bossBgm?.rules), JSON.stringify(apiBb.rules?.bossBgm || null).slice(0, 80));
+// 还原：关掉 bossBgm、删掉刚加的那条演示规则（config 默认关 = 官方行为）
+await page.evaluate(() => {
+  const cb = document.querySelector('input[data-en="bossBgm"]');
+  cb.checked = false; cb.dispatchEvent(new Event('change', { bubbles: true }));
+  const subs = [...document.querySelectorAll('#bbRules .sub')];
+  subs.at(-1)?.querySelector('button.danger')?.click();
+});
+await page.click('#save');
+await new Promise((r2) => setTimeout(r2, 1200));
+const apiBb2 = await (await fetch(`http://127.0.0.1:${PORT}/console/api`)).json();
+check('已还原 bossBgm 关闭（rules=null）', apiBb2.rules?.bossBgm == null, JSON.stringify(apiBb2.rules?.bossBgm || null));
+check('已还原示例规则条数', (apiBb2.config?.bossBgm?.rules || []).length === bbBefore, `rules=${(apiBb2.config?.bossBgm?.rules || []).length} 期望=${bbBefore}`);
+await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('干员三选一'))?.click());
 
 // 切到抽奖页，改 rolls，保存（标签 2026-10-12 改名为「指定回合发装备 · 抽奖」，兼容两种）
 await page.evaluate(() => [...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('回合抽奖') || t.textContent.includes('指定回合发装备'))?.click());

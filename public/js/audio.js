@@ -129,9 +129,12 @@ const SKILL_MODE_FILE = /_(d|h|s)\d*\.mp3$/i;
  * @param {any} pub m.public (may be null)
  * @param {0|1|null} [combatTrack] the round's own 开战 track index into `bgm.combatAlts` (combatTrackFor; omitted ⇒
  *   plain 'combat', i.e. the manifest's default combat track)
- * @returns {string|null} 'lobby' | 'prep' | 'combat' | 'combat:<i>' | 'unite' | 'boss' | 'boss:<bossId>' | null
+ * @param {string|null} [stemKey] 自研 bossBgm（2026-10-16）：服务器 m.public.bgmTrack 命中曲目经
+ *   stemBgmKey() 确认可解析后的 'stem:<x>' key；null/省略 ⇒ 官方日程逐字节不变。只作用于三个作战期
+ *   （COMBAT / FINAL_ASSAULT / HIDDEN_CORE），联防 UNITE 保持官方独立曲目（蚀刻章）。
+ * @returns {string|null} 'lobby' | 'prep' | 'combat' | 'combat:<i>' | 'unite' | 'boss' | 'boss:<bossId>' | 'stem:<x>' | null
  */
-export function bgmKeyFor(route, pub, combatTrack = null) {
+export function bgmKeyFor(route, pub, combatTrack = null, stemKey = null) {
   if (route !== 'game') return route === 'title' || route === 'lobby' || route === 'room' ? 'lobby' : null;
   const phase = pub?.phase;
   if (!phase) return 'lobby';
@@ -145,10 +148,13 @@ export function bgmKeyFor(route, pub, combatTrack = null) {
       return 'unite';
     case PHASE.COMBAT:
       // 开战 BGM: the round's own track — 骑士之日 / 无畏者 are fixed per round, not drawn (combatTrackFor)
+      if (stemKey) return stemKey;
       return combatTrack == null ? 'combat' : `combat:${combatTrack ? 1 : 0}`;
     case PHASE.FINAL_ASSAULT:
+      if (stemKey) return stemKey;
       return pub.bossId ? `boss:${pub.bossId}` : 'boss';
     case PHASE.HIDDEN_CORE:
+      if (stemKey) return stemKey;
       return pub.hiddenBossId ? `boss:${pub.hiddenBossId}` : pub.bossId ? `boss:${pub.bossId}` : 'boss';
     default:
       return 'prep';
@@ -158,7 +164,9 @@ export function bgmKeyFor(route, pub, combatTrack = null) {
 /**
  * Resolve a BGM key to { intro?, loop } URLs from the manifest: `boss:<id>` falls back to the generic boss track,
  * `combat:<i>` to the i-th `bgm.combatAlts` entry (and to `bgm.combat` when the manifest has none), and `unite`
- * (联防's own track) to `bgm.combat` when the manifest predates it.
+ * (联防's own track) to `bgm.combat` when the manifest predates it. `stem:<x>` (自研 bossBgm 2026-10-16) looks the
+ * loop-file stem up across `bgm` (scenes + combatAlts) and `bossBgm`, with its intro when the manifest pairs one;
+ * an unknown stem ⇒ null — the caller then keeps the official schedule (never silence, never a 404).
  * @param {any} manifest
  * @param {string|null} key
  * @returns {{ intro: string|null, loop: string }|null}
@@ -167,12 +175,42 @@ export function resolveBgm(manifest, key) {
   const a = manifest?.audio;
   if (!a || !key) return null;
   let t = null;
-  if (key.startsWith('boss:')) t = a.bossBgm?.[key.slice(5)] || a.bgm?.boss;
+  if (key.startsWith('stem:')) t = bgmTrackByStem(a, key.slice(5));
+  else if (key.startsWith('boss:')) t = a.bossBgm?.[key.slice(5)] || a.bgm?.boss;
   else if (key.startsWith('combat:')) t = a.bgm?.combatAlts?.[Number(key.slice('combat:'.length))] || a.bgm?.combat;
   else if (key === 'unite') t = a.bgm?.unite || a.bgm?.combat;
   else t = a.bgm?.[key];
   if (!t || typeof t.loop !== 'string') return null;
   return { intro: typeof t.intro === 'string' ? t.intro : null, loop: t.loop };
+}
+
+/**
+ * A BGM track by its loop-file stem (`m_bat_rglk1phantomcastle` ← `/assets/audio/bgm/m_bat_rglk1phantomcastle_loop.mp3`),
+ * searched across `bgm` (every scene + `combatAlts`) and `bossBgm`. The stem comes from the server's m.public.bgmTrack
+ * (自研 bossBgm 2026-10-16); every manifest audio path is `/assets/[~hash/]audio/bgm/<file>.mp3`, hashed URLs included.
+ * @param {any} a manifest.audio
+ * @param {string} stem
+ * @returns {{ loop: string, intro?: string }|null}
+ */
+function bgmTrackByStem(a, stem) {
+  if (typeof stem !== 'string' || !/^[a-z0-9_]{1,64}$/.test(stem)) return null;
+  const lists = [];
+  if (a.bgm && typeof a.bgm === 'object') {
+    for (const v of Object.values(a.bgm)) {
+      if (Array.isArray(v)) lists.push(...v); else if (v && typeof v === 'object') lists.push(v);
+    }
+  }
+  if (a.bossBgm && typeof a.bossBgm === 'object') lists.push(...Object.values(a.bossBgm).filter((v) => v && typeof v === 'object'));
+  for (const t of lists) {
+    if (typeof t.loop === 'string' && stemOfAudioUrl(t.loop) === stem) return t;
+  }
+  return null;
+}
+
+/** The loop/intro stem of a manifest audio URL: '/assets/~ab12/audio/bgm/m_bat_ancestor_loop.mp3' → 'm_bat_ancestor'. */
+function stemOfAudioUrl(url) {
+  const file = url.slice(url.lastIndexOf('/') + 1).replace(/\.[^.]*$/, '');
+  return file.replace(/_(loop|intro)$/, '');
 }
 
 /**
@@ -193,6 +231,19 @@ export function combatTrackFor(round) {
   const r = Number(round);
   if (!Number.isFinite(r) || r < 1) return null;
   return r <= COMBAT_TRACK_SWITCH_ROUND ? 1 : 0;
+}
+
+/**
+ * 自研 bossBgm（2026-10-16）：把服务器 m.public.bgmTrack 的曲目 stem 变成 `stem:<x>` 的 BGM key。
+ * **可解析才替换**：manifest 里没有该 stem（配置手误 / 旧清单）⇒ null ⇒ 官方日程继续，绝不静音。
+ * @param {any} manifest assets 清单
+ * @param {any} pub m.public（读 bgmTrack）
+ * @returns {string|null} 'stem:<x>' 或 null
+ */
+export function stemBgmKey(manifest, pub) {
+  const track = pub && typeof pub.bgmTrack === 'string' && pub.bgmTrack ? pub.bgmTrack : null;
+  if (!track) return null;
+  return resolveBgm(manifest, `stem:${track}`) ? `stem:${track}` : null;
 }
 
 /**
@@ -1535,13 +1586,15 @@ export function installAudio(deps) {
           // 开战 BGM: the round's own track out of bgm.combatAlts (骑士之日 / 无畏者 are fixed per round, not drawn),
           // so every client of a room hears the same one, a mid-fight re-render (or a teammate view) never switches,
           // and the next round moves on by the table. 联防 shares its round ⇒ same key ⇒ the loop keeps playing.
-          audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round)));
+          // 自研 bossBgm（2026-10-16）：服务器 m.public.bgmTrack 命中（且本清单可解析）时覆盖作战期选曲——
+          // 全房同一 key ⇒ 1–6 人联机所有人听到同一首；无该字段（规则全关）⇒ 官方日程逐字节不变。
+          audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round), stemBgmKey(manifestGetter(), pub)));
         } catch { /* ignore */ }
       };
       sync(deps.getState());
       return deps.subscribe((s, prev) => {
         if (s.match?.public?.phase !== prev?.match?.public?.phase || s.room !== prev?.room || s.session !== prev?.session
-          || s.match?.public?.bossId !== prev?.match?.public?.bossId) sync(s);
+          || s.match?.public?.bossId !== prev?.match?.public?.bossId || s.match?.public?.bgmTrack !== prev?.match?.public?.bgmTrack) sync(s); // bgmTrack（自研 bossBgm）：热更换曲 / 回合切换立即重选
       });
     }
   } catch (err) { console.warn('[audio] install failed', err); }

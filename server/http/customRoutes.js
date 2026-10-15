@@ -383,6 +383,7 @@ function consoleApiRead() {
   if (rules.pacing) on.push(t('对局节奏'));
 
   if (rules.bossHp) on.push(t('BOSS 血量'));
+  if (rules.bossBgm) on.push(t('BOSS音乐'));
   return { ok: true, path: 'config/custom-rules.json', config, rules, summary: on.length ? t('生效中：{0}', { 0: on.join(' / ') }) : t('全部关闭（原版行为）') };
 }
 
@@ -481,6 +482,7 @@ async function consoleApiWrite(req, res, log) {
     if (rules.grant) on.push(t('GM 发放'));
     if (rules.prepUndo) on.push(t('撤回'));
     if (rules.music) on.push(t('播放器'));
+    if (rules.bossBgm) on.push(t('BOSS音乐'));
     log.info(`[console] 规则配置已更新（${on.join(' / ') || '全部关闭'}）`);
     sendJson(req, res, 200, { ok: true, config: obj, rules: saved.rules, summary: on.length ? t('生效中：{0}', { 0: on.join(' / ') }) : t('全部关闭（原版行为）') });
   } catch (e) {

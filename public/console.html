@@ -213,6 +213,20 @@
       <p class="desc">内置音源（游戏 BGM 16 首 + 塞壬唱片官方 OST 专辑，含搜索/队列/歌词/收藏的全功能播放器）。服务器只缓存塞壬 JSON 元数据，音频由玩家浏览器直连官方 CDN，服务器零带宽。（外部音源 lx-music 脚本已于 2026-10-16 移除。）</p>
     </div>
   </section>
+
+  <!-- ⑩b BOSS 战 / 指定回合 BGM 替换（自研 2026-10-16） -->
+  <section class="panel" data-panel="bossBgm">
+    <div class="card">
+      <h2><label class="chk"><input type="checkbox" data-en="bossBgm"> BOSS 战 / 指定回合换 BGM（bossBgm）</label></h2>
+      <p class="desc">把指定回合的<b>作战期</b>换成指定曲目：BOSS 回合（开了加时赛 = 第 18 回合最终攻势 / 第 19 回合隐秘核心；没开加时赛 = 官方 14 / 15）或任意回合号，可配多条，按列表顺序取先命中的一条。<b>未命中规则的回合 = 官方日程逐字节不变</b>（1–7 无畏者 / 8+ 骑士之日；BOSS 战用领袖自己的曲目）。曲目 = 游戏素材清单里已有的 BGM stem（下拉候选自动从清单载入，也可手填）；服务器只多下发一个字符串字段，<b>零新增内存、零新增流量</b>（禁止也不必要把音频预载进服务器）。<b>关掉 = 原版没有任何替换。</b>联防（蚀刻章阶段）不受影响，保持官方曲目。</p>
+      <div id="bbRules"></div>
+      <div class="row">
+        <button id="bbAdd">+ 添加规则</button>
+        <span class="hint" id="bbHint">曲目候选：载入中…</span>
+      </div>
+      <p class="hint">曲目 stem = loop 文件名去 <code>_loop.mp3</code>，如 <code>m_bat_rglk1phantomcastle</code> 幻影城堡 · <code>m_bat_abyssalhunters</code> 深渊猎手 · <code>m_bat_vtlionk</code> 狮心王 · <code>m_bat_rouge3boss1</code> 红票 · <code>m_bat_prtsstage1</code> PRTS · <code>m_bat_ancestor</code> 先祖 · <code>m_bat_kazimierz2_1</code> 骑士之日 · <code>m_bat_kazimierz2_2</code> 无畏者 · <code>m_bat_corrosion</code> 蚀刻章 · <code>m_bat_act1autochess</code> 卫戍协议·作战 · <code>m_sys_act1autochess</code> 协议启动。手填了清单里不存在的曲目时客户端自动回落官方日程，不会静音。</p>
+    </div>
+  </section>
   <!-- ⑨ 休整期撤回（自研 2026-10-15） -->
   <section class="panel" data-panel="prepUndo">
     <div class="card">
@@ -364,6 +378,7 @@ function setStat(d) {
   if (d.rules?.grant) on.push('GM 发放');
   if (d.rules?.prepUndo) on.push('撤回');
   if (d.rules?.music) on.push('播放器');
+  if (d.rules?.bossBgm) on.push('BOSS音乐');
   const s = $('#stat');
   s.textContent = on.length ? '生效中：' + on.join(' / ') : '全部关闭（原版行为）';
   s.className = 'pill ' + (on.length ? 'on' : 'off');
@@ -388,10 +403,12 @@ function ensureShape() {
   cfg.grant = cfg.grant || { enabled: true };
   cfg.prepUndo = cfg.prepUndo || { enabled: true, maxDepth: 32 };
   cfg.music = cfg.music || { enabled: true };
+  cfg.bossBgm = cfg.bossBgm || { enabled: false, rules: [] };
+  cfg.bossBgm.rules = Array.isArray(cfg.bossBgm.rules) ? cfg.bossBgm.rules : [];
 }
 
 // ---------------- 渲染 ----------------
-const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['prepUndo','休整期撤回'],['music','音乐播放器'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
+const TABS = [['rewardOffer','干员三选一'],['itemOffer','装备甄选'],['prepDebt','负债规则'],['roundLottery','指定回合发装备（抽奖）'],['extraRounds','回合编排'],['pacing','对局节奏'],['bossHp','BOSS 血量'],['prepUndo','休整期撤回'],['music','音乐播放器'],['bossBgm','BOSS 音乐替换'],['__grant','GM 发放棋子/装备/发钱'],['__raw','原始 JSON']];
 function renderTabs() {
   const t = $('#tabs');
   t.textContent = '';
@@ -417,6 +434,7 @@ function renderAll() {
   }
   renderSlots();
   renderRounds();
+  renderBgmRules();
   syncGrantUI();
   if (activeTab === '__raw') $('#raw').value = JSON.stringify(cfg, null, 2);
   renderTabs();
@@ -471,6 +489,66 @@ function renderRounds() {
   if (!cfg.roundLottery.rounds.length) box.append(el('p', { class: 'hint', text: '（无回合：不发放抽奖）' }));
 }
 
+// ---------------- BOSS 音乐替换（自研 bossBgm 2026-10-16）----------------
+// 曲目候选：从 /data/assets.json（与游戏客户端同一份清单，浏览器缓存命中）枚举 bgm/bossBgm 的 loop stem。
+// 加载失败退回面板内置的常见 stem 列表——track 的合法性本就宽松（客户端不可解析时自动回落官方日程）。
+const BB_FALLBACK = ['m_sys_act1autochess', 'm_bat_act1autochess', 'm_bat_kazimierz2_1', 'm_bat_kazimierz2_2', 'm_bat_corrosion', 'm_bat_rglk1phantomcastle', 'm_bat_abyssalhunters', 'm_bat_vtlionk', 'm_bat_rouge3boss1', 'm_bat_prtsstage1', 'm_bat_ancestor'];
+let bbStems = null;   // [{stem, name}]（name 取中文曲名表，未命中显示 stem）
+const BB_NAMES = { m_sys_act1autochess: '协议启动', m_bat_act1autochess: '卫戍协议·作战', m_bat_kazimierz2_1: '骑士之日', m_bat_kazimierz2_2: '无畏者', m_bat_corrosion: '蚀刻章', m_bat_rglk1phantomcastle: '幻影城堡', m_bat_abyssalhunters: '深渊猎手', m_bat_vtlionk: '狮心王', m_bat_rouge3boss1: '红票', m_bat_prtsstage1: 'PRTS', m_bat_ancestor: '先祖' };
+
+/** 从 assets 清单的 URL 提取 loop stem（去 _loop.mp3，hash 前缀无关）。 */
+function bbStemOfUrl(u) {
+  if (typeof u !== 'string') return null;
+  const file = u.slice(u.lastIndexOf('/') + 1).replace(/\.[^.]*$/, '');
+  return /_loop$/.test(file) ? file.slice(0, -5) : null;
+}
+
+async function loadBbTracks() {
+  try {
+    const a = await (await fetch('/data/assets.json', { cache: 'force-cache' })).json();
+    const seen = new Map();
+    for (const v of Object.values((a.audio || {}).bgm || {})) {
+      const list = Array.isArray(v) ? v : [v];
+      for (const t of list) { const s = bbStemOfUrl(t && t.loop); if (s && !seen.has(s)) seen.set(s, BB_NAMES[s] || s); }
+    }
+    for (const v of Object.values((a.audio || {}).bossBgm || {})) {
+      const s = bbStemOfUrl(v && v.loop); if (s && !seen.has(s)) seen.set(s, BB_NAMES[s] || s);
+    }
+    if (seen.size) { bbStems = [...seen].map(([stem, name]) => ({ stem, name })); renderBgmRules(); return; }
+    throw new Error('清单无 bgm');
+  } catch { bbStems = BB_FALLBACK.map((s) => ({ stem: s, name: BB_NAMES[s] || s })); renderBgmRules(); }
+}
+
+function bbTracks() { return (bbStems || BB_FALLBACK.map((s) => ({ stem: s, name: BB_NAMES[s] || s }))).map((x) => x.stem); }
+
+function renderBgmRules() {
+  const box = $('#bbRules');
+  if (!box || !cfg.bossBgm) return;
+  const hint = $('#bbHint');
+  if (hint) hint.textContent = bbStems ? '曲目候选：已从素材清单载入 ' + bbStems.length + ' 首' : '曲目候选：内置列表（清单未载入）';
+  box.textContent = '';
+  cfg.bossBgm.rules.forEach((ru, i) => {
+    const row = el('div', { class: 'sub' });
+    row.append(el('div', { class: 'subhead' },
+      el('b', { text: `第 ${ru.round ?? '?'} 回合 → ${BB_NAMES[ru.track] || ru.track || '?'}` }),
+      el('span', { class: 'grow' }),
+      el('button', { class: 'danger', text: '删除', onclick: () => { cfg.bossBgm.rules.splice(i, 1); renderBgmRules(); } })
+    ));
+    const r1 = el('div', { class: 'row' });
+    r1.append(numField('回合 round（加时赛 BOSS=18/隐藏=19，未开=14/15）', ru.round, 1, 200, (v) => { ru.round = v; }));
+    r1.append(selField('语义 kind', ru.kind || 'round', [['boss', 'boss（BOSS 回合）'], ['round', 'round（任意回合）']], (v) => { ru.kind = v; }));
+    // 曲目：下拉 + 可手填（datalist 兼得）
+    const dl = 'bbDl' + i;
+    const inp = el('input', { type: 'text', list: dl, value: ru.track || '', placeholder: 'm_bat_…' });
+    inp.addEventListener('change', () => { ru.track = inp.value.trim(); renderBgmRules(); });
+    const opts = (bbStems || []).map((x) => el('option', { value: x.stem, label: x.name }));
+    r1.append(el('label', { class: 'f' }, el('span', { text: '曲目 track' }), inp, el('datalist', { id: dl }, ...opts)));
+    row.append(r1);
+    box.append(row);
+  });
+  if (!cfg.bossBgm.rules.length) box.append(el('p', { class: 'hint', text: '（无规则：全部回合保持官方 BGM 日程）' }));
+}
+
 function numField(label, val, min, max, set, step) {
   const inp = el('input', { type: 'number', min, max, value: val == null ? '' : val });
   if (step) inp.step = step;
@@ -517,6 +595,10 @@ $('#roAdd').addEventListener('click', () => {
 $('#rlAdd').addEventListener('click', () => {
   cfg.roundLottery.rounds.push({ round: 3, minTier: 1, maxTier: 6 });
   renderRounds();
+});
+$('#bbAdd').addEventListener('click', () => {
+  cfg.bossBgm.rules.push({ round: 18, kind: 'boss', track: bbTracks()[0] || 'm_bat_abyssalhunters' });
+  renderBgmRules();
 });
 $('#rawFromForm').addEventListener('click', () => { $('#raw').value = JSON.stringify(cfg, null, 2); });
 $('#reload').addEventListener('click', load);
@@ -671,9 +753,9 @@ $('#gGrantChess').addEventListener('click', () => doGrant('chess'));
 $('#gGrantItem').addEventListener('click', () => doGrant('item'));
 $('#gGrantFunds').addEventListener('click', () => doGrant('funds'));
 
-// 切到发放页时懒加载数据（不拖慢控制台首屏）
+// 切到发放页时懒加载数据（不拖慢控制台首屏）；切到 BOSS 音乐页时懒加载曲目候选（自研 bossBgm）
 const _switchTab = switchTab;
-switchTab = function (k) { _switchTab(k); if (k === '__grant') loadGrant(); };
+switchTab = function (k) { _switchTab(k); if (k === '__grant') loadGrant(); if (k === 'bossBgm' && !bbStems) loadBbTracks(); };
 
 switchTab('rewardOffer');
 load();
