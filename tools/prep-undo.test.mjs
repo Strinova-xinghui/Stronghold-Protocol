@@ -185,6 +185,29 @@ describe('休整期撤回 · 开关与边界', () => {
     assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok);
     h.invariants();
   });
+
+  test('多人并发：A 买→B 买同一干员→A 撤回，只还 A 的份额（池恒等式闭合）', () => {
+    writeCfg({ prepUndo: { enabled: true, maxDepth: 4 } });
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 2, seed: 304, registry: REG, fake: true });
+    h.start(); h.toPrep(1);
+    const m = h.m;
+    const [a, b] = [...m.players.values()].filter((p) => !p.isBot);
+    a.funds = 99; b.funds = 99;
+    const base = m.pool.entries.keys().next().value; // 池里随便一个 base
+    a.shop.slots[0] = { kind: 'chess', id: base, basePrice: 1, frozen: false, sold: false };
+    b.shop.slots[0] = { kind: 'chess', id: base, basePrice: 1, frozen: false, sold: false };
+    const left0 = m.pool.entries.get(base).left;
+    const cap = m.pool.entries.get(base).cap;
+    assert.ok(m.handle(a.playerId, { t: 'g.buy', slot: 0 }).ok);
+    assert.ok(m.handle(b.playerId, { t: 'g.buy', slot: 0 }).ok);
+    assert.equal(m.pool.entries.get(base).left, left0 - 2, '两买后池 -2');
+    assert.ok(m.handle(a.playerId, { t: 'g.undo' }).ok, 'A 撤回');
+    assert.equal(m.pool.entries.get(base).left, left0 - 1, '只还 A 的份额（B 的还在占用）');
+    // B 的棋子不受影响
+    const bHas = [...b.hand, ...b.temp].some((p) => p && p.kind === 'chess' && m.gd.baseIdOf(p.id) === base);
+    assert.ok(bHas, 'B 买的棋子还在');
+    h.invariants(); // left + held == cap 全场恒等式闭合
+  });
 });
 
 // 还原配置

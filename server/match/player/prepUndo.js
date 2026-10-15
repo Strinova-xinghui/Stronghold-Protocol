@@ -33,8 +33,18 @@ function snapshotPlayer(ps) {
   const m = ps.m;
   // 共享池与 DIY 库存的占用基线：记录每个 entry 的当前 left（恢复时按差分逆向）。
   // DIY 库存是玩家私有的，直接全量记；共享池全量记（条目 ~200 个，每条 1 数字，代价可忽略）。
-  const poolLeft = new Map();
-  for (const [id, e] of m.pool.entries) poolLeft.set(id, e.left);
+  // 池恢复不记 left 基线（写回基线在多人并发下会把别人的消耗也「还」回去，打破 left + held == cap），
+  // 改记「本玩家自己每 base 的持有份数」：恢复时 left = cap − 其他玩家的持有（他们同期的买卖不受影响）。
+  const mineHeld = new Map();
+  const seeMine = (p) => {
+    if (p && p.kind === 'chess' && p.poolCopies > 0) {
+      const b = ps.gd.baseIdOf(p.id);
+      mineHeld.set(b, (mineHeld.get(b) || 0) + p.poolCopies);
+    }
+  };
+  for (const p of ps.hand) seeMine(p);
+  for (const p of ps.temp) seeMine(p);
+  for (const p of ps.board.values()) seeMine(p);
   const diyLeft = new Map();
   for (const [id, e] of ps.diyStock.entries) diyLeft.set(id, e.left);
   return {
@@ -54,8 +64,8 @@ function snapshotPlayer(ps) {
     layers: clone(ps.layers),
     round: clone(ps.round),
     stats: clone(ps.stats),
-    // ---- 池占用差分基线 ----
-    poolLeft,
+    // ---- 池占用：自己每 base 的持有份数（恢复对账用，见上）----
+    mineHeld,
     diyLeft,
     // ---- 阶段锚（恢复校验用） ----
     phase: m.phase,
@@ -84,11 +94,20 @@ function restorePlayer(ps, snap) {
   ps.round = snap.round;
   ps.stats = snap.stats;
   ps.prepsEnded = snap.prepsEnded;
-  // 共享池差分：恢复每个 entry 的 left 到快照基线。
-  // 直接写回 left（不经过 give/take 的 cap 钳制——差分本身就是合法占用，其他玩家的占用不动）。
+  // 共享池对账：left = cap − 全场所有玩家的持有（A 恢复后的持有 = 恢复到字段里的手牌/棋盘 piece.poolCopies）。
+  // 其他人同期的买卖不动——他们还持有的份数被自然减去；A 自己的持有随快照回滚。
+  // 恒等式 left + Σheld == cap 自动闭合（快照本身合法 ⇒ A 恢复后的持有合法 ⇒ 差值 = 池该有的 left）。
   for (const [id, e] of m.pool.entries) {
-    const base = snap.poolLeft.get(id);
-    if (base !== undefined) e.left = base;
+    let held = 0;
+    for (const pl of m.order) {
+      const see = (p) => {
+        if (p && p.kind === 'chess' && pl.gd.baseIdOf(p.id) === id) held += p.poolCopies || 0;
+      };
+      for (const p of pl.hand) see(p);
+      for (const p of pl.temp) see(p);
+      for (const p of pl.board.values()) see(p);
+    }
+    e.left = e.cap - held;
   }
   // DIY 库存同理（玩家私有，无并发问题）。
   for (const [id, e] of ps.diyStock.entries) {
