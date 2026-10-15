@@ -74,6 +74,35 @@ describe('音乐播放器路由 /music/*', () => {
     server.close();
   });
 
+  test('专辑详情：带 /detail 与不带 /detail 都代理（线上旧客户端兼容），同一缓存', async () => {
+    let calls = 0;
+    globalThis.fetch = async (url) => { calls++; return { ok: true, status: 200, json: async () => ({ code: 0, data: { cid: '8913', name: 'A', songs: [] } }) }; };
+    const server = await startServer({ startedAt: Date.now(), customRules: () => ({ music: { enabled: true } }) });
+    const a = await get(server, '/music/siren/album/8913/detail');
+    assert.equal(a.status, 200, '带 /detail 必须 200（点专辑展开的全部）');
+    const b = await get(server, '/music/siren/album/8913');
+    assert.equal(b.status, 200, '不带 /detail 也 200（两种客户端形态互不打架）');
+    assert.equal(calls, 1, '同一份缓存：第二次不再打外网');
+    server.close();
+  });
+
+  test('搜索：/music/siren/search?kw= 代理上游 keyword=；空 kw 400；非法路径 404', async () => {
+    const seen = [];
+    globalThis.fetch = async (url) => { seen.push(url); return { ok: true, status: 200, json: async () => ({ code: 0, data: { albums: { list: [{ cid: '1', name: 'X' }], end: true } } }) }; };
+    const server = await startServer({ startedAt: Date.now(), customRules: () => ({ music: { enabled: true } }) });
+    const a = await get(server, '/music/siren/search?kw=' + encodeURIComponent('日常'));
+    assert.equal(a.status, 200);
+    assert.ok(seen[0].includes('keyword=%E6%97%A5%E5%B8%B8'), 'kw 映射为上游 keyword：' + seen[0]);
+    const empty = await get(server, '/music/siren/search');
+    assert.equal(empty.status, 400, '空关键词直接 400，不打外网');
+    const evil = await get(server, '/music/siren/search?kw=x&evil=1&url=http://169.254.169.254');
+    assert.equal(evil.status, 200, '多余参数被忽略（只取 kw）');
+    assert.ok(!seen.some((u) => u.includes('169.254')), '绝不透传任意参数');
+    const nope = await get(server, '/music/siren/whatever');
+    assert.equal(nope.status, 404);
+    server.close();
+  });
+
   test('/music/proxy：非 http(s) 拒绝，音频 content-type 拒绝', async () => {
     const server = await startServer({ startedAt: Date.now(), customRules: () => ({ music: { enabled: true } }) });
     const bad = await get(server, '/music/proxy?url=ftp://x/y');

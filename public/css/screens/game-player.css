@@ -48,3 +48,30 @@
   color: var(--text); font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: .12rem; line-height: 1.5;
 }
 .gm__music .icon { color: var(--mint-400); }
+
+/* 搜索框（内置 / 塞壬两个 tab 共用） */
+.psearch {
+  display: flex; align-items: center; gap: .06rem; margin: .02rem 0 .08rem; padding: 0 .08rem;
+  background: rgba(0, 0, 0, .3); border: 1px solid var(--line-2); border-radius: .05rem; height: .34rem;
+}
+.psearch:focus-within { border-color: var(--mint-500); }
+.psearch__ico { display: grid; place-items: center; color: var(--text-dim); flex: 0 0 auto; }
+.psearch input {
+  flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent;
+  color: var(--text); font-size: .14rem;
+}
+.psearch input::placeholder { color: var(--text-dim); }
+.psearch input::-webkit-search-cancel-button { display: none; }
+.psearch__x {
+  flex: 0 0 auto; display: grid; place-items: center; width: .22rem; height: .22rem; padding: 0;
+  border: 0; border-radius: .04rem; background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.psearch__x:hover { color: var(--text); background: rgba(255, 255, 255, .08); }
+
+/* 专辑详情头 */
+.palbum-head { margin-bottom: .06rem; }
+.palbum-title { font-size: .16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palbum-intro {
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  margin: 0 0 .08rem; line-height: 1.5;
+}

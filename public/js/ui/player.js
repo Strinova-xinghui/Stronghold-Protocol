@@ -5,7 +5,7 @@ import { html, Icon, Button, Modal } from './components.js';
 import { audio } from '../audio.js';
 import { data } from '../data.js';
 import { t } from '../../../shared/i18n.js';
-import { builtinTracks, sirenAlbums, sirenAlbum, sirenSongUrl, loadLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
+import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, lxMusicUrl, parseLxHeader } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -29,7 +29,7 @@ const TABS = [
   { key: 'custom', label: '外部音源' },
 ];
 
-function TrackRow({ track, playing, onPlay, cover }) {
+function TrackRow({ track, playing, onPlay, cover, hint }) {
   return html`<button type="button" class=${cx('ptrack', playing && 'is-on')} onClick=${onPlay}
     aria-pressed=${String(!!playing)}>
     <span class="ptrack__art">
@@ -37,10 +37,25 @@ function TrackRow({ track, playing, onPlay, cover }) {
     </span>
     <span class="ptrack__meta">
       <b class="ptrack__name">${track.name}</b>
-      <small class="ptrack__sub">${[track.artist, track.album].filter(Boolean).join(' · ') || track.scene || ''}</small>
+      <small class="ptrack__sub">${[track.artist, track.album, hint].filter(Boolean).join(' · ') || track.scene || ''}</small>
     </span>
     <span class="ptrack__play"><${Icon} name=${playing ? 'close' : 'play'} /></span>
   </button>`;
+}
+
+/** 搜索框（受控；type=search 原生带清除按钮，这里再补一个显式的）。 */
+function SearchBox({ value, onChange, placeholder }) {
+  return html`<div class="psearch">
+    <span class="psearch__ico"><${Icon} name="search" /></span>
+    <input type="search" value=${value} onInput=${(e) => onChange(e.target.value)} placeholder=${placeholder} aria-label=${placeholder} />
+    ${value ? html`<button type="button" class="psearch__x" onClick=${() => onChange('')} aria-label=${t('清除')}><${Icon} name="close" /></button>` : null}
+  </div>`;
+}
+
+/** 专辑是否命中的关键词（名称 / 艺术家，大小写不敏感）。 */
+function matchAlbum(a, q) {
+  if (!q) return true;
+  return String(a.name || '').toLowerCase().includes(q) || (a.artistes || []).some((x) => String(x).toLowerCase().includes(q));
 }
 
 /** 外部音源 tab：粘贴 lx 脚本 → 加载 → 输入歌曲信息点播。 */
@@ -98,7 +113,10 @@ export function PlayerPanel({ open, onClose }) {
   const [playing, setPlaying] = useState('');
   const [albums, setAlbums] = useState(null);
   const [album, setAlbum] = useState(null);
+  const [albumBusy, setAlbumBusy] = useState('');
   const [sirenBusy, setSirenBusy] = useState(false);
+  const [q, setQ] = useState('');
+  const [remote, setRemote] = useState(null);
   const [sirenErr, setSirenErr] = useState('');
   const tracks = useMemo(() => builtinTracks(data.get('assets')), []);
   useEffect(() => {
@@ -109,6 +127,20 @@ export function PlayerPanel({ open, onClose }) {
       .catch((e) => { if (e.name !== 'AbortError') { setSirenErr(String(e && e.message ? e.message : e)); setSirenBusy(false); } });
     return () => ac.abort();
   }, [open, tab, albums]);
+  // 搜索：本地即时过滤（专辑名/艺术家）；本地 0 命中时防抖 350 ms 走服务器搜索（塞壬站内检索）
+  const qq = q.trim().toLowerCase();
+  useEffect(() => {
+    if (tab !== 'siren' || album || !qq) { setRemote(null); return; }
+    if (albums && albums.some((a) => matchAlbum(a, qq))) { setRemote(null); return; }
+    const ac = new AbortController();
+    const timer = setTimeout(() => { sirenSearch(qq, ac.signal).then(setRemote).catch(() => setRemote(null)); }, 350);
+    return () => { clearTimeout(timer); ac.abort(); };
+  }, [tab, album, qq, albums]);
+  const openAlbum = (a) => {
+    setSirenErr(''); setAlbumBusy(a.cid); setAlbum(null);
+    sirenAlbum(a.cid).then((d) => { setAlbum(d); setAlbumBusy(''); })
+      .catch((e) => { setSirenErr(String(e && e.message ? e.message : e)); setAlbumBusy(''); });
+  };
   const playUrl = (url, label) => {
     audio.playTrack({ url }, 'ext:' + label);
     setPlaying('ext:' + label);
@@ -119,33 +151,44 @@ export function PlayerPanel({ open, onClose }) {
     setPlaying('');
   };
   if (!open) return null;
+  const shownAlbums = albums ? (qq ? albums.filter((a) => matchAlbum(a, qq)) : albums) : null;
+  const shownBuiltin = qq ? tracks.filter((x) => String(x.name).toLowerCase().includes(qq) || x.key.includes(qq)) : tracks;
   return html`<${Modal} open=${open} onClose=${onClose} title=${t('音乐播放器')} wide=${true}>
     <div class="player">
       <div class="player__tabs">
         ${TABS.map((x) => html`<button key=${x.key} type="button" class=${cx('ptab-btn', tab === x.key && 'is-on')}
-          onClick=${() => setTab(x.key)}>${t(x.label)}<//>`)}
+          onClick=${() => { setTab(x.key); setQ(''); setAlbum(null); }}>${t(x.label)}<//>`)}
         <span class="grow"></span>
         <${Button} size="sm" variant="ghost" onClick=${stopAndAuto}>${t('回到自动 BGM')}<//>
       </div>
       ${tab === 'builtin' ? html`<div class="ptab">
         <p class="phint">${t('游戏内置配乐（随客户端已下载，零额外流量）。播放中不受阶段切换影响，点「回到自动 BGM」恢复。')}</p>
-        ${tracks.map((tr) => html`<${TrackRow} key=${tr.key} track=${tr} cover=${null}
+        <${SearchBox} value=${q} onChange=${setQ} placeholder=${t('搜索曲目…')} />
+        ${shownBuiltin.length ? shownBuiltin.map((tr) => html`<${TrackRow} key=${tr.key} track=${tr} cover=${null}
           playing=${playing === tr.key || (audio.manualBgm && audio.manualBgm.label === tr.key)}
-          onPlay=${() => { setPlaying(tr.key); playBuiltin(tr); }} />`)}
+          onPlay=${() => { setPlaying(tr.key); playBuiltin(tr); }} />`) : html`<p class="phint">${t('没有匹配的曲目。')}</p>`}
       </div>` : null}
       ${tab === 'siren' ? html`<div class="ptab">
         <p class="phint">${t('塞壬唱片官方 OST（monster-siren.hypergryph.com）。曲目元数据经服务器缓存，音频由浏览器直连官方 CDN。')}</p>
+        ${!album ? html`<${SearchBox} value=${q} onChange=${setQ} placeholder=${t('搜索专辑 / 艺术家…')} />` : null}
         ${sirenErr ? html`<p class="perr">${t('加载失败：')}${sirenErr}</p>` : null}
         ${sirenBusy && !albums ? html`<p class="phint">${t('加载中…')}</p>` : null}
-        ${album ? html`<div class="prow"><${Button} size="sm" variant="ghost" onClick=${() => setAlbum(null)}>${t('返回专辑列表')}<//>
-            <b>${album.name}</b></div>` : null}
-        ${!album && albums ? albums.map((a) => html`<${TrackRow} key=${a.cid} track=${{ name: a.name, artist: (a.artistes || []).join(' / ') }}
-          cover=${a.coverUrl} playing=${false}
-          onPlay=${() => { setSirenErr(''); sirenAlbum(a.cid).then(setAlbum).catch((e) => setSirenErr(String(e && e.message ? e.message : e))); }} />`) : null}
-        ${album ? (album.songs || []).map((s) => html`<${TrackRow} key=${s.cid} track=${{ name: s.name, artist: (s.artistes || []).join(' / '), album: album.name }}
-          cover=${album.coverUrl}
-          playing=${audio.manualBgm && String(audio.manualBgm.label || '').startsWith('siren:' + s.cid)}
-          onPlay=${() => playSirenSong(s.cid, s.name).then(() => setPlaying('siren:' + s.cid)).catch((e) => setSirenErr(String(e && e.message ? e.message : e)))} />`) : null}
+        ${album ? html`<div class="prow palbum-head">
+            <${Button} size="sm" variant="ghost" onClick=${() => setAlbum(null)}><${Icon} name="chevronLeft" />${t('专辑列表')}<//>
+            <b class="palbum-title">${album.name}</b></div>
+          ${album.intro ? html`<p class="phint palbum-intro">${album.intro}</p>` : null}
+          ${(album.songs || []).length ? (album.songs || []).map((s) => html`<${TrackRow} key=${s.cid} track=${{ name: s.name, artist: (s.artistes || []).join(' / '), album: album.name }}
+            cover=${album.coverUrl}
+            playing=${!!(audio.manualBgm && String(audio.manualBgm.label || '').startsWith('siren:' + s.cid))}
+            onPlay=${() => { setSirenErr(''); playSirenSong(s.cid, s.name).then(() => setPlaying('siren:' + s.cid)).catch((e) => setSirenErr(String(e && e.message ? e.message : e))); }} />`) : html`<p class="phint">${t('这张专辑没有曲目。')}</p>`}
+        ` : null}
+        ${!album && shownAlbums ? (shownAlbums.length ? shownAlbums.map((a) => html`<${TrackRow} key=${a.cid} track=${{ name: a.name, artist: (a.artistes || []).join(' / ') }}
+          cover=${a.coverUrl} playing=${false} hint=${albumBusy === a.cid ? t('加载中…') : t('点击查看曲目')}
+          onPlay=${() => openAlbum(a)} />`) : html`<p class="phint">${t('列表里没有匹配的专辑。')}</p>`) : null}
+        ${!album && shownAlbums && qq && !shownAlbums.length && remote && remote.length ? html`<p class="phint">${t('服务器搜索到 ' + remote.length + ' 张相关专辑：')}</p>
+          ${remote.map((a) => html`<${TrackRow} key=${a.cid} track=${{ name: a.name, artist: (a.artistes || []).join(' / ') }}
+            cover=${a.coverUrl} playing=${false} hint=${albumBusy === a.cid ? t('加载中…') : t('点击查看曲目')}
+            onPlay=${() => openAlbum(a)} />`)}` : null}
       </div>` : null}
       ${tab === 'custom' ? html`<${CustomSourceTab} onPlayUrl=${playUrl} />` : null}
     </div>

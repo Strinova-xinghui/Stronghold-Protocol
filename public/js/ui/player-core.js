@@ -84,7 +84,7 @@ export async function sirenAlbums(signal) {
 
 /** 专辑详情（曲目列表 + 封面）。 */
 export async function sirenAlbum(cid, signal) {
-  const r = await fetch(SIREN_API + '/album/' + encodeURIComponent(cid), { signal });
+  const r = await fetch(SIREN_API + '/album/' + encodeURIComponent(cid) + '/detail', { signal });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const d = await r.json();
   const a = d.data || {};
@@ -92,6 +92,17 @@ export async function sirenAlbum(cid, signal) {
     cid: a.cid, name: a.name, intro: a.intro || '', coverUrl: a.coverUrl || null,
     songs: (a.songs || []).map((s) => ({ cid: s.cid, name: s.name, artistes: s.artistes || [] })),
   };
+}
+
+/** 塞壬站内搜索（服务器代理 + 短缓存）：返回命中的专辑列表。 */
+export async function sirenSearch(kw, signal) {
+  const q = String(kw || '').trim();
+  if (!q) return [];
+  const r = await fetch(SIREN_API + '/search?kw=' + encodeURIComponent(q.slice(0, 64)), { signal });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const d = await r.json();
+  const list = ((d.data || {}).albums || {}).list || [];
+  return list.map((a) => ({ cid: a.cid, name: a.name, coverUrl: a.coverUrl, artistes: a.artistes || [] }));
 }
 
 /** 单曲音频地址（服务器代理换 sourceUrl，客户端直连 CDN 播放）。 */

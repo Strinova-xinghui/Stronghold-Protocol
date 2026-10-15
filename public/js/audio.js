@@ -910,8 +910,46 @@ export class AudioManager {
       this.wantBgm = null;
       const token = ++this.bgmToken;
       this._fadeOutBgm();
+      // 自研播放器：跨域绝对地址（塞壬官方 CDN 的 56 MB WAV、lx 外部源）流式播放——
+      // 走 _buffer 会把整曲解码成上百 MB PCM（手机端 OOM），<audio> + MediaElementSource 只缓冲几 MB。
+      if (this._remoteUrl(track.url)) { this._startBgmStream('manual:' + label, track.url, token); return; }
       this._startBgm('manual:' + label, { intro: track.introUrl || null, loop: track.url }, token);
     } catch (err) { this._warn('playTrack', err); }
+  }
+
+  /** 是否跨域绝对地址（同源相对路径的内置 BGM 不是）。 */
+  _remoteUrl(u) {
+    try {
+      const base = this.win?.location?.href;
+      const x = new URL(u, base || undefined);
+      return !base || x.origin !== new URL(base).origin;
+    } catch { return false; }
+  }
+
+  /** 流式播放一个远程音轨（不循环、不缓存；淡入走 gain，停止与自动 BGM 共用 _fadeOutBgm）。 */
+  _startBgmStream(key, url, token) {
+    try {
+      const ctx = this.ctx;
+      const el = new this.win.Audio();
+      el.src = url;
+      el.crossOrigin = 'anonymous';   // CDN 回 Access-Control-Allow-Origin: *（实测），MediaElementSource 需要
+      el.preload = 'auto';
+      const src = ctx.createMediaElementSource(el);
+      const gain = ctx.createGain();
+      src.connect(gain);
+      gain.connect(this.bgmGain);
+      const t0 = ctx.currentTime + 0.05;
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(1, t0 + FADE_S);
+      this.bgm = { key, loopUrl: url, nodes: [{ src: { stop: () => { try { el.pause(); } catch { /* ignore */ } } } }], gain };
+      el.addEventListener('ended', () => {
+        if (this.bgm && this.bgm.loopUrl === url) this.bgm = null;
+        try { gain.disconnect(); } catch { /* ignore */ }
+      });
+      el.addEventListener('error', () => { this._warn('bgm-stream', new Error('media error ' + url.slice(0, 80))); if (token === this.bgmToken) this._fadeOutBgm(); });
+      const pr = el.play();
+      if (pr && pr.catch) pr.catch((e) => { this._warn('bgm-stream', e); if (token === this.bgmToken) this._fadeOutBgm(); });
+    } catch (err) { this._warn('bgm-stream', err); }
   }
 
   /** 自研播放器：解除手动锁，交还阶段自动 BGM（重新触发一次自动选择由调用方负责）。 */
