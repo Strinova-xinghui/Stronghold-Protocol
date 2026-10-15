@@ -757,7 +757,7 @@ export class AudioManager {
     if (wasSilent && !this.bgmSilent && this.ctx) {
       // 自研播放器：静音期间记住的手动曲优先恢复，否则放阶段自动 BGM
       const man = this.manualBgm;
-      if (man) { this.manualBgm = null; this.playTrack(man, man.label); return; }
+      if (man) { this.manualBgm = null; this.playTrack({ url: man.url, introUrl: man.introUrl }, man.label, { stream: man._stream, loop: man._loop }); return; }
       if (this.wantBgm) { const k = this.wantBgm; this.wantBgm = null; this.playBgm(k); }
     }
     if (this.landWarm && this.ctx && !this.volumes.muted && this.volumes.sfx > 0) this.warmLandings();
@@ -896,23 +896,24 @@ export class AudioManager {
    * @param {{ url: string, introUrl?: string|null }} track
    * @param {string} [label] 供日志/UI 的曲目标识
    */
-  playTrack(track, label = 'manual') {
+  playTrack(track, label = 'manual', opts = {}) {
     try {
       if (!this.ctx || !track || typeof track.url !== 'string' || !track.url) return;
       if (this.bgmSilent) {
         // 静音期只记住选择（与自动 BGM 一致）：解除静音时 startManualTrack 再放
-        this.manualBgm = { ...track, label };
+        this.manualBgm = { ...track, label, _stream: !!opts.stream, _loop: !!opts.loop };
         this.wantBgm = null;
         this._fadeOutBgm();
         return;
       }
-      this.manualBgm = { ...track, label };
+      this.manualBgm = { ...track, label, _stream: !!opts.stream, _loop: !!opts.loop };
       this.wantBgm = null;
       const token = ++this.bgmToken;
       this._fadeOutBgm();
       // 自研播放器：跨域绝对地址（塞壬官方 CDN 的 56 MB WAV、lx 外部源）流式播放——
       // 走 _buffer 会把整曲解码成上百 MB PCM（手机端 OOM），<audio> + MediaElementSource 只缓冲几 MB。
-      if (this._remoteUrl(track.url)) { this._startBgmStream('manual:' + label, track.url, token); return; }
+      // opts.stream 强制流式（点歌台播内置曲目也要：可暂停/可 seek/循环，统一播放控制面）。
+      if (opts.stream || this._remoteUrl(track.url)) { this._startBgmStream('manual:' + label, track.url, token, !!opts.loop); return; }
       this._startBgm('manual:' + label, { intro: track.introUrl || null, loop: track.url }, token);
     } catch (err) { this._warn('playTrack', err); }
   }
@@ -927,13 +928,14 @@ export class AudioManager {
   }
 
   /** 流式播放一个远程音轨（不循环、不缓存；淡入走 gain，停止与自动 BGM 共用 _fadeOutBgm）。 */
-  _startBgmStream(key, url, token) {
+  _startBgmStream(key, url, token, loop = false) {
     try {
       const ctx = this.ctx;
       const el = new this.win.Audio();
       el.src = url;
       el.crossOrigin = 'anonymous';   // CDN 回 Access-Control-Allow-Origin: *（实测），MediaElementSource 需要
       el.preload = 'auto';
+      el.loop = !!loop;               // 点歌台播内置 BGM：循环（自动 BGM 的循环语义在手动模式延续）
       const src = ctx.createMediaElementSource(el);
       const gain = ctx.createGain();
       src.connect(gain);
@@ -942,8 +944,14 @@ export class AudioManager {
       gain.gain.setValueAtTime(0, t0);
       gain.gain.linearRampToValueAtTime(1, t0 + FADE_S);
       this.bgm = { key, loopUrl: url, nodes: [{ src: { stop: () => { try { el.pause(); } catch { /* ignore */ } } } }], gain };
+      // 自研播放器：暴露 <audio> 元素与播完钩子（进度条/seek/歌词滚动/队列连播由 UI 层驱动）
+      this.mediaEl = el;
       el.addEventListener('ended', () => {
-        if (this.bgm && this.bgm.loopUrl === url) this.bgm = null;
+        if (this.bgm && this.bgm.loopUrl === url) {
+          this.bgm = null;
+          this.mediaEl = null;
+          try { const cb = this.onBgmEnded; if (cb) cb(key); } catch { /* ignore */ } // 队列连播（UI 层挂）
+        }
         try { gain.disconnect(); } catch { /* ignore */ }
       });
       el.addEventListener('error', () => { this._warn('bgm-stream', new Error('media error ' + url.slice(0, 80))); if (token === this.bgmToken) this._fadeOutBgm(); });
@@ -1004,6 +1012,7 @@ export class AudioManager {
   _fadeOutBgm() {
     const cur = this.bgm;
     this.bgm = null;
+    if (this.mediaEl) { try { this.mediaEl.pause(); } catch { /* ignore */ } this.mediaEl = null; } // 自研播放器：流式元素随停播释放
     if (!cur || !this.ctx) return;
     try {
       const t = this.ctx.currentTime;

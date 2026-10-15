@@ -45,7 +45,7 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     });
     await c.page.waitForSelector('.player', { timeout: 10000 });
     const tabs = await c.page.$$eval('.ptab-btn', (els) => els.map((e) => e.textContent.trim()));
-    assert.equal(tabs.length, 3, '三个 tab: ' + tabs.join('/'));
+    assert.equal(tabs.length, 4, '四个 tab（含收藏）: ' + tabs.join('/'));
     const n = await c.page.$$eval('.ptab .ptrack', (els) => els.length);
     assert.ok(n > 0, '内置曲目 ' + n + ' 首');
     await c.page.evaluate(() => {
@@ -121,7 +121,14 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
     await c.page.waitForFunction(() => window.__ext.length > 0, { timeout: 8000 });
     const ext = await c.page.evaluate(() => window.__ext[0]);
     assert.equal(ext.url, 'https://example.com/e2e/123.mp3', '点行 → 脚本 musicUrl 取链（songmid 来自搜索结果）');
-    assert.ok(String(ext.label).includes('测试歌'), 'label=' + ext.label);
+    assert.ok(String(ext.label).startsWith('ext:wy:'), 'label(队列 key)=' + ext.label);
+    // 控制条出现并显示当前曲名 + 进度条 + 播放/暂停钮
+    await c.page.waitForSelector('.pctrl', { timeout: 8000 });
+    assert.equal(await c.page.$eval('.pctrl__title', (e) => e.textContent), '测试歌', '控制条显示当前曲名');
+    assert.ok(await c.page.$('.pctrl__seek'), '进度条在');
+    const nBtn = await c.page.evaluate(() => document.querySelectorAll('.pctrl__btns .pbtn').length);
+    assert.ok(nBtn >= 5, '控制按钮 ≥5，实际 ' + nBtn);
+    assert.ok(await c.page.$('.plist .ptrack--lx.is-on'), '当前播放行高亮');
     await c.page.setRequestInterception(false);
   } finally {
     await c.close().catch(() => {});
@@ -171,7 +178,7 @@ test('塞壬 tab：专辑展开 + 点歌换链 + 搜索过滤 + 远程流式播�
     assert.ok(hits.some((h) => /\/song\/.+:200/.test(h)), '单曲换链 200: ' + hits.join(', '));
     const pt = await c.page.evaluate(() => window.__pt[0]);
     assert.ok(/^https:\/\/res\d+\.hycdn\.cn\//.test(pt.url), 'CDN 直连地址: ' + pt.url);
-    assert.ok(String(pt.label).startsWith('siren:'), 'label=' + pt.label);
+    assert.ok(String(pt.label).startsWith('siren:'), 'label(队列 key)=' + pt.label);
     // —— 返回专辑列表按钮存在且能退回
     assert.ok(await c.page.$('.palbum-head .btn'), '返回按钮在');
     // —— 远程流式播放（真实 playTrack，不经过面板）：<audio> + MediaElementSource，不进 _buffer
@@ -222,7 +229,7 @@ test('全局点歌台：标题屏入口能开面板、能关闭', { skip: !enabl
     assert.ok(mounted, '面板由全局 PlayerHost 挂载（screen 之外）');
     assert.ok(await c.page.$('.psearch input'), '面板带搜索框');
     const tabs = await c.page.$$eval('.ptab-btn', (els) => els.length);
-    assert.equal(tabs, 3, '三 tab 齐全');
+    assert.equal(tabs, 4, '四 tab 齐全（内置/塞壬/外部/收藏）');
     await c.page.keyboard.press('Escape');
     await c.page.waitForFunction(() => !document.querySelector('.player'), { timeout: 8000 });
     // 重开（store 开关可重复）

@@ -91,3 +91,46 @@
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   margin: 0 0 .08rem; line-height: 1.5;
 }
+
+/* ---- 播放控制条 + 滚动歌词 + 收藏（全功能播放器 2026-10-16）---- */
+.pctrl {
+  margin-top: auto; padding: .08rem .1rem .1rem; border-top: 1px solid var(--line-2);
+  background: rgba(8, 11, 10, .6); display: flex; flex-direction: column; gap: .05rem; flex: 0 0 auto;
+}
+.pctrl__row { display: flex; align-items: center; gap: .08rem; }
+.pctrl__art { flex: 0 0 auto; width: .4rem; height: .4rem; display: grid; place-items: center; overflow: hidden; background: rgba(0, 0, 0, .35); border-radius: .04rem; color: var(--text-dim); }
+.pctrl__art img { width: 100%; height: 100%; object-fit: cover; }
+.pctrl__meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pctrl__title { font-size: .15rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pctrl__sub { font-size: .12rem; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pctrl__btns { flex: 0 0 auto; display: flex; align-items: center; gap: .03rem; }
+.pctrl__time { flex: 0 0 auto; font-size: .12rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.pbtn {
+  width: .3rem; height: .3rem; display: grid; place-items: center; padding: 0; border: 0; border-radius: .05rem;
+  background: transparent; color: var(--text-dim); cursor: pointer; transition: color var(--t-fast), background var(--t-fast);
+}
+.pbtn:hover { color: var(--text); background: rgba(255, 255, 255, .08); }
+.pbtn.is-on { color: var(--mint-400); }
+.pbtn--main { width: .38rem; height: .38rem; color: var(--mint-400); }
+.pbtn--main:hover { color: var(--mint-300); background: rgba(95, 224, 185, .12); }
+.pctrl__seek { width: 100%; height: .16rem; margin: 0; accent-color: var(--mint-500); cursor: pointer; }
+.plyric {
+  max-height: 1.5rem; overflow-y: auto; padding: .04rem .06rem; margin-bottom: .04rem;
+  background: rgba(0, 0, 0, .25); border-radius: .05rem; scroll-behavior: smooth;
+}
+.plyric--empty { display: grid; place-items: center; min-height: .5rem; color: var(--text-dim); font-size: .13rem; }
+.plyric__line { margin: .02rem 0; padding: .02rem .04rem; font-size: .13rem; line-height: 1.5; color: var(--text-dim); cursor: pointer; border-radius: .03rem; }
+.plyric__line:hover { color: var(--text); background: rgba(255, 255, 255, .05); }
+.plyric__line.is-on { color: var(--mint-300); font-weight: 700; background: rgba(95, 224, 185, .08); }
+/* 收藏行：曲目按钮吃掉宽度，心形钮贴右 */
+.pfav-row { display: flex; align-items: center; gap: .04rem; }
+.pfav-row .ptrack { flex: 1; min-width: 0; }
+.pfav {
+  flex: 0 0 auto; width: .32rem; height: .32rem; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: .05rem; background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.pfav:hover { color: #ff7a90; background: rgba(255, 255, 255, .06); }
+.pfav.is-on { color: #ff7a90; }
+/* 播放器主体（.player 顶部已 flex 列 + max-height 60vh）：列表区吃掉剩余高度滚动，控制条贴底 */
+.player .ptab { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+

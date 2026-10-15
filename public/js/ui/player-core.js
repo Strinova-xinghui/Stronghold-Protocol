@@ -315,3 +315,62 @@ export function fmtDur(sec) {
   const n = Number(sec) || 0;
   return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
 }
+
+// ---- 歌词（全功能播放器 2026-10-16）：LRC 解析 + 三条取词路径 ------------------------------------------
+/**
+ * LRC 文本 → [{t, line}]（按时间排序；一行多时间标签各成一条；元数据行 [ar:..] 丢弃）。
+ * 支持毫秒 .xx / .xxx；无时间标签的行忽略。
+ */
+export function parseLrc(text) {
+  const out = [];
+  const TAG = /\[([0-9]{1,3}):([0-9]{1,2})(?:[.:]([0-9]{1,3}))?\]/g;
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const times = [];
+    let m;
+    TAG.lastIndex = 0;
+    // 行首区连续的时间标签（[00:12.34][01:02]词）
+    let at = 0;
+    while ((m = TAG.exec(raw)) && m.index === at) {
+      times.push(Number(m[1]) * 60 + Number(m[2]) + (m[3] ? Number('0.' + m[3]) : 0));
+      at = TAG.lastIndex;
+    }
+    if (!times.length) continue;
+    const line = raw.slice(at).trim();
+    if (!line) continue; // 纯时间标签的过渡空行忽略
+    for (const t of times) out.push({ t, line });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/** 当前播放时刻 → 活跃行下标（二分；无词行 -1）。 */
+export function lrcIndex(lines, sec) {
+  if (!lines || !lines.length) return -1;
+  let lo = 0, hi = lines.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (lines[mid].t <= sec + 0.25) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans;
+}
+
+/** 网易云歌词（内置搜索结果的轮椅取词）：走 /music/proxy（服务器注入 Referer）。返回 LRC 文本或 null。 */
+export async function wyLyric(songmid, signal) {
+  const url = 'https://music.163.com/api/song/lyric?id=' + encodeURIComponent(String(songmid)) + '&lv=-1&kv=-1&tv=-1';
+  const r = await fetch('/music/proxy?url=' + encodeURIComponent(url), { signal });
+  if (!r.ok) return null;
+  try { const j = JSON.parse(await r.text()); return (j.lrc && j.lrc.lyric) || null; } catch { return null; }
+}
+
+/** lx 脚本的 lyric action（源实现了就用；失败静默 null）。 */
+export async function lxLyric(listeners, source, musicInfo) {
+  const hs = listeners && listeners.get(LX_EVENT_NAMES.request);
+  if (!hs || !hs.size) return null;
+  for (const h of hs) {
+    try {
+      const v = await h({ source, action: 'lyric', info: { type: 'txt', musicInfo } });
+      const text = typeof v === 'string' ? v : (v && (v.lyric || v.lrc || v.content)) || '';
+      if (text && text.includes('[')) return text;
+    } catch { /* 下一个 handler */ }
+  }
+  return null;
+}

@@ -1311,5 +1311,20 @@
   "搜索中…": "Searching…",
   "搜索": "Search",
   "没有搜索结果。": "No results.",
-  "高级：直接输入 songmid / ID 点播": "Advanced: play directly by songmid / ID"
+  "高级：直接输入 songmid / ID 点播": "Advanced: play directly by songmid / ID",
+  "收藏": "Favorites",
+  "暂无歌词": "No lyrics",
+  "单曲循环": "Repeat one",
+  "列表循环": "Repeat list",
+  "不循环": "No repeat",
+  "上一曲": "Previous",
+  "播放": "Play",
+  "下一曲": "Next",
+  "歌词": "Lyrics",
+  "停止并交还自动 BGM": "Stop and return to auto BGM",
+  "播放进度": "Playback progress",
+  "还没有收藏。在搜索结果或曲目行右侧点 ♥ 收藏。": "No favorites yet. Tap ♥ on a track row to save it.",
+  "取消收藏": "Remove favorite",
+  "先在「外部音源」加载脚本后再播收藏": "Load a source script in the External tab before playing this favorite",
+  "收藏（本机保存，最多 200 首）。外部音源的收藏需要先在「外部音源」加载脚本后才能取链。": "Favorites (stored on this device, up to 200). External-source favorites need the source script loaded in the External tab first."
 }

@@ -3,7 +3,7 @@
 // 用法: node --test tools/music-player.test.mjs
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader, fetchLxScript, lxSearch } from '../public/js/ui/player-core.js';
+import { builtinTracks, loadLxScript, lxMusicUrl, parseLxHeader, fetchLxScript, lxSearch, parseLrc, lrcIndex } from '../public/js/ui/player-core.js';
 
 describe('内置 BGM 曲目推导', () => {
   test('从 assets 清单推导 16 首（intro+loop 去重，loop 为准）', () => {
@@ -171,5 +171,34 @@ describe('lxSearch（内置搜索点歌）', () => {
     await assert.rejects(() => lxSearch('bogus', 'x'));
     globalThis.fetch = async () => ({ ok: false, status: 502, text: async () => '' });
     await assert.rejects(() => lxSearch('wy', 'x'), /502/);
+  });
+});
+
+describe('歌词（parseLrc / lrcIndex）', () => {
+  test('标准 LRC：排序、多标签、元数据行丢弃', () => {
+    const lrc = ['[ti:歌]', '[ar:手]', '[00:12.50]第一句', '[00:05.00]前奏句', '[01:30.25]副歌', '[00:12.50]第一句重复标签'].join('\n');
+    const lines = parseLrc(lrc);
+    assert.deepEqual(lines.map((l) => l.t), [5, 12.5, 12.5, 90.25]);
+    assert.equal(lines[1].line, '第一句');
+  });
+  test('毫秒 .xxx 与非法行', () => {
+    const lines = parseLrc('[00:01.123]三点毫秒\n没有时间标签\n[abc]坏标签\n[02:59.9]尾句');
+    assert.equal(lines.length, 2);
+    assert.ok(Math.abs(lines[0].t - 1.123) < 1e-6);
+    assert.equal(lines[1].t, 179.9);
+  });
+  test('空/坏输入安全', () => {
+    assert.deepEqual(parseLrc(''), []);
+    assert.deepEqual(parseLrc(null), []);
+    assert.equal(lrcIndex([], 5), -1);
+  });
+  test('lrcIndex：二分定位当前行（含 0.25s 提前量）', () => {
+    const lines = parseLrc('[00:10.00]A\n[00:20.00]B\n[00:30.00]C');
+    assert.equal(lrcIndex(lines, 0), -1);
+    assert.equal(lrcIndex(lines, 9.0), -1, '提前量 0.25s 之外不点亮');
+    assert.equal(lrcIndex(lines, 9.9), 0, '提前 0.25s 点亮（歌词比声音先到半拍，读感更顺）');
+    assert.equal(lrcIndex(lines, 10.2), 0);
+    assert.equal(lrcIndex(lines, 25), 1);
+    assert.equal(lrcIndex(lines, 999), 2);
   });
 });
