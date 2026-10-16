@@ -792,3 +792,39 @@ custom-bgm 18/18（个人池改 scope 口径 + 旧数字键兼容）；五套件
 真引擎端到端：R18 BOSS 轮 → `x:aizo`，早期常规轮 → `x:xinsiyanhuo`，中期常规轮 → `x:yuai`（各按类型独立抽取）。
 线上（build 9ccbdf6b153d）实测：规则为 scope 形态、客户端三行渲染正确、勾 BOSS 轮存为 `{"boss":["aizo"]}`、
 `personalBgmKey('boss',…)→cbgm:aizo` 而 `('combat',…)→null`（未配该轮次正确回落）。
+
+### 优先级契约：点歌台 > 个人替换 > 全局替换(bossBgm) > 官方日程（2026-10-16 用户提醒「注意与点歌台的冲突」）
+
+**结论：这条优先级原本就成立**（不是新功能），但此前是**隐式**的——靠 `installAudio` 的 sync 里
+`if (audio.manualBgm) return;` 挡在自动选曲之前。用户提醒后我把它**显式化**，避免将来改动误破：
+
+1. **代码**：`public/js/audio.js` 的 installAudio 该处补了 ⚠️ 优先级契约注释，写明
+   「bossBgm/个人池只管**默认战斗音乐**；玩家一点歌（manualBgm 上锁）就整体让位，轮次怎么变都不许覆盖」，
+   并指明这条 return 必须留在所有自动选曲之前。
+2. **测试**（tools/custom-bgm.test.mjs 新增 2 例，共 20/20）：
+   - 自动模式采纳服务器下发的 `x:yuai` → `cbgm:yuai`；
+   - 玩家点歌上锁后，轮次从 COMBAT 切到 FINAL_ASSAULT（服务器改发 `x:xinsiyanhuo`）**不调用 playBgm**、
+     反复触发仍不覆盖；
+   - `clearManualBgm()` 后自动链恢复且**按当前轮次**取曲（`cbgm:xinsiyanhuo`）；
+   - 个人替换（localStorage）同样让位于手动点歌。
+3. **UI**：客户端「我的战斗音乐」面板加一行提示「这里只管默认战斗音乐；你自己点歌播放时一切以点歌为准」。
+
+**机制依据（为什么天然安全）**：`playTrack`（手动）会置 `this.manualBgm` 并清 `this.wantBgm`；
+`onBgmEnded` 只在 `_startBgmStream` 的 `ended` 里触发，而自动 BGM 走 `_startBgm`（loop，不触发 ended）
+⇒ 自动替换与手动队列之间没有交叉切换路径。`setVolumes` 从静音恢复时也是手动曲优先（`man` 分支）。
+
+**验证**：五套件串行 79/79、既有 `test/ui/audio.test.js` 34/34（确认未破坏原行为）、符号审计 ✓、i18n en 100%。
+线上真机（headless 在 strinova.me 真实页面里执行该链路）：`auto=cbgm:yuai` ✔、点歌期间 `blocked=true` ✔、
+回到自动 `after=cbgm:xinsiyanhuo` ✔、无 JS 错误。客户端文件 no-cache ⇒ **scp 即生效，无需重启**。
+
+**🔍 顺带发现的一个既有边界（未改，等用户定夺）**：玩家点了一首**不循环**的曲子（塞壬 OST；内置 BGM 是 loop 不会命中）
+且队列播到尽头时，`_startBgmStream` 的 `ended` 会把 `this.bgm` 置 null，但 `manualBgm` **仍锁着**，
+`qNext(true)` 到尽头直接 return ⇒ 音乐停止且**自动 BGM（含 bossBgm）不会自动恢复**，需玩家按「回到自动 BGM」
+才恢复。这是播放器既有行为（尊重「玩家点了歌」），不是本次引入；要改成「队列自然播完即交还自动」需动
+ui/player.js 的 qNext + audio 的 ended 协同，已记在此处备用。
+
+**推送方式更新**：本机 `github.com:443` 直连与钉 IP（140.82.112.3）全部黑洞，改用
+**api.github.com 的 Git Data API** 推送（脚本已存 `.cache/push-api.mjs`）：
+blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/message 按本地原样) → PATCH ref。
+⚠️ 关键坑：`message` 必须传**原样（含尾随换行）**，不能 `.trim()`——否则 commit sha 与本地不一致（第一次就踩了）；
+时间戳传带 `+08:00` 的 ISO，GitHub 会原样保留 ⇒ **sha 可精确复现**，本地与远程完全一致，下次 push 不会 non-fast-forward。
