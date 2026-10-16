@@ -545,17 +545,31 @@ function renderBgmRules() {
   /** 规则的曲目池（兼容旧配置的单字符串 track）。 */
   const poolOf = (ru) => (Array.isArray(ru.track) ? ru.track : (ru.track ? [ru.track] : []));
   const nameOf = (t) => BB_NAMES[t] || (String(t).startsWith('x:') ? String(t).slice(2) : t) || '?';
+  const SCOPE_LABEL = { combat: '常规战斗轮', boss: 'BOSS 轮', '*': '所有作战期' };
   cfg.bossBgm.rules.forEach((ru, i) => {
     const pool = poolOf(ru);
+    // 规则形态：scope（轮次类型，主用法）或 round（旧的具体回合号，兼容保留）
+    const scope = typeof ru.scope === 'string' ? ru.scope : null;
+    const title = scope ? (SCOPE_LABEL[scope] || scope) : `第 ${ru.round ?? '?'} 回合（旧形态）`;
     const row = el('div', { class: 'sub' });
     row.append(el('div', { class: 'subhead' },
-      el('b', { text: `第 ${ru.round ?? '?'} 回合 → ${pool.length ? pool.map(nameOf).join(' / ') : '?'}${pool.length > 1 ? '（随机池 ' + pool.length + ' 首）' : ''}` }),
+      el('b', { text: `${title} → ${pool.length ? pool.map(nameOf).join(' / ') : '?'}${pool.length > 1 ? '（随机池 ' + pool.length + ' 首）' : ''}` }),
       el('span', { class: 'grow' }),
       el('button', { class: 'danger', text: '删除', onclick: () => { cfg.bossBgm.rules.splice(i, 1); renderBgmRules(); } })
     ));
     const r1 = el('div', { class: 'row' });
-    r1.append(numField('回合 round（加时赛 BOSS=18/隐藏=19，未开=14/15）', ru.round, 1, 200, (v) => { ru.round = v; }));
-    r1.append(selField('语义 kind', ru.kind || 'round', [['boss', 'boss（BOSS 回合）'], ['round', 'round（任意回合）']], (v) => { ru.kind = v; }));
+    // 轮次类型（2026-10-16 晚改）：BOSS 回合号会随「开不开加时赛」变（官方 14/15，开了加时赛顺延 18/19），
+    // 所以不按回合号匹配，只分两种：常规战斗轮 / BOSS 轮（另有「所有作战期」通配）。
+    r1.append(selField('轮次类型 scope', scope || 'combat', [
+      ['combat', '常规战斗轮（每个非 BOSS 战斗回合）'],
+      ['boss', 'BOSS 轮（最终攻势 / 隐秘核心）'],
+      ['*', '所有作战期（以上两种都覆盖）'],
+    ], (v) => {
+      // 切到 scope 形态时清掉旧的 round 字段，避免两种形态并存造成误命中
+      delete ru.round;
+      ru.scope = v;
+      renderBgmRules();
+    }));
     // 曲目池：逗号分隔（多首 = 随机池）。下拉 datalist 兼得手填。自定义上传曲目以 x:<stem> 并入候选。
     const dl = 'bbDl' + i;
     const inp = el('input', { type: 'text', list: dl, value: pool.join(', '), placeholder: 'm_bat_… 或 x:我的曲目（逗号分隔 = 随机池）' });
@@ -567,6 +581,7 @@ function renderBgmRules() {
     const custom = (cbItems || []).map((x) => ({ stem: 'x:' + x.stem, name: '★ ' + (x.name || x.stem) + '（自定义上传）' }));
     const opts = [...custom, ...(bbStems || []).map((x) => ({ stem: x.stem, name: x.name }))].map((x) => el('option', { value: x.stem, label: x.name }));
     r1.append(el('label', { class: 'f' }, el('span', { text: '曲目池 track' }), inp, el('datalist', { id: dl }, ...opts)));
+    if (!scope) r1.append(numField('（旧形态）回合 round', ru.round, 1, 200, (v) => { ru.round = v; }));
     // 快捷勾选（自定义曲目 chip 多选）——比手打逗号直观
     const cbs = (cbItems || []);
     if (cbs.length) {
@@ -709,7 +724,9 @@ $('#rlAdd').addEventListener('click', () => {
 });
 $('#cbUpload').addEventListener('click', uploadCbFile);
 $('#bbAdd').addEventListener('click', () => {
-  cfg.bossBgm.rules.push({ round: 18, kind: 'boss', track: bbTracks()[0] || 'm_bat_abyssalhunters' });
+  // 新规则默认「BOSS 轮」+ 第一首自定义曲（没有自定义曲时用内置首曲）
+  const firstCustom = (cbItems || []).map((x) => 'x:' + x.stem);
+  cfg.bossBgm.rules.push({ scope: 'boss', track: firstCustom.length ? firstCustom : (bbTracks()[0] || 'm_bat_abyssalhunters') });
   renderBgmRules();
 });
 $('#rawFromForm').addEventListener('click', () => { $('#raw').value = JSON.stringify(cfg, null, 2); });

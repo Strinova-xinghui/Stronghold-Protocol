@@ -159,8 +159,11 @@ export class MatchViews {
     if (this.phase === PHASE.COMBAT || this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) {
       let bbRules = null;
       try { bbRules = getCustomRules({ log: this.log }); } catch { bbRules = null; }
-      // 池随机用本局 seed 派生（同局同回合恒定 ⇒ 全房同曲、重连/节流广播不换曲；不占 rngMeta/rngShop 流）
-      const track = bossBgmTrackFor(bbRules, this.round, this.seed);
+      // 轮次类型（2026-10-16 晚，用户指出按回合号是错的）：BOSS 回合号随「开不开加时赛」变（官方 14/15，
+      // 开了加时赛顺延 18/19），所以按**作战期的种类**匹配：COMBAT = 常规战斗轮；最终攻势/隐秘核心 = BOSS 轮。
+      // 池随机用本局 seed 派生（同局同轮次恒定 ⇒ 全房同曲、重连/节流广播不换曲；不占 rngMeta/rngShop 流）。
+      const scope = (this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) ? 'boss' : 'combat';
+      const track = bossBgmTrackFor(bbRules, scope, this.round, this.seed);
       if (track) v.bgmTrack = track;
     }
     // 最终攻势 / 隐秘核心: when the overtime drain starts (ms epoch; `deadline` is the level's 120 s countdown)

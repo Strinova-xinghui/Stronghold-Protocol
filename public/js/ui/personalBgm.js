@@ -24,8 +24,8 @@ const LS_KEY = 'sp_personal_bgm';
 /** 'cbgm:<stem>' 的 stem 合法性（与 audio.js / server 侧一致）。 */
 const STEM_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** 键合法性：'*'（所有作战期）或回合号 1–200。 */
-const KEY_RE = /^([0-9]{1,3}|\*)$/;
+/** 键合法性：轮次类型 'combat' | 'boss'、通配 '*'，或旧版的回合号 1–200。 */
+const KEY_RE = /^(combat|boss|\*|[0-9]{1,3})$/;
 
 /** 一个值的合法曲目池：字符串或字符串数组，逐项过 STEM_RE，去重，最多 16 首。 */
 function cleanPool(v) {
@@ -108,7 +108,7 @@ export function PersonalBgmTab() {
     fetchCustomBgmList(ac.signal).then(setItems);
     return () => ac.abort();
   }, []);
-  const [openKey, setOpenKey] = useState('18'); // 当前展开编辑的回合（默认 BOSS 回合）
+  const [openKey, setOpenKey] = useState('boss'); // 当前展开编辑的轮次（默认 BOSS 轮）
   const save = (next) => { setMap(next); if (!writePersonalBgm(next)) setErr(t('保存失败（浏览器存储不可用）')); else setErr(''); };
   /** 勾选/取消一首（池多选）：空池 = 删除该回合条目（回落全局/官方）。 */
   const toggle = (round, stem) => {
@@ -126,13 +126,16 @@ export function PersonalBgmTab() {
     </div>`;
   }
   const nameOf = (stem) => { const it = items.find((x) => x.stem === stem); return (it && it.name) || stem; };
+  // 轮次类型（2026-10-16 晚改）：BOSS 回合号会随「开不开加时赛」变（官方 14/15，开了加时赛顺延 18/19），
+  // 所以不按回合号，只分两种：常规战斗轮 / BOSS 轮（外加「所有作战期」通配）。
   const rows = [
+    { key: 'combat', label: t('常规战斗轮') },
+    { key: 'boss', label: t('BOSS 轮（最终攻势 / 隐秘核心）') },
     { key: '*', label: t('所有作战期') },
-    ...[1, 5, 8, 13, 18, 19].map((n) => ({ key: String(n), label: t('第 {n} 回合', { n }) })),
   ];
   const cur = Array.isArray(map[openKey]) ? map[openKey] : [];
   return html`<div class="ptab">
-    <p class="phint">${t('个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（本回合作战期从中随机一首）。全不勾 = 用全局/官方日程。')}</p>
+    <p class="phint">${t('个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（这种轮次每次从中随机一首）。全不勾 = 用全局/官方日程。')}</p>
     ${err ? html`<p class="perr">${err}</p>` : null}
     <div class="pbgm-list">
       ${rows.map((row) => {

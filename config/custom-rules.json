@@ -123,8 +123,7 @@
     "enabled": true,
     "rules": [
       {
-        "round": 18,
-        "kind": "boss",
+        "scope": "combat",
         "track": [
           "x:yuai",
           "x:aizo",
@@ -132,8 +131,7 @@
         ]
       },
       {
-        "round": 19,
-        "kind": "boss",
+        "scope": "boss",
         "track": [
           "x:yuai",
           "x:aizo",

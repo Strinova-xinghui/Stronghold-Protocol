@@ -122,7 +122,7 @@ describe('自定义 BGM 客户端解析（cbgm: 通道 + 个人优先级）', ()
     } finally { delete globalThis.localStorage; }
   });
 
-  test('优先级：个人 > 全局 > 官方（bgmKeyFor 的 stemKey 取值语义）', async () => {
+  test('优先级：个人 > 全局 > 官方（按轮次类型）', async () => {
     const { bgmKeyFor, personalBgmKey, stemBgmKey } = await import('../public/js/audio.js');
     const pmod = await import('../public/js/ui/personalBgm.js');
     const store = new Map();
@@ -135,26 +135,27 @@ describe('自定义 BGM 客户端解析（cbgm: 通道 + 个人优先级）', ()
       const manifest = { audio: { bgm: { combat: { loop: '/assets/audio/bgm/m_bat_act1autochess_loop.mp3' } } } };
       const pub = { phase: 'COMBAT', round: 18, bgmTrack: 'm_bat_act1autochess' }; // 全局命中内置曲
       // 无个人设置：全局生效
-      const globalKey = personalBgmKey(pub.round) || stemBgmKey(manifest, pub);
+      const globalKey = personalBgmKey('combat', pub.round) || stemBgmKey(manifest, pub);
       assert.equal(globalKey, 'stem:m_bat_act1autochess');
       assert.equal(bgmKeyFor('game', pub, 0, globalKey), 'stem:m_bat_act1autochess');
-      // 个人指定第 18 回合 ⇒ 压过全局
-      pmod.writePersonalBgm({ 18: 'mine_here' });
-      const personalKey = personalBgmKey(pub.round) || stemBgmKey(manifest, pub);
+      // 个人配「常规战斗轮」⇒ 压过全局
+      pmod.writePersonalBgm({ combat: 'mine_here' });
+      const personalKey = personalBgmKey('combat', pub.round) || stemBgmKey(manifest, pub);
       assert.equal(personalKey, 'cbgm:mine_here', '个人优先');
       assert.equal(bgmKeyFor('game', pub, 0, personalKey), 'cbgm:mine_here');
-      // 个人指定别的回合 ⇒ 第 18 回合仍用个人该条？不：映射里没有 18 就走全局
-      pmod.writePersonalBgm({ 7: 'other' });
-      assert.equal(personalBgmKey(18) || stemBgmKey(manifest, pub), 'stem:m_bat_act1autochess', '非本回合回落全局');
+      // 只配了 BOSS 轮 ⇒ 常规轮回落全局
+      pmod.writePersonalBgm({ boss: 'boss_only' });
+      assert.equal(personalBgmKey('combat', 18) || stemBgmKey(manifest, pub), 'stem:m_bat_act1autochess', '未配本轮次 ⇒ 回落全局');
+      assert.equal(personalBgmKey('boss', 18), 'cbgm:boss_only', 'BOSS 轮用个人池');
       // '*' 通配
       pmod.writePersonalBgm({ '*': 'wild' });
-      assert.equal(personalBgmKey(5), 'cbgm:wild', '通配命中任意回合');
+      assert.equal(personalBgmKey('combat', 5), 'cbgm:wild', '通配命中任意轮次');
       // 清空 ⇒ 回落全局
       pmod.writePersonalBgm({});
-      assert.equal(personalBgmKey(18) || stemBgmKey(manifest, pub), 'stem:m_bat_act1autochess');
+      assert.equal(personalBgmKey('combat', 18) || stemBgmKey(manifest, pub), 'stem:m_bat_act1autochess');
       // 个人指定的曲目名非法（服务器上没有）时仍解析（客户端不校验存在性——由文件 404 兜底静默）
-      pmod.writePersonalBgm({ 3: 'not_uploaded_yet' });
-      assert.equal(personalBgmKey(3), 'cbgm:not_uploaded_yet', '客户端不校验存在性（上传前后都能设）');
+      pmod.writePersonalBgm({ boss: 'not_uploaded_yet' });
+      assert.equal(personalBgmKey('boss', 19), 'cbgm:not_uploaded_yet', '客户端不校验存在性（上传前后都能设）');
     } finally { delete globalThis.localStorage; }
   });
 });
@@ -300,20 +301,29 @@ describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
     assert.equal(m.pickFromPool([], 18, 'x'), null, '空池 null');
   });
 
-  test('personalBgmKey：个人池优先 + 确定性选曲（audio.js 集成）', async () => {
+  test('personalBgmKey：按轮次类型取池 + 确定性选曲（audio.js 集成）', async () => {
     const { personalBgmKey } = await import('../public/js/audio.js');
     const m = await import('../public/js/ui/personalBgm.js');
     store.clear();
-    m.writePersonalBgm({ 18: ['yuai', 'aizo'] });
-    const k1 = personalBgmKey(18, 'match1');
-    for (let i = 0; i < 10; i++) assert.equal(personalBgmKey(18, 'match1'), k1, '同局同回合恒定');
+    m.writePersonalBgm({ boss: ['yuai', 'aizo'] });
+    const k1 = personalBgmKey('boss', 18, 'match1');
+    for (let i = 0; i < 10; i++) assert.equal(personalBgmKey('boss', 18, 'match1'), k1, '同局同轮次恒定');
     assert.ok(k1 === 'cbgm:yuai' || k1 === 'cbgm:aizo', '来自个人池：' + k1);
-    assert.equal(personalBgmKey(5, 'match1'), null, '未配置的回合 ⇒ null（回落全局/官方）');
+    assert.equal(personalBgmKey('combat', 18, 'match1'), null, '未配置的轮次 ⇒ null（回落全局/官方）');
+    // 通配
     m.writePersonalBgm({ '*': ['xinsiyanhuo'] });
-    assert.equal(personalBgmKey(7, 'match1'), 'cbgm:xinsiyanhuo', '通配生效');
-    m.writePersonalBgm({ 18: ['yuai'] });
-    assert.equal(personalBgmKey(18, 'match1'), 'cbgm:yuai', '回合号优先于通配');
+    assert.equal(personalBgmKey('combat', 7, 'match1'), 'cbgm:xinsiyanhuo', '通配生效');
+    // 轮次类型优先于通配
+    m.writePersonalBgm({ boss: ['yuai'], '*': ['xinsiyanhuo'] });
+    assert.equal(personalBgmKey('boss', 18, 'match1'), 'cbgm:yuai', '轮次类型优先于通配');
+    assert.equal(personalBgmKey('combat', 5, 'match1'), 'cbgm:xinsiyanhuo', '未配该轮次 ⇒ 落通配');
+    // 与回合号无关：BOSS 落在 14/15 还是 18/19 都命中同一条
+    assert.equal(personalBgmKey('boss', 14, 'match1'), 'cbgm:yuai', 'BOSS 在第 14 回合也命中');
+    assert.equal(personalBgmKey('boss', 19, 'match1'), 'cbgm:yuai', 'BOSS 在第 19 回合也命中');
+    // 旧版按回合号的键仍兼容
+    m.writePersonalBgm({ 18: ['daoguanmeng'] });
+    assert.equal(personalBgmKey('boss', 18, 'match1'), 'cbgm:daoguanmeng', '旧版回合号键仍生效');
     m.writePersonalBgm({});
-    assert.equal(personalBgmKey(18, 'match1'), null, '清空 ⇒ 回落');
+    assert.equal(personalBgmKey('boss', 18, 'match1'), null, '清空 ⇒ 回落');
   });
 });

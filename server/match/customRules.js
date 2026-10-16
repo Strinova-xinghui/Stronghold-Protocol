@@ -222,24 +222,30 @@ function normalize(raw) {
   const mu = raw.music && typeof raw.music === 'object' ? raw.music : null;
   if (mu && mu.enabled) out.music = Object.freeze({ enabled: true });
 
-  // ---- BOSS 战 / 指定回合 BGM 替换（bossBgm，自研 2026-10-16）：把 BOSS 回合（extraRounds 顺延后的
-  //      bossRound=18 / hiddenRound=19，未开加时赛则为官方 14/15）或任意指定回合的**作战期**换成指定曲目。
-  //      rules 每条 { round, track }：round = 对局回合号（含加时赛顺延后的实际回合）；track = 曲目 stem
-  //      （loop 文件名去 _loop.mp3，如 m_bat_rglk1phantomcastle；客户端 assets 清单已就位，服务器零素材）。
-  //      可选 kind: 'boss' | 'round'——仅作语义标注（BOSS 回合 = 最终攻势/隐秘核心的作战/开打期），命中仍按
-  //      round 号；同回合多条 = 前者生效（列表序）。未命中任何规则 = 官方日程逐字节不变（audio.js bgmKeyFor）。
-  //      曲目合法性：服务器不解析 1.6 MB 的 data/assets.json（零新增内存/流量红线）——宽松校验 stem 格式
-  //      /^[a-z0-9_]{1,64}$/（manifest 里全部 loop stem 都符合），真正的存在性由客户端 resolveBgm 兜底：
-  //      清单里没有该 stem ⇒ 回落官方 key（'boss'/'combat' 日程），绝不静音、绝不 404。
+  // ---- BOSS 战 BGM 替换（bossBgm，自研 2026-10-16；2026-10-16 晚改为**按轮次类型**匹配）----
+  //      ⚠️ 不再按回合号匹配（旧设计）：BOSS 回合号会随「开不开加时赛」变化——官方 14/15，开了加时赛
+  //      顺延成 18/19（见 gamedata.bossRound/hiddenRound 与 extraRounds 规则）。把 BOSS 绑死在 18/19
+  //      在未开加时赛的局里完全失效。改为按**轮次类型**（作战期的种类）匹配，两种：
+  //        scope: 'combat' = 常规战斗轮（COMBAT 阶段，非 BOSS）
+  //        scope: 'boss'   = BOSS 轮（FINAL_ASSAULT 最终攻势 / HIDDEN_CORE 隐秘核心）
+  //        scope: '*'      = 所有作战期（两种都覆盖；列表序在前者优先）
+  //      rules 每条 { scope, track }；track = 曲目标识（见下）或**数组 = 随机池**（本回合从池里取一首）。
+  //      （兼容：仍接受 { round: N, track } 的旧形态——按具体回合号匹配，高级用法，控制台不再暴露。）
+  //      未命中任何规则 = 官方日程逐字节不变（audio.js bgmKeyFor）。
+  //      曲目合法性：服务器不解析 1.6 MB 的 data/assets.json（零新增内存/流量红线）——宽松校验格式，
+  //      真正的存在性由客户端 resolveBgm 兜底：清单/上传目录里没有该曲 ⇒ 回落官方 key，绝不静音、绝不 404。
   const bb = raw.bossBgm && typeof raw.bossBgm === 'object' ? raw.bossBgm : null;
   if (bb && bb.enabled) {
     const src = Array.isArray(bb.rules) ? bb.rules : [];
     const STEMS = /^[a-z0-9_]{1,64}$/;
+    const SCOPES = new Set(['combat', 'boss', '*']);
     const list = [];
     for (const r0 of src) {
       if (!r0 || typeof r0 !== 'object') continue;
-      const round = Math.trunc(numOr(r0.round, 0));
-      if (!(round >= 1) || round > 200) continue;              // 非法 round 丢弃
+      // 轮次类型：'combat' | 'boss' | '*'；给了 scope 就按类型匹配，否则退回旧的具体回合号
+      const scope = typeof r0.scope === 'string' && SCOPES.has(r0.scope.trim().toLowerCase()) ? r0.scope.trim().toLowerCase() : null;
+      const round = scope ? 0 : Math.trunc(numOr(r0.round, 0));
+      if (!scope && (!(round >= 1) || round > 200)) continue;   // 无 scope 时 round 必须合法；有 scope 则忽略 round
       // 曲目来源（2026-10-16）：`track` 可以是**单个曲目**（字符串）或**随机池**（数组）。
       //   内置素材 stem  `m_bat_xxx`         → 客户端 resolveBgm 走 assets 清单（'stem:<x>'）
       //   自定义上传曲目  `x:<name>`          → 客户端走 /media/cbgm/<name>（'cbgm:<name>'，管理员上传目录）
@@ -257,9 +263,8 @@ function normalize(raw) {
       const pool = [];
       for (const v of arr) { const t = norm(v); if (t && !pool.includes(t)) pool.push(t); if (pool.length >= 32) break; }
       if (!pool.length) continue;                              // 非法/空曲目池丢弃（宽松格式校验，见上注释）
-      const kind = r0.kind === 'boss' || r0.kind === 'round' ? r0.kind : 'round';
       // 单曲也存成 1 元池：下游只需处理池这一种形态（视图下发时再解析成字符串）
-      list.push(Object.freeze({ round, pool: Object.freeze(pool), kind }));
+      list.push(Object.freeze(scope ? { scope, pool: Object.freeze(pool) } : { round, pool: Object.freeze(pool) }));
       if (list.length >= 64) break;                            // 硬上限：视图字段最多 64 条（防滥用撑大 m.public）
     }
     if (list.length) out.bossBgm = Object.freeze({ enabled: true, rules: Object.freeze(list) });
@@ -319,21 +324,31 @@ export function resetCustomRules() { cache = null; warned = false; }
  * @param {number} [seed] 对局种子（Match.seed）。给了就做确定性随机；省略 ⇒ 取池首。
  * @returns {string|null} 曲目标识（内置 stem 或 `x:<name>`）或 null
  */
-export function bossBgmTrackFor(rules, round, seed) {
+export function bossBgmTrackFor(rules, scope, round, seed) {
   const bb = rules && rules.bossBgm;
   if (!bb || !bb.enabled || !Array.isArray(bb.rules)) return null;
+  // 兼容旧签名 bossBgmTrackFor(rules, round, seed)：第二参是数字（或纯数字串）时视为回合号
+  if (typeof scope === 'number' || (typeof scope === 'string' && scope !== '' && Number.isFinite(Number(scope)))) {
+    seed = round; round = scope; scope = null;
+  }
+  // scope = 'combat'（常规战斗轮）| 'boss'（BOSS 轮）；round 只给「旧形态的按回合号规则」用
+  const sc = scope === 'boss' ? 'boss' : scope === 'combat' ? 'combat' : null;
   const r = Number(round);
-  if (!Number.isFinite(r)) return null;
   for (const rule of bb.rules) {
-    if (rule.round !== r) continue;
-    // 归一化后是 rule.pool；这里也容忍手写对象 { round, track }（单测/旧调用点直接构造规则时的形态）
+    // 命中判定：规则带 scope ⇒ 比较类型（'*' 通配）；规则带 round（旧形态）⇒ 比较回合号
+    const hit = rule.scope != null
+      ? (rule.scope === '*' || (sc != null && rule.scope === sc))
+      : (Number.isFinite(r) && rule.round === r);
+    if (!hit) continue;
+    // 归一化后是 rule.pool；这里也容忍手写对象 { scope, track }（单测/旧调用点直接构造规则时的形态）
     const pool = Array.isArray(rule.pool) ? rule.pool
       : (typeof rule.track === 'string' ? [rule.track] : Array.isArray(rule.track) ? rule.track : []);
-    if (!pool.length) return null;
+    if (!pool.length) continue;
     if (pool.length === 1 || !Number.isFinite(seed)) return pool[0];
-    // 确定性选择：FNV-1a(seed:round) % pool.length（与 sim/rng.js 的派生思路一致，但不占任何 rng 流）
+    // 确定性选择：FNV-1a(seed:scope:round) % pool.length（不占任何 rng 流；同局同轮次恒定 ⇒ 全房同曲、
+    // 节流广播/重连 resync 不换曲；不同局/不同轮次有变化）。轮次号进哈希 ⇒ 同一池在第 3 轮与第 9 轮可不同。
     let h = 0x811c9dc5;
-    const s = `${seed >>> 0}:${r}`;
+    const s = `${seed >>> 0}:${rule.scope != null ? rule.scope : 'r' + rule.round}:${Number.isFinite(r) ? r : ''}`;
     for (let i = 0; i < s.length; i++) { h = (h ^ s.charCodeAt(i)) >>> 0; h = Math.imul(h, 0x01000193) >>> 0; }
     return pool[h % pool.length];
   }

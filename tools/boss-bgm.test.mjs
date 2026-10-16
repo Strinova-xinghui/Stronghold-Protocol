@@ -60,9 +60,10 @@ describe('bossBgm · normalize', () => {
     ] } });
     const bb = getCustomRules({}).bossBgm;
     assert.ok(bb, '存在合法条目时整段启用');
-    assert.deepEqual(bb.rules.map((r) => [r.round, [...r.pool], r.kind]), [
-      [18, [BOSS_TRACK], 'boss'], [19, [OTHER_TRACK], 'round'], [5, [BOSS_TRACK], 'round'],
-    ], '只剩合法条目（track 归一为 1 元池）；kind 白名单外归 round；5.5 截断为 5');
+    assert.deepEqual(bb.rules.map((r) => [r.round, [...r.pool]]), [
+      [18, [BOSS_TRACK]], [19, [OTHER_TRACK]], [5, [BOSS_TRACK]],
+    ], '只剩合法条目（track 归一为 1 元池）；无 scope ⇒ 旧形态按回合号；5.5 截断为 5');
+    assert.ok(bb.rules.every((r) => r.scope == null), '旧形态不产生 scope 字段');
     assert.ok(Object.isFrozen(bb) && Object.isFrozen(bb.rules) && Object.isFrozen(bb.rules[0]), '冻结防篡改');
   });
 
@@ -337,5 +338,55 @@ describe('bossBgm 随机池（2026-10-16 用户要求：18/19 从雨爱/AIZO/心
     assert.equal(bossBgmTrackFor(rules, 5), null, '未命中回合');
     const off = load({ enabled: false, rules: [{ round: 18, track: ['x:a'] }] });
     assert.equal(bossBgmTrackFor(off, 18, 1), null, '全关 = null');
+  });
+});
+
+describe('按轮次类型匹配（2026-10-16 晚，用户指出按回合号是错的）', () => {
+  const cfgPath = CUSTOM_RULES_PATH;
+  const backup = fs.readFileSync(cfgPath, 'utf8');
+  after(() => { fs.writeFileSync(cfgPath, backup); resetCustomRules(); });
+  const load = (bossBgm) => { fs.writeFileSync(cfgPath, JSON.stringify({ bossBgm }, null, 2)); resetCustomRules(); return getCustomRules({}); };
+
+  test('scope 归一：combat / boss / * 合法；非法 scope 退回 round 形态', () => {
+    const rules = load({ enabled: true, rules: [
+      { scope: 'combat', track: ['x:yuai'] },
+      { scope: 'BOSS', track: ['x:aizo'] },           // 大小写宽容
+      { scope: '*', track: ['x:xinsiyanhuo'] },
+      { scope: 'nope', round: 7, track: ['m_bat_prtsstage1'] }, // 非法 scope ⇒ 用 round
+      { scope: 'combat' },                             // 空池 ⇒ 丢弃
+    ] });
+    const got = rules.bossBgm.rules.map((r) => [r.scope ?? ('round:' + r.round), [...r.pool]]);
+    assert.deepEqual(got, [
+      ['combat', ['x:yuai']], ['boss', ['x:aizo']], ['*', ['x:xinsiyanhuo']], ['round:7', ['m_bat_prtsstage1']],
+    ]);
+  });
+
+  test('BOSS 轮：无论 BOSS 落在第 14/15 还是 18/19 回合都命中（这正是改设计的理由）', () => {
+    const rules = load({ enabled: true, rules: [{ scope: 'boss', track: ['x:bossong'] }, { scope: 'combat', track: ['x:combatong'] }] });
+    // 未开加时赛：BOSS 在 14（最终攻势 13 / 隐秘核心 14 之类的实际号）——按 scope 匹配，与具体数字无关
+    for (const r of [13, 14, 15, 18, 19]) {
+      assert.equal(bossBgmTrackFor(rules, 'boss', r, 1), 'x:bossong', 'BOSS 轮 R' + r);
+      assert.equal(bossBgmTrackFor(rules, 'combat', r, 1), 'x:combatong', '常规轮 R' + r);
+    }
+    // 常规战斗轮与 BOSS 轮各自独立
+    assert.equal(bossBgmTrackFor(rules, 'combat', 3, 7), 'x:combatong');
+    assert.equal(bossBgmTrackFor(rules, 'boss', 19, 7), 'x:bossong');
+  });
+
+  test("scope '*' 通配 + 列表序优先（具体类型规则排在前面时优先）", () => {
+    const rules = load({ enabled: true, rules: [{ scope: 'boss', track: ['x:special'] }, { scope: '*', track: ['x:fallback'] }] });
+    assert.equal(bossBgmTrackFor(rules, 'boss', 18, 1), 'x:special', 'BOSS 轮命中具体规则');
+    assert.equal(bossBgmTrackFor(rules, 'combat', 5, 1), 'x:fallback', '常规轮落到通配');
+    const rev = load({ enabled: true, rules: [{ scope: '*', track: ['x:fallback'] }, { scope: 'boss', track: ['x:special'] }] });
+    assert.equal(bossBgmTrackFor(rev, 'boss', 18, 1), 'x:fallback', '通配在前则先命中（列表序）');
+  });
+
+  test('轮次类型池的确定性随机：同局同轮次恒定，不同局有变化', () => {
+    const rules = load({ enabled: true, rules: [{ scope: 'boss', track: ['x:yuai', 'x:aizo', 'x:xinsiyanhuo'] }] });
+    const a = bossBgmTrackFor(rules, 'boss', 19, 4242);
+    for (let i = 0; i < 20; i++) assert.equal(bossBgmTrackFor(rules, 'boss', 19, 4242), a, '同局同轮次恒定');
+    const seen = new Set();
+    for (let s = 1; s <= 120; s++) seen.add(bossBgmTrackFor(rules, 'boss', 19, s));
+    assert.ok(seen.size >= 2, '不同局有变化：' + [...seen].join(','));
   });
 });

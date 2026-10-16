@@ -252,26 +252,32 @@ function customBgmTrack(stem) {
 }
 
 /**
- * 自研（2026-10-16）**个人替换**（浏览器本地，优先级最高）：localStorage 里的 { round|'*': stem } 映射。
- * 用户在客户端自己指定「本回合作战期放我这首」——只影响自己这台设备（不动服务器、不影响队友），
+ * 自研（2026-10-16）**个人替换**（浏览器本地，优先级最高）：localStorage 里的
+ * { 'boss'|'combat'|'*': [stem…] } 映射（**按轮次类型**，与服务器全局规则的 scope 口径一致）。
+ * 用户在客户端自己指定「这种作战期放我这几首」——只影响自己这台设备（不动服务器、不影响队友），
  * 与「全局替换（控制台 bossBgm）」冲突时以本函数为准。
- * @param {number|null|undefined} round
+ * 兼容：旧版按回合号的键（'1'…'200'）仍然生效。
+ * @param {'combat'|'boss'|null} scope 本次作战期的轮次类型（由 phase 推导）
+ * @param {number|null|undefined} round 对局回合号（只给旧版按回合号的键用）
+ * @param {string} [matchKey] 对局标识（同局恒定即可），用于确定性随机
  * @returns {string|null} 'cbgm:<stem>' 或 null
  */
-export function personalBgmKey(round, matchKey = '') {
+export function personalBgmKey(scope, round, matchKey = '') {
   try {
     const raw = JSON.parse(localStorage.getItem('sp_personal_bgm') || 'null');
     if (!raw || typeof raw !== 'object') return null;
     const r = Number(round);
-    // 值是**池**（数组；旧版单字符串也兼容）。按 回合号 → '*' 的优先级取池。
+    // 值是**池**（数组；旧版单字符串也兼容）。
     const asPool = (v) => (Array.isArray(v) ? v : [v]).filter((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x));
-    let pool = Number.isFinite(r) ? asPool(raw[String(r)]) : [];
+    // 优先级：轮次类型 → 旧版回合号 → 通配 '*'
+    let pool = (scope === 'boss' || scope === 'combat') ? asPool(raw[scope]) : [];
+    if (!pool.length && scope != null && Number.isFinite(r)) pool = asPool(raw[String(r)]);
     if (!pool.length) pool = asPool(raw['*']);
     if (!pool.length) return null;
-    // 本地确定性随机：同局同回合恒定（不会一边打一边换歌），不同局/回合有变化。
+    // 本地确定性随机：同局同轮次恒定（不会一边打一边换歌），不同局有变化。
     // 个人池只影响本机 ⇒ 无需服务器参与（全局池才必须服务器掷，见 customRules.bossBgmTrackFor）。
     const pick = pool.length === 1 ? pool[0] : (() => {
-      const s = `${matchKey}:${r || 0}:${pool.join(',')}`;
+      const s = `${matchKey}:${scope || 'r' + (r || 0)}:${pool.join(',')}`;
       let h = 0x811c9dc5;
       for (let i = 0; i < s.length; i++) { h = (h ^ s.charCodeAt(i)) >>> 0; h = Math.imul(h, 0x01000193) >>> 0; }
       return pool[h % pool.length];
@@ -1642,8 +1648,10 @@ export function installAudio(deps) {
           // 自研自定义曲目优先级（2026-10-16 用户定）：**个人替换 > 全局替换（控制台）> 官方日程**。
           // 个人替换只读本机 localStorage（不动服务器、不影响队友），命中即压过全局。
           const manifest = manifestGetter();
-          // matchKey：客户端拿不到 match.seed，用「开赛时间/房间码」这类稳定串代替（同局同回合恒定即可）
-          const personal = personalBgmKey(pub?.round, String(pub?.startedAt || pub?.roomCode || ''));
+          // 轮次类型（与服务器同口径）：最终攻势/隐秘核心 = BOSS 轮，其余作战期 = 常规战斗轮。
+          // matchKey：客户端拿不到 match.seed，用「开赛时间/房间码」这类稳定串代替（同局同轮次恒定即可）。
+          const bgmScope = (pub?.phase === PHASE.FINAL_ASSAULT || pub?.phase === PHASE.HIDDEN_CORE) ? 'boss' : 'combat';
+          const personal = personalBgmKey(bgmScope, pub?.round, String(pub?.startedAt || pub?.roomCode || ''));
           audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round),
             personal || stemBgmKey(manifest, pub)));
         } catch { /* ignore */ }
