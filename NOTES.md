@@ -828,3 +828,43 @@ ui/player.js 的 qNext + audio 的 ended 协同，已记在此处备用。
 blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/message 按本地原样) → PATCH ref。
 ⚠️ 关键坑：`message` 必须传**原样（含尾随换行）**，不能 `.trim()`——否则 commit sha 与本地不一致（第一次就踩了）；
 时间戳传带 `+08:00` 的 ISO，GitHub 会原样保留 ⇒ **sha 可精确复现**，本地与远程完全一致，下次 push 不会 non-fast-forward。
+
+### 战斗音乐替换独立化：与点歌台解耦（2026-10-16 用户要求「发布节奏不同」）
+
+**起因**：用户指出「战斗音乐替换只在我们内部使用，而点歌台是要随撤回、等待一起发布的」——
+两者此前共用「我的战斗音乐」tab，导致**发布边界被绑在一起**（内部功能的代码与 UI 混在公开功能里，
+将来把点歌台随大版本发出去时，会连内部入口一起带出去）。
+
+**解耦结果**（四层都切开，可各自发布/演进）：
+
+| 维度 | 点歌台（公开功能） | 战斗音乐替换（内部功能） |
+| --- | --- | --- |
+| 模块 | `public/js/ui/player.js`（+ player-core.js） | `public/js/ui/battleMusic.js`（+ battleMusicStore.js） |
+| 面板 tab | 内置 BGM / 塞壬 OST / **收藏**（回到 3 个） | 独立浮层（`BattleMusicPanel`），不占点歌台任何 tab |
+| 入口 | `openPlayer()`（原有 4 处按钮不变） | `openBattleMusic()`（**四屏各加一个 sword 图标按钮**：title/lobby/room/game） |
+| 样式 | `game-player.css`（.p* 前缀） | `battle-music.css`（**bm-* 前缀，新文件**，index.html 单独引入） |
+| 存储 | `sp_player_favs`（收藏，自有） | `sp_personal_bgm` 经 **battleMusicStore.js**（纯逻辑层：audio.js 与 UI 共用同一份解析） |
+
+**互相 import 数为 0**（只剩注释里说明关系）：`ui/player.js` 不再 import 战斗音乐模块，
+`ui/battleMusic.js` 也不 import 点歌台。旧模块 `ui/personalBgm.js` 已删除（其存储职责移入
+`battleMusicStore.js`，UI 职责移入 `ui/battleMusic.js`）。`audio.js` 改为从 store 取个人池
+（`pickPersonalPool`），单一来源。
+
+**唯一的语义交点**（必须保留）：`audio.js` installAudio 里 `if (audio.manualBgm) return;` ——
+**点歌台 > 个人池 > 全局池 > 官方日程**。这条契约与解耦无关，但两边都要依赖它，已单独写测试锁定
+（见上一节「优先级契约」）。
+
+**4 条解耦守卫测试**（tools/custom-bgm.test.mjs，只查代码行、跳过注释）：
+① 点歌台 code 里不出现战斗音乐符号、反之亦然；② 点歌台 TABS 恰为 builtin/siren/fav 且无 mybgm/PersonalBgmTab；
+③ 四个屏各自 import `openBattleMusic` 且有按钮、main.js 同时挂着 `<PlayerHost/>` 与 `<BattleMusicHost/>`；
+④ battleMusicStore.js 的 import 里没有任何 UI 依赖（preact/components/store/ui）。
+
+**验证**：自研套件串行 83/83；`test/ui/audio.test.js` 34/34（点歌台逻辑未被破坏）；符号审计 ✓；i18n en 100%。
+本地 e2e（真服务器+无头浏览器）：点歌台 tabs=[内置 BGM/塞壬 OST/收藏] ✔、独立面板三行渲染 ✔、
+勾选持久化 `{"boss":["t_alpha","t_beta"]}` ✔、选曲 boss=t_alpha / combat=null / 换局 boss2=t_beta ✔。
+线上（**未重启**，纯客户端文件 no-cache）：新文件 200、旧模块 404、player.js 零残留引用、9 首曲目仍在、
+标题屏按钮 = [点歌, 战斗音乐]、独立面板 9 首可选、勾选存 `{"boss":["aizo","daoguanmeng"]}`、无 JS 错误。
+
+**已知限制（待办）**：个人池的候选只列**自定义上传曲**（`public/cbgm/`）；内置素材曲（`m_bat_*`）目前只能配在
+控制台的全局规则里。若要把内置曲也纳入个人池，需要让面板拉 `/data/assets.json` 枚举 loop stem 并走
+`stem:` key（客户端 resolveBgm 已支持该分支，只差 UI 候选）。
