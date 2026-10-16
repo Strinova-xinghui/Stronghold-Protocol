@@ -680,3 +680,46 @@ Lead 独立复跑 bili 7/7、音乐全套 34/34（--test-concurrency=1）、远�
 云端 build 未变（全程未碰）。玩法：`cd E:\sp-ext-bili && PORT=24599 HOST=127.0.0.1 node server/index.js` →
 浏览器 127.0.0.1:24599 → 点歌台 → 外部音源。限制：免登录 128k/192k、无歌词、audio 无 Range（实测 mp4 moov
 前置可播）。调研结论「云端不可行」依然成立——**本地家宽中转是它唯一的合法形态**，该分支因此永不部署。
+
+### 自定义 BGM 曲目 + 三层优先级（2026-10-16 下午，用户：「我能提供音乐文件到服务器替换 BOSS 战音乐吗」+「控制台可全局替换，但个人优先级更高」）
+
+**三层优先级（audio.js installAudio 选曲）**：① 个人替换（客户端 localStorage，只影响本机）
+> ② 全局替换（控制台 bossBgm，服务器 m.public.bgmTrack 下发，全房同曲）> ③ 官方日程。
+用户原话「个人优先级更高，若同时在客户端启用指定替换则优先个人」——实现为
+`personalBgmKey(pub.round) || stemBgmKey(manifest, pub)`，前者命中即压过后者。
+
+**上传通道（控制台网页上传，用户选定）**：
+- 存储 `public/cbgm/<stem>.<ext>` + `index.json`（展示名/上传时间）；目录名与 URL 前缀同名 `cbgm`
+  （第一版叫 custom-bgm，导致 media.js 分支判断拿 URL 段比目录名永远不匹配 → 404，单测抓出后统一）。
+- API（仅控制台认证后可达，CONSOLE_PATHS 内）：`GET/POST/DELETE /console/api/bgm`。POST 用**原始字节 body**
+  而非 multipart（控制台自己的页面，`fetch(url,{body:file})` 最简）；ext 从 `?ext=` 或 Content-Type 推断。
+- 公开只读 `GET /music/bgm-list`（客户端个人替换面板要列曲，但控制台 API 有密码闸；只暴露 stem/name/size）。
+- 音频通道 `/media/cbgm/<stem>`（media.js 新分支，复用无扩展名通道 + Range + no-cache 的 mtime ETag）：
+  下载管理器同样不弹窗；不进 assetIndex（管理员随时增删，进去会让内容哈希索引反复重建）。
+- 安全：stem 白名单 `[A-Za-z0-9_-]{1,64}`（无点/斜杠 ⇒ 无穿越、无隐藏文件）、扩展名白名单 AUDIO_EXTS、
+  ≤24MB/首、≤40 首、临时文件 + rename 原子写、换扩展名时清旧文件。
+- 规则侧：bossBgm 的 track 支持 `x:<name>`（自定义）与内置 stem 两种；客户端 `stemBgmKey` 把 `x:` 映射成
+  `cbgm:<name>` 走上传通道。**服务器仍不解析 assets 清单**（只做格式校验），零内存零流量红线守住。
+
+**服务端成本（用户红线）**：文件是磁盘静态资源，客户端首次听到时按需拉取（一首 5–15MB，与官方 BGM 同一套
+流式通道 + LRU）；服务器不预载、不解码、不转码。20 首 ≈ 200MB 磁盘，内存零新增。
+
+**🐛 顺手修的两个真 bug**：
+1. `resolveBgm` 首行 `const a = manifest?.audio; if (!a) return null` —— cbgm 分支写在它**之后**，
+   而个人替换调用方传 `null` manifest（不查清单）⇒ 个人替换**永远失效**。改成 cbgm 分支前置。
+   （单元测试当场抓出：优先级断言拿到的是全局 key 而非个人 key。）
+2. 控制台切页残留滚动：从长面板（BOSS 音乐，新增上传卡片后更高）切到短面板时，页面保留的滚动让目标
+   控件跑到视口上方（实测 rolls 输入 rect.top=-43）。修法：switchTab 里 `window.scrollTo(0,0)` + 面板 scrollTop 复位。
+   这个是我加的上传卡片**真实引入的 UI 回归**（verify-console-ui 从 34/34 掉到 33/34，3 次稳定复现），
+   不是 flaky——教训：`isIntersectingViewport()` 失败先看 rect.top 是不是负数（滚过头），别急着判 flaky。
+3. 另修一处 class 冲突：上传列表行原本也用 `.sub`，与 verify 的 `#bbRules .sub` 选择器撞车（`subs.at(-1)`
+   选中了自定义行的删除按钮），改用 `.cbrow`。
+
+**验证**：custom-bgm.test.mjs 15/15（仓库存/列/删/上限/路径安全/手工 scp 可见 + cbgm 解析 + 个人优先级 +
+/media/cbgm 真 HTTP 200/audio + 控制台 API 上传/删除/非法拒绝 + 公开列表）；boss-bgm 18/18（含 x: 规则校验）；
+五套件串行 66/66；check-missing-imports ✓；i18n en 100%；verify-console-ui 34/34。
+云端已闪断上线（matches=0，build c193bad0d372），线上实测：上传 wav → 列表/公开列表/音频 200 audio-wav →
+控制台面板显示曲目且规则候选含 `x:deploy_tone` → 播放器「我的战斗音乐」tab 21 行下拉可选 → 删除清理干净。
+
+**玩法**：控制台 → BOSS音乐页 → 填文件名+选音频文件上传 → 在规则的「曲目 track」里选 `x:你的文件名` → 保存。
+个人覆盖：游戏内点歌台 → 「我的战斗音乐」→ 给某回合/所有作战期选一首 → 只影响你这台设备。
