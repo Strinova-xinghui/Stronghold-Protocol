@@ -723,3 +723,38 @@ Lead 独立复跑 bili 7/7、音乐全套 34/34（--test-concurrency=1）、远�
 
 **玩法**：控制台 → BOSS音乐页 → 填文件名+选音频文件上传 → 在规则的「曲目 track」里选 `x:你的文件名` → 保存。
 个人覆盖：游戏内点歌台 → 「我的战斗音乐」→ 给某回合/所有作战期选一首 → 只影响你这台设备。
+
+### BOSS 战 BGM 随机池 + 个人自定义池（2026-10-16，用户：「18/19 雨爱/AIZO/心似烟火随机池，允许客户端自定义单独的随机池」）
+
+**需求拆成两半**：① 全局（控制台）18/19 从指定几首里随机；② 客户端能配**自己的**随机池，且个人优先于全局。
+
+**全局池的随机必须在服务器掷**（三条硬约束，写进 customRules 注释）：
+1. 客户端各自随机 ⇒ 同局队友听到不同的歌，且每帧视图重算会不断换曲；
+2. 同局同回合必须恒定 ⇒ 节流广播 / 重连 resync 不能换曲；
+3. **不得消耗 rngMeta/rngShop** ⇒ 那两个流被反 SL 快照与 golden 基线依赖，掺进来会污染整局随机序列。
+
+落法：`deriveSeed` 思路的独立哈希 `FNV-1a(seed:round) % pool.length`——用 `Match.seed`，不碰任何既有 rng 流。
+views.js 调用点从 `bossBgmTrackFor(bbRules, this.round)` 改为传 `this.seed`。**服务器只下发选中的那一首**，
+客户端逻辑零改动（仍走 `x:` → `cbgm:` 通道）。省略 seed 时退化为「取池首」⇒ 纯函数单测/旧调用点不用构造 seed。
+
+**个人池**（客户端本地，天然不需要服务器参与——只影响本机）：localStorage 的
+`{ '18': ['aizo','daoguanmeng'], '*': [...] }`（值是池；旧版单字符串仍兼容）。
+`personalBgmKey(round, matchKey)` 用 `matchKey`（开赛时间/房间码）+ 回合 + 池内容派生确定性索引：
+同局同回合恒定（不会一边打一边换歌），不同局/回合有变化。优先级仍是
+`personalBgmKey(...) || stemBgmKey(...)`（个人 > 全局 > 官方）。
+
+**UI**：控制台规则行的「曲目 track」→「曲目池 track」（逗号分隔 = 池，另加 ★ 自定义曲目 chip 多选，
+比手打逗号直观）；客户端「我的战斗音乐」从单下拉改成**回合行 + 展开 chip 多选**（`.pbgm-picks`/`.pchip`），
+行摘要显示当前池（`aizo / 朋友的酒`）或「（不替换）」。
+
+**规则结构变更**：normalize 后 `rule.track`（字符串）→ `rule.pool`（冻结数组，单曲也存成 1 元池 ⇒ 下游只需
+处理一种形态）；`bossBgmTrackFor` 仍容忍手写 `{round, track}`（单测/旧调用点直接构造规则时）。
+池内非法项剔除、去重、上限 32。
+
+**默认配置**：18 与 19 都 = `["x:yuai","x:aizo","x:xinsiyanhuo"]`（雨爱 / AIZO / 心似烟火）。
+
+**验证**：boss-bgm 22/22（新增池 4 例：数组=池/旧字符串兼容、非法剔除+去重+上限、**确定性随机**——
+同 seed 同回合 20 次恒定 + 200 个 seed 覆盖 ≥2 首、省略 seed=池首）；custom-bgm 18/18（个人池读写/去重/清除、
+`pickFromPool` 确定性、`personalBgmKey` 集成 + 通配 + 回合优先）；五套件串行 73/73；符号审计 ✓；i18n en 100%。
+线上（build 2fa4bed41f02）实测：控制台读到池规则、9 首 chip 全渲染、勾两首持久化为 `{"18":["aizo","daoguanmeng"]}`、
+个人池压过全局（`cbgm:daoguanmeng` > `stem:m_bat_act1autochess`）、60 个 seed 在 R18 抽到全部三首。
