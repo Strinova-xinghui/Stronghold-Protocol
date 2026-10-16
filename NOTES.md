@@ -932,7 +932,7 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
   1. **热改测试并发互踩**（约 18 条，自研 tools/*.test.mjs 族）：这些套件共享 `config/custom-rules.json`（mtime 热改）——并发跑互踩；`--test-concurrency=1` 单跑 82/82 全绿已证。
   2. **负载抖动**（co-op 20-seeds 长跑、performance、websocket flooding）：4 并发下 CPU 挤占导致超时/时序断言。
   3. **平台门缺失**（make-windows-bundle「大小写不敏感」断言）：测试断言 Windows/macOS 文件系统语义，Linux 天然不同；该文件 Windows 侧同跑同样会过，属测试应加平台 skip。
-  4. **git 身份缺失**（test-monitor）：WSL `mk` 用户未配 `user.name/email` 导致其内部 git 操作失败（已配齐后通过）。
+  4. **集成脚本混入单测**（tools/test-monitor.mjs）：它不是单测——要 24778 端口**已有常驻服务器**才能跑（`node tools/test-monitor.mjs [port]` 先起服），被 `node --test` 的命名规则自动捞进来必然 `ECONNREFUSED`。两侧同病；已在 WSL 验证：起临时服后端到端全通。根治 = 改名 `tools/verify-monitor.mjs` 之类不被 --test 匹配的名字（待办）。
 - **Windows 独有 116 条**：主要是基线跑时 6 个 node 进程（含我另起的单跑）互相挤占 + Final Assault 长跑族超时——**Windows 侧全量并发的噪声比 WSL 还大**。
 - **结论**：WSL 迁移后健康度不劣于 Windows（58 < 148）；**开发循环建议**：改完跑相关单文件/单并发组，全量回归留给 `--test-concurrency=1` 或低并发。
 
