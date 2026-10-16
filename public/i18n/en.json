@@ -1327,5 +1327,12 @@
   "取消收藏": "Remove favorite",
   "先在「外部音源」加载脚本后再播收藏": "Load a source script in the External tab before playing this favorite",
   "收藏（本机保存，最多 200 首）。外部音源的收藏需要先在「外部音源」加载脚本后才能取链。": "Favorites (stored on this device, up to 200). External-source favorites need the source script loaded in the External tab first.",
-  "收藏（本机保存，最多 200 首）": "Favorites (stored on this device, up to 200)"
+  "收藏（本机保存，最多 200 首）": "Favorites (stored on this device, up to 200)",
+  "保存失败（浏览器存储不可用）": "Save failed (browser storage unavailable)",
+  "服务器上还没有自定义曲目。请管理员在 /console 的「BOSS音乐」页上传音乐文件后，这里就能选。": "No custom tracks on the server yet. Once an admin uploads music on the BOSS music page of /console, it shows up here.",
+  "所有作战期": "All combat phases",
+  "第 {n} 回合": "Round {n}",
+  "个人替换：只影响你这台设备，优先于控制台的全局替换。留空 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Leave empty to use the global/official schedule.",
+  "（不替换）": "(no override)",
+  "全部清除": "Clear all"
 }

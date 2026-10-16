@@ -93,9 +93,24 @@ async function sirenFetch(sub, query, log) {
  * @param {{ rawPath: string, query: string }} parts @param {{ warn?: Function }} log
  * @param {boolean} musicEnabled config/custom-rules.json music.enabled（关掉 = 404，原版行为）
  */
-export async function handleMusicRoutes(req, res, parts, log, musicEnabled) {
+export async function handleMusicRoutes(req, res, parts, log, musicEnabled, publicDir = null) {
   const p = parts.rawPath;
   if (!musicEnabled) return false;
+  // 自研（2026-10-16）：自定义 BOSS 战曲目的**公开只读列表**——客户端「个人替换」面板要选曲，
+  // 但控制台 API 有密码闸；这里只暴露「有哪些曲目」（stem + 展示名 + 体积），不含任何写操作，
+  // 也不泄露磁盘路径。音频本体走 /media/cbgm/<stem>（静态，同源）。
+  if (p === '/music/bgm-list') {
+    if (!publicDir) { sendJson(req, res, 200, { ok: true, items: [] }); return true; }
+    try {
+      const { listCustomBgm } = await import('../match/customBgm.js');
+      const items = await listCustomBgm(publicDir);
+      sendJson(req, res, 200, { ok: true, items: items.map((x) => ({ stem: x.stem, name: x.name, ext: x.ext, size: x.size })) }, { 'Cache-Control': 'no-store' });
+    } catch (e) {
+      log?.warn?.('[music] bgm-list failed: ' + (e && e.message));
+      sendJson(req, res, 200, { ok: true, items: [] });
+    }
+    return true;
+  }
   if (p === '/music/siren' || p.startsWith('/music/siren/')) {
     const sub = p.slice('/music/siren'.length) || '/';
     const r = await sirenFetch(sub, parts.query, log);

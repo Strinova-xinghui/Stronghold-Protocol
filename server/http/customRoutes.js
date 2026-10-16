@@ -11,6 +11,10 @@ import path from 'node:path';
 import { PHASE_NAMES } from '../../shared/constants.js';
 import { sendError, sendJson } from './common.js';
 import { getCustomRules, saveCustomRules, CUSTOM_RULES_PATH } from '../match/customRules.js';
+import {
+  listCustomBgm, saveCustomBgm, removeCustomBgm, customBgmCapacity,
+  CUSTOM_BGM_DIR, MAX_BGM_BYTES, MAX_BGM_COUNT,
+} from '../match/customBgm.js';
 import { applyGrants } from '../match/grant.js';
 import { t } from '../../shared/i18n.js';
 function isPrivateAddress(addr) {
@@ -490,9 +494,64 @@ async function consoleApiWrite(req, res, log) {
   }
 }
 
+/**
+ * 自研（2026-10-16）BOSS 战替换曲目的文件管理（仅控制台认证后可达；见 CONSOLE_PATHS 的门）。
+ *
+ *   GET    /console/api/bgm             → { ok, items:[{stem,name,ext,size,mtimeMs,addedAt}], max, dir }
+ *   POST   /console/api/bgm?stem=<s>&name=<n>   body = 原始音频字节（不是 multipart，也不是 JSON）
+ *   DELETE /console/api/bgm?stem=<s>
+ *
+ * 为什么用 raw body：multipart 解析器要自己写边界处理，而控制台是我们自己的页面，`fetch(url,{body:file})`
+ * 直接发原始字节最简单也最少出错；扩展名从 `?stem` 里带（或 body 的 Content-Type 推断）。
+ * 体积上限 MAX_BGM_BYTES，超限即 413 且不落盘。
+ */
+async function consoleApiBgm(req, res, log, publicDir) {
+  const q = new URLSearchParams((String(req.url || '').split('?')[1] || ''));
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const items = await listCustomBgm(publicDir);
+    sendJson(req, res, 200, { ok: true, items, max: MAX_BGM_COUNT, maxBytes: MAX_BGM_BYTES, dir: 'public/' + CUSTOM_BGM_DIR });
+    return;
+  }
+  if (req.method === 'DELETE') {
+    const stem = q.get('stem') || '';
+    const r = await removeCustomBgm(publicDir, stem);
+    if (!r.ok) { sendJson(req, res, 404, { ok: false, error: t('曲目不存在') }); return; }
+    log.info('[console] 自定义 BGM 已删除：' + stem);
+    sendJson(req, res, 200, { ok: true, removed: r.removed, items: await listCustomBgm(publicDir) });
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.setHeader('Allow', 'GET, HEAD, POST, DELETE');
+    sendError(req, res, 405, t('不支持的请求方法 · Method not allowed'));
+    return;
+  }
+  // POST：原始音频字节。stem 必填；ext 取 ?ext= 或 Content-Type 推断（两者都没有则默认 .mp3）。
+  const stem = String(q.get('stem') || '').trim();
+  const name = q.get('name') || '';
+  const ct = String(req.headers['content-type'] || '').toLowerCase();
+  const ctExt = /mpeg|mp3/.test(ct) ? '.mp3' : /mp4|m4a|aac/.test(ct) ? '.m4a' : /ogg|opus/.test(ct) ? '.ogg'
+    : /wav|wave/.test(ct) ? '.wav' : '';
+  const ext = String(q.get('ext') || ctExt || '.mp3').toLowerCase();
+  const cap = await customBgmCapacity(publicDir, stem);
+  if (!cap.ok) { sendJson(req, res, 400, { ok: false, error: cap.error }); return; }
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const c of req) {
+      size += c.length;
+      if (size > MAX_BGM_BYTES) { req.destroy(); sendJson(req, res, 413, { ok: false, error: t('文件过大') }); return; }
+      chunks.push(c);
+    }
+  } catch (e) { sendJson(req, res, 400, { ok: false, error: t('读取请求体失败：') + e.message }); return; }
+  const out = await saveCustomBgm(publicDir, { stem, ext, name, buf: Buffer.concat(chunks) });
+  if (!out.ok) { sendJson(req, res, 400, { ok: false, error: out.error }); return; }
+  log.info('[console] 自定义 BGM 已上传：' + out.item.stem + out.item.ext + '（' + Math.round(out.item.size / 1024) + 'KB）');
+  sendJson(req, res, 200, { ok: true, item: out.item, items: await listCustomBgm(publicDir) });
+}
+
 // ---- 自研路由入口 -----------------------------------------------------------------------------------------------
 
-const CONSOLE_PATHS = new Set(['/console', '/console/api', '/console/api/state', '/console/api/grant']);
+const CONSOLE_PATHS = new Set(['/console', '/console/api', '/console/api/state', '/console/api/grant', '/console/api/bgm']);
 
 /**
  * The real client IP for our private-only routes. Strict(er than net.js 'auto'):
@@ -582,6 +641,7 @@ export async function handleCustomRoutes({ req, res, parts, deps }) {
       sendError(req, res, 405, t('不支持的请求方法 · Method not allowed'));
       return true;
     }
+    if (p === '/console/api/bgm') { await consoleApiBgm(req, res, log, publicDir); return true; }
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, t('不支持的请求方法 · Method not allowed'));

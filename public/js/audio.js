@@ -166,14 +166,20 @@ export function bgmKeyFor(route, pub, combatTrack = null, stemKey = null) {
  * `combat:<i>` to the i-th `bgm.combatAlts` entry (and to `bgm.combat` when the manifest has none), and `unite`
  * (联防's own track) to `bgm.combat` when the manifest predates it. `stem:<x>` (自研 bossBgm 2026-10-16) looks the
  * loop-file stem up across `bgm` (scenes + combatAlts) and `bossBgm`, with its intro when the manifest pairs one;
+ * `cbgm:<stem>` (自研 2026-10-16 自定义曲目) resolves to the upload channel `/media/cbgm/<stem>` (admin-uploaded
+ * files under public/custom-bgm; no manifest entry needed — it is a real file, not an asset);
  * an unknown stem ⇒ null — the caller then keeps the official schedule (never silence, never a 404).
  * @param {any} manifest
  * @param {string|null} key
  * @returns {{ intro: string|null, loop: string }|null}
  */
 export function resolveBgm(manifest, key) {
+  if (!key) return null;
+  // cbgm（自定义上传曲目）不查清单——它是 public/custom-bgm 下的真实文件，manifest 无关。
+  // 所以这一支必须在 `a` 的判空**之前**（个人替换的调用方会传 null manifest）。
+  if (key.startsWith('cbgm:')) return customBgmTrack(key.slice(5));
   const a = manifest?.audio;
-  if (!a || !key) return null;
+  if (!a) return null;
   let t = null;
   if (key.startsWith('stem:')) t = bgmTrackByStem(a, key.slice(5));
   else if (key.startsWith('boss:')) t = a.bossBgm?.[key.slice(5)] || a.bgm?.boss;
@@ -234,6 +240,37 @@ export function combatTrackFor(round) {
 }
 
 /**
+ * 自研（2026-10-16）自定义曲目（管理员上传的 public/custom-bgm/<stem>.<ext>）→ { loop }。
+ * 不需要清单条目：它是真实文件，走 /media/cbgm/<stem> 无扩展名通道（下载管理器同样不弹窗）。
+ * stem 白名单与服务器侧一致（无点/斜杠 ⇒ 无穿越）；解析失败返回 null ⇒ 调用方回落下一优先级。
+ * @param {string} stem
+ * @returns {{ intro: null, loop: string }|null}
+ */
+function customBgmTrack(stem) {
+  if (typeof stem !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(stem)) return null;
+  return { intro: null, loop: '/media/cbgm/' + stem };
+}
+
+/**
+ * 自研（2026-10-16）**个人替换**（浏览器本地，优先级最高）：localStorage 里的 { round|'*': stem } 映射。
+ * 用户在客户端自己指定「本回合作战期放我这首」——只影响自己这台设备（不动服务器、不影响队友），
+ * 与「全局替换（控制台 bossBgm）」冲突时以本函数为准。
+ * @param {number|null|undefined} round
+ * @returns {string|null} 'cbgm:<stem>' 或 null
+ */
+export function personalBgmKey(round) {
+  try {
+    const raw = JSON.parse(localStorage.getItem('sp_personal_bgm') || 'null');
+    if (!raw || typeof raw !== 'object') return null;
+    const r = Number(round);
+    const pick = (Number.isFinite(r) && typeof raw[r] === 'string' ? raw[r] : null) || (typeof raw['*'] === 'string' ? raw['*'] : null);
+    if (!pick) return null;
+    const key = 'cbgm:' + pick;
+    return resolveBgm(null, key) ? key : null;
+  } catch { return null; }
+}
+
+/**
  * 自研 bossBgm（2026-10-16）：把服务器 m.public.bgmTrack 的曲目 stem 变成 `stem:<x>` 的 BGM key。
  * **可解析才替换**：manifest 里没有该 stem（配置手误 / 旧清单）⇒ null ⇒ 官方日程继续，绝不静音。
  * @param {any} manifest assets 清单
@@ -243,7 +280,10 @@ export function combatTrackFor(round) {
 export function stemBgmKey(manifest, pub) {
   const track = pub && typeof pub.bgmTrack === 'string' && pub.bgmTrack ? pub.bgmTrack : null;
   if (!track) return null;
-  return resolveBgm(manifest, `stem:${track}`) ? `stem:${track}` : null;
+  // `x:<stem>` = 控制台选的自定义曲目（管理员上传到 public/custom-bgm），走 cbgm 通道；否则是内置素材 stem。
+  const custom = track.startsWith('x:') ? track.slice(2) : null;
+  const key = custom ? `cbgm:${custom}` : `stem:${track}`;
+  return resolveBgm(manifest, key) ? key : null;
 }
 
 /**
@@ -1588,7 +1628,12 @@ export function installAudio(deps) {
           // and the next round moves on by the table. 联防 shares its round ⇒ same key ⇒ the loop keeps playing.
           // 自研 bossBgm（2026-10-16）：服务器 m.public.bgmTrack 命中（且本清单可解析）时覆盖作战期选曲——
           // 全房同一 key ⇒ 1–6 人联机所有人听到同一首；无该字段（规则全关）⇒ 官方日程逐字节不变。
-          audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round), stemBgmKey(manifestGetter(), pub)));
+          // 自研自定义曲目优先级（2026-10-16 用户定）：**个人替换 > 全局替换（控制台）> 官方日程**。
+          // 个人替换只读本机 localStorage（不动服务器、不影响队友），命中即压过全局。
+          const manifest = manifestGetter();
+          const personal = personalBgmKey(pub?.round);
+          audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round),
+            personal || stemBgmKey(manifest, pub)));
         } catch { /* ignore */ }
       };
       sync(deps.getState());

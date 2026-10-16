@@ -82,7 +82,7 @@ export function createRequestHandler({ serveStatic, health, log, custom, trustPr
     // 自研音乐播放器（musicRoutes.js）：/music/siren/*（塞壬 JSON 元数据代理，磁盘缓存）。音频/封面走 CDN 直连不经此路由。
     // （外部音源的 /music/proxy 兜底路由已随 2026-10-16「去掉外部源」移除。）music 规则关闭（music.enabled=false）时
     // 内部直接 false 落回静态（404 = 原版没有播放器）。
-    if (await handleMusicRoutes(req, res, parts, log, musicEnabled(health))) return;
+    if (await handleMusicRoutes(req, res, parts, log, musicEnabled(health), custom?.publicDir)) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');

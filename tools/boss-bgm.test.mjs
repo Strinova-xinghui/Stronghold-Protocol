@@ -6,7 +6,7 @@
 // ⚠️ 本文件会写 config/custom-rules.json：与其它写配置的 tools/*.test.mjs 一起跑必须
 //    --test-concurrency=1（并行互踩配置文件，项目老坑）；退出钩子恢复原 config。
 // 用法: node --test tools/boss-bgm.test.mjs
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { makeMatch } from '../test/match/harness.js';
@@ -242,5 +242,50 @@ describe('bossBgm · 端到端 m.public（对局引擎广播）', () => {
       assert.equal(getCustomRules({}).bossBgm, null, 'golden 屏蔽全部自研规则');
       assert.equal(bossBgmTrackFor(getCustomRules({}), 18), null);
     } finally { delete process.env.SP_OFFICIAL_RULES; resetCustomRules(); }
+  });
+});
+
+describe('bossBgm 规则的两种曲目来源（内置 stem / 自定义 x:）', () => {
+  const orig = process.env.SP_OFFICIAL_RULES;
+  after(() => { if (orig === undefined) delete process.env.SP_OFFICIAL_RULES; else process.env.SP_OFFICIAL_RULES = orig; });
+
+  const cfgPath = CUSTOM_RULES_PATH;
+  const backup = fs.readFileSync(cfgPath, 'utf8');
+  after(() => { fs.writeFileSync(cfgPath, backup); resetCustomRules(); });
+
+  const load = (bossBgm) => {
+    fs.writeFileSync(cfgPath, JSON.stringify({ bossBgm }, null, 2));
+    resetCustomRules();
+    return getCustomRules({});
+  };
+
+  test('内置 stem 照旧通过；自定义 x:<name> 也通过并保留前缀', () => {
+    const rules = load({ enabled: true, rules: [
+      { round: 18, track: 'm_bat_abyssalhunters' },
+      { round: 19, track: 'x:my_boss_theme' },
+    ] });
+    assert.ok(rules.bossBgm, '规则生效');
+    assert.equal(rules.bossBgm.rules.length, 2);
+    assert.equal(rules.bossBgm.rules[0].track, 'm_bat_abyssalhunters');
+    assert.equal(rules.bossBgm.rules[1].track, 'x:my_boss_theme', '自定义曲保留 x: 前缀');
+    assert.equal(bossBgmTrackFor(rules, 19), 'x:my_boss_theme');
+    assert.equal(bossBgmTrackFor(rules, 18), 'm_bat_abyssalhunters');
+  });
+
+  test('非法曲目丢弃：x: 后含点/斜杠/空；大写与连字符合法', () => {
+    const rules = load({ enabled: true, rules: [
+      { round: 1, track: 'x:../etc/passwd' },
+      { round: 2, track: 'x:has.dot' },
+      { round: 3, track: 'x:' },
+      { round: 4, track: 'x:My-Theme_01' },
+    ] });
+    assert.equal(rules.bossBgm.rules.length, 1, '只留合法那条');
+    assert.equal(rules.bossBgm.rules[0].track, 'x:My-Theme_01');
+    assert.equal(rules.bossBgm.rules[0].round, 4);
+  });
+
+  test('全关（enabled:false）= 无 bossBgm 规则（原版行为）', () => {
+    const rules = load({ enabled: false, rules: [{ round: 18, track: 'x:any' }] });
+    assert.equal(rules.bossBgm, null);
   });
 });

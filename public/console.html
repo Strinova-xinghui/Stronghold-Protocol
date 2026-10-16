@@ -59,6 +59,7 @@
   .gcard .tg { font-size:11px; padding:1px 7px; border-radius:999px; background:#223047; color:#9db4d0; align-self:flex-start; }
   .gcard .tg.gold { background:#3a2e14; color:#ffd479; }
   .gempty { color:var(--dim); text-align:center; padding:18px 0; font-size:12.5px; grid-column:1 / -1; }
+.cbrow { margin: 4px 0; padding: 6px 8px; border-left: 2px solid #3a7; background: rgba(255,255,255,.03); }
 </style>
 </head>
 <body>
@@ -225,6 +226,18 @@
         <span class="hint" id="bbHint">曲目候选：载入中…</span>
       </div>
       <p class="hint">曲目 stem = loop 文件名去 <code>_loop.mp3</code>，如 <code>m_bat_rglk1phantomcastle</code> 幻影城堡 · <code>m_bat_abyssalhunters</code> 深渊猎手 · <code>m_bat_vtlionk</code> 狮心王 · <code>m_bat_rouge3boss1</code> 红票 · <code>m_bat_prtsstage1</code> PRTS · <code>m_bat_ancestor</code> 先祖 · <code>m_bat_kazimierz2_1</code> 骑士之日 · <code>m_bat_kazimierz2_2</code> 无畏者 · <code>m_bat_corrosion</code> 蚀刻章 · <code>m_bat_act1autochess</code> 卫戍协议·作战 · <code>m_sys_act1autochess</code> 协议启动。手填了清单里不存在的曲目时客户端自动回落官方日程，不会静音。</p>
+    </div>
+    <div class="card">
+      <h2>上传自定义曲目（自己提供的音乐文件）</h2>
+      <p class="desc">把你自己的音乐文件传上来，就能在上面任意规则里选它（列表里显示为 <code>x:文件名</code>）。支持 mp3 / m4a / aac / ogg / opus / wav，<b>单文件 ≤ 24MB</b>、最多 40 首。上传后音频存到服务器 <code>public/custom-bgm/</code>，客户端首次播放时按需下载（一首 5–15MB，与官方 BGM 同一套播放通道）——<b>服务器不预载、不解码，内存零新增</b>。文件名只能是字母/数字/下划线/连字符（会作为 URL 的一部分）。<b>个人替换优先</b>：玩家在游戏内点歌台的「我的战斗音乐」里自选时，以他个人的选择为准，覆盖这里的全局规则。</p>
+      <div class="row">
+        <label class="f">文件名 stem<input type="text" id="cbStem" placeholder="my_boss_theme" style="width:180px"></label>
+        <label class="f">展示名（可选）<input type="text" id="cbName" placeholder="我的 BOSS 战曲" style="width:180px"></label>
+        <input type="file" id="cbFile" accept=".mp3,.m4a,.aac,.ogg,.oga,.opus,.wav,audio/*">
+        <button id="cbUpload">上传</button>
+      </div>
+      <div id="cbList"></div>
+      <p class="hint" id="cbHint">曲目列表：载入中…</p>
     </div>
   </section>
   <!-- ⑨ 休整期撤回（自研 2026-10-15） -->
@@ -537,16 +550,85 @@ function renderBgmRules() {
     const r1 = el('div', { class: 'row' });
     r1.append(numField('回合 round（加时赛 BOSS=18/隐藏=19，未开=14/15）', ru.round, 1, 200, (v) => { ru.round = v; }));
     r1.append(selField('语义 kind', ru.kind || 'round', [['boss', 'boss（BOSS 回合）'], ['round', 'round（任意回合）']], (v) => { ru.kind = v; }));
-    // 曲目：下拉 + 可手填（datalist 兼得）
+    // 曲目：下拉 + 可手填（datalist 兼得）。自定义上传曲目以 x:<stem> 形式并入候选（自研 2026-10-16）。
     const dl = 'bbDl' + i;
-    const inp = el('input', { type: 'text', list: dl, value: ru.track || '', placeholder: 'm_bat_…' });
+    const inp = el('input', { type: 'text', list: dl, value: ru.track || '', placeholder: 'm_bat_… 或 x:我的曲目' });
     inp.addEventListener('change', () => { ru.track = inp.value.trim(); renderBgmRules(); });
-    const opts = (bbStems || []).map((x) => el('option', { value: x.stem, label: x.name }));
+    const custom = (cbItems || []).map((x) => ({ stem: 'x:' + x.stem, name: '★ ' + (x.name || x.stem) + '（自定义上传）' }));
+    const opts = [...custom, ...(bbStems || []).map((x) => ({ stem: x.stem, name: x.name }))].map((x) => el('option', { value: x.stem, label: x.name }));
     r1.append(el('label', { class: 'f' }, el('span', { text: '曲目 track' }), inp, el('datalist', { id: dl }, ...opts)));
     row.append(r1);
     box.append(row);
   });
   if (!cfg.bossBgm.rules.length) box.append(el('p', { class: 'hint', text: '（无规则：全部回合保持官方 BGM 日程）' }));
+}
+
+// ---------------- 自定义曲目（自研 2026-10-16）：上传 / 列表 / 删除 ----------------
+// 与 bossBgm 规则联动：上传成功后曲目候选多出 `x:<stem>` 项，规则里就能选它。
+let cbItems = null; // [{stem,name,ext,size}]
+
+async function loadCbItems() {
+  try {
+    const r = await fetch('/console/api/bgm', { cache: 'no-store' });
+    const j = await r.json();
+    cbItems = Array.isArray(j.items) ? j.items : [];
+  } catch { cbItems = []; }
+  renderCbList();
+  renderBgmRules(); // 候选变化 → 规则下拉刷新（含 x: 项）
+}
+
+function renderCbList() {
+  const box = $('#cbList');
+  const hint = $('#cbHint');
+  if (!box) return;
+  box.textContent = '';
+  const items = cbItems || [];
+  if (hint) hint.textContent = items.length ? '已有 ' + items.length + ' 首自定义曲目（规则里选 x:文件名 即可用）' : '还没有自定义曲目。填好文件名选个音频文件上传即可。';
+  for (const it of items) {
+    const row = el('div', { class: 'cbrow' });
+    row.append(el('div', { class: 'subhead' },
+      el('b', { text: (it.name || it.stem) + '（x:' + it.stem + it.ext + '，' + Math.round((it.size || 0) / 1024) + 'KB）' }),
+      el('span', { class: 'grow' }),
+      el('button', { class: 'danger', text: '删除', onclick: async () => {
+        if (!confirm('删除自定义曲目 ' + it.stem + '？用到它的规则会回落官方日程。')) return;
+        try {
+          const r = await fetch('/console/api/bgm?stem=' + encodeURIComponent(it.stem), { method: 'DELETE' });
+          const j = await r.json();
+          if (!j.ok) { alert('删除失败：' + (j.error || '')); return; }
+          cbItems = j.items || [];
+          renderCbList(); renderBgmRules();
+        } catch (e) { alert('删除失败：' + e.message); }
+      } })
+    ));
+    box.append(row);
+  }
+}
+
+async function uploadCbFile() {
+  const stem = ($('#cbStem').value || '').trim();
+  const name = ($('#cbName').value || '').trim();
+  const file = $('#cbFile').files && $('#cbFile').files[0];
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(stem)) { alert('文件名只能是字母/数字/下划线/连字符，1–64 字'); return; }
+  if (!file) { alert('请选择一个音频文件'); return; }
+  const ext = ('.' + (file.name.split('.').pop() || '').toLowerCase());
+  const ok = ['.mp3', '.m4a', '.aac', '.ogg', '.oga', '.opus', '.wav'];
+  if (!ok.includes(ext)) { alert('只支持 ' + ok.join(' / ')); return; }
+  const btn = $('#cbUpload');
+  btn.disabled = true; btn.textContent = '上传中…';
+  try {
+    const r = await fetch('/console/api/bgm?stem=' + encodeURIComponent(stem) + '&ext=' + encodeURIComponent(ext) + '&name=' + encodeURIComponent(name), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    });
+    const j = await r.json();
+    if (!j.ok) { alert('上传失败：' + (j.error || ('HTTP ' + r.status))); return; }
+    cbItems = j.items || [];
+    $('#cbFile').value = '';
+    renderCbList(); renderBgmRules();
+    alert('已上传：x:' + stem + ext + '\n在规则的「曲目 track」里选它即可。');
+  } catch (e) { alert('上传失败：' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '上传'; }
 }
 
 function numField(label, val, min, max, set, step) {
@@ -596,6 +678,7 @@ $('#rlAdd').addEventListener('click', () => {
   cfg.roundLottery.rounds.push({ round: 3, minTier: 1, maxTier: 6 });
   renderRounds();
 });
+$('#cbUpload').addEventListener('click', uploadCbFile);
 $('#bbAdd').addEventListener('click', () => {
   cfg.bossBgm.rules.push({ round: 18, kind: 'boss', track: bbTracks()[0] || 'm_bat_abyssalhunters' });
   renderBgmRules();
@@ -755,7 +838,15 @@ $('#gGrantFunds').addEventListener('click', () => doGrant('funds'));
 
 // 切到发放页时懒加载数据（不拖慢控制台首屏）；切到 BOSS 音乐页时懒加载曲目候选（自研 bossBgm）
 const _switchTab = switchTab;
-switchTab = function (k) { _switchTab(k); if (k === '__grant') loadGrant(); if (k === 'bossBgm' && !bbStems) loadBbTracks(); };
+switchTab = function (k) {
+    _switchTab(k);
+    // 切页后把滚动复位到顶（自研 2026-10-16）：面板高度差异大，从长面板切到短面板时残留滚动会让
+    // 目标页的控件停在视口外（实测：BOSS 音乐页 save 后切抽奖页，rolls 输入跑到视口上方 -43px）。
+    try { window.scrollTo(0, 0); const m = document.querySelector('.main, .panels, #panels'); if (m) m.scrollTop = 0; } catch { /* ignore */ }
+    if (k === '__grant') loadGrant();
+    if (k === 'bossBgm') loadCbItems();
+    if (k === 'bossBgm' && !bbStems) loadBbTracks();
+  };
 
 switchTab('rewardOffer');
 load();

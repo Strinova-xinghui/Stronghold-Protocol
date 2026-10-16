@@ -240,10 +240,18 @@ function normalize(raw) {
       if (!r0 || typeof r0 !== 'object') continue;
       const round = Math.trunc(numOr(r0.round, 0));
       if (!(round >= 1) || round > 200) continue;              // 非法 round 丢弃
-      const track = typeof r0.track === 'string' ? r0.track.trim() : '';
-      if (!STEMS.test(track)) continue;                        // 非法 track 丢弃（宽松格式校验，见上注释）
+      const raw0 = typeof r0.track === 'string' ? r0.track.trim() : '';
+      // 两种曲目来源（2026-10-16 追加自定义上传）：
+      //   内置素材 stem  `m_bat_xxx`         → 客户端 resolveBgm 走 assets 清单（'stem:<x>'）
+      //   自定义上传曲目  `x:<name>`          → 客户端走 /media/cbgm/<name>（'cbgm:<name>'，管理员上传目录）
+      // 自定义 stem 允许大小写与连字符（用户文件名），仍禁点/斜杠 ⇒ 无路径穿越。
+      const custom = /^x:/i.test(raw0);
+      const track = custom ? raw0.slice(2).trim() : raw0;
+      const okTrack = custom ? /^[A-Za-z0-9_-]{1,64}$/.test(track) : STEMS.test(track);
+      if (!okTrack) continue;                                  // 非法 track 丢弃（宽松格式校验，见上注释）
+      const stored = custom ? 'x:' + track : track;            // 存回带前缀的规范形，视图原样下发
       const kind = r0.kind === 'boss' || r0.kind === 'round' ? r0.kind : 'round';
-      list.push(Object.freeze({ round, track, kind }));
+      list.push(Object.freeze({ round, track: stored, kind }));
       if (list.length >= 64) break;                            // 硬上限：视图字段最多 64 条（防滥用撑大 m.public）
     }
     if (list.length) out.bossBgm = Object.freeze({ enabled: true, rules: Object.freeze(list) });
