@@ -240,18 +240,26 @@ function normalize(raw) {
       if (!r0 || typeof r0 !== 'object') continue;
       const round = Math.trunc(numOr(r0.round, 0));
       if (!(round >= 1) || round > 200) continue;              // 非法 round 丢弃
-      const raw0 = typeof r0.track === 'string' ? r0.track.trim() : '';
-      // 两种曲目来源（2026-10-16 追加自定义上传）：
+      // 曲目来源（2026-10-16）：`track` 可以是**单个曲目**（字符串）或**随机池**（数组）。
       //   内置素材 stem  `m_bat_xxx`         → 客户端 resolveBgm 走 assets 清单（'stem:<x>'）
       //   自定义上传曲目  `x:<name>`          → 客户端走 /media/cbgm/<name>（'cbgm:<name>'，管理员上传目录）
-      // 自定义 stem 允许大小写与连字符（用户文件名），仍禁点/斜杠 ⇒ 无路径穿越。
-      const custom = /^x:/i.test(raw0);
-      const track = custom ? raw0.slice(2).trim() : raw0;
-      const okTrack = custom ? /^[A-Za-z0-9_-]{1,64}$/.test(track) : STEMS.test(track);
-      if (!okTrack) continue;                                  // 非法 track 丢弃（宽松格式校验，见上注释）
-      const stored = custom ? 'x:' + track : track;            // 存回带前缀的规范形，视图原样下发
+      // 池 = 本回合作战期从这几首里随机取一首（**服务器确定性随机**：同局同回合永远同一首，全房同曲；
+      // 见 bossBgmTrackFor 的 seed 参数）。自定义 stem 允许大小写与连字符，仍禁点/斜杠 ⇒ 无路径穿越。
+      const norm = (v) => {
+        const s = typeof v === 'string' ? v.trim() : '';
+        if (!s) return null;
+        const custom = /^x:/i.test(s);
+        const stem = custom ? s.slice(2).trim() : s;
+        const ok = custom ? /^[A-Za-z0-9_-]{1,64}$/.test(stem) : STEMS.test(stem);
+        return ok ? (custom ? 'x:' + stem : stem) : null;
+      };
+      const arr = Array.isArray(r0.track) ? r0.track : [r0.track];
+      const pool = [];
+      for (const v of arr) { const t = norm(v); if (t && !pool.includes(t)) pool.push(t); if (pool.length >= 32) break; }
+      if (!pool.length) continue;                              // 非法/空曲目池丢弃（宽松格式校验，见上注释）
       const kind = r0.kind === 'boss' || r0.kind === 'round' ? r0.kind : 'round';
-      list.push(Object.freeze({ round, track: stored, kind }));
+      // 单曲也存成 1 元池：下游只需处理池这一种形态（视图下发时再解析成字符串）
+      list.push(Object.freeze({ round, pool: Object.freeze(pool), kind }));
       if (list.length >= 64) break;                            // 硬上限：视图字段最多 64 条（防滥用撑大 m.public）
     }
     if (list.length) out.bossBgm = Object.freeze({ enabled: true, rules: Object.freeze(list) });
@@ -294,19 +302,40 @@ export function resetCustomRules() { cache = null; warned = false; }
 /**
  * BOSS 战 / 指定回合 BGM 替换（bossBgm，自研 2026-10-16）的**命中纯函数**：本回合作战期用哪首自定义曲目。
  * 列表序取首条命中（同回合多条规则 = 先配的生效）。规则关闭 / 未命中 ⇒ null（官方日程不变）。
- * 服务器唯一新增开销 = 每次 m.public 视图构建多这一次整数查找 + 命中时多下发一个 ≤64 字节的字符串字段；
- * 音频文件本身已在客户端 assets 清单（public/assets 素材管道零改动），零内存零流量红线成立。
- * @param {{ bossBgm?: { enabled: boolean, rules: readonly { round: number, track: string, kind: string }[] } | null }} rules getCustomRules() 的产物
+ *
+ * **随机池（2026-10-16 用户要求）**：规则可以配多首（`track` 数组 = 池），本回合从池里随机取一首。
+ * 随机的三条硬约束：
+ *   ① 必须**服务器**掷——若客户端各自随机，同一局里队友会听到不同的歌（且每帧视图重算会不断换曲）；
+ *   ② 必须**每局每回合固定**——同一回合的多次视图构建（节流广播 / 重连 resync）必须给出同一首；
+ *   ③ 不得消耗 rngMeta/rngShop——那两个流被反 SL 快照与 golden 基线依赖，掺进来会污染整局随机序列。
+ * 所以用 `deriveSeed(match.seed, 'bgm:<round>')` 现推一个独立确定性种子（同一局同一回合恒定；不同局/不同回合
+ * 各不相同），不碰任何既有 rng 流。seed 省略时退化为「取池首」——纯函数单测与旧调用点无需构造 seed。
+ *
+ * 服务器唯一新增开销 = 每次 m.public 视图构建多这一次整数查找（+ 命中池时一次小型哈希）；
+ * 命中时多下发一个 ≤64 字节的字符串字段；音频文件本身已在客户端（assets 清单或 public/cbgm 上传目录），
+ * 零内存零流量红线成立。
+ * @param {{ bossBgm?: { enabled: boolean, rules: readonly { round: number, pool: readonly string[], kind: string }[] } | null }} rules getCustomRules() 的产物
  * @param {number} round 对局回合号（extraRounds 顺延后的**实际**回合：BOSS=18 / 隐藏核心=19；未开加时赛则官方 14/15）
- * @returns {string|null} 曲目 stem（loop 文件名去 _loop.mp3）或 null
+ * @param {number} [seed] 对局种子（Match.seed）。给了就做确定性随机；省略 ⇒ 取池首。
+ * @returns {string|null} 曲目标识（内置 stem 或 `x:<name>`）或 null
  */
-export function bossBgmTrackFor(rules, round) {
+export function bossBgmTrackFor(rules, round, seed) {
   const bb = rules && rules.bossBgm;
   if (!bb || !bb.enabled || !Array.isArray(bb.rules)) return null;
   const r = Number(round);
   if (!Number.isFinite(r)) return null;
   for (const rule of bb.rules) {
-    if (rule.round === r) return rule.track;
+    if (rule.round !== r) continue;
+    // 归一化后是 rule.pool；这里也容忍手写对象 { round, track }（单测/旧调用点直接构造规则时的形态）
+    const pool = Array.isArray(rule.pool) ? rule.pool
+      : (typeof rule.track === 'string' ? [rule.track] : Array.isArray(rule.track) ? rule.track : []);
+    if (!pool.length) return null;
+    if (pool.length === 1 || !Number.isFinite(seed)) return pool[0];
+    // 确定性选择：FNV-1a(seed:round) % pool.length（与 sim/rng.js 的派生思路一致，但不占任何 rng 流）
+    let h = 0x811c9dc5;
+    const s = `${seed >>> 0}:${r}`;
+    for (let i = 0; i < s.length; i++) { h = (h ^ s.charCodeAt(i)) >>> 0; h = Math.imul(h, 0x01000193) >>> 0; }
+    return pool[h % pool.length];
   }
   return null;
 }

@@ -1334,5 +1334,6 @@
   "第 {n} 回合": "Round {n}",
   "个人替换：只影响你这台设备，优先于控制台的全局替换。留空 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Leave empty to use the global/official schedule.",
   "（不替换）": "(no override)",
-  "全部清除": "Clear all"
+  "全部清除": "Clear all",
+  "个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（本回合作战期从中随机一首）。全不勾 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Pick several tracks to make a random pool (one is drawn for that combat phase). Pick none to use the global/official schedule."
 }

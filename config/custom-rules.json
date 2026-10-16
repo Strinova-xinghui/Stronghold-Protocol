@@ -125,12 +125,20 @@
       {
         "round": 18,
         "kind": "boss",
-        "track": "x:xinsiyanhuo"
+        "track": [
+          "x:yuai",
+          "x:aizo",
+          "x:xinsiyanhuo"
+        ]
       },
       {
         "round": 19,
         "kind": "boss",
-        "track": "x:jianghumeng"
+        "track": [
+          "x:yuai",
+          "x:aizo",
+          "x:xinsiyanhuo"
+        ]
       }
     ]
   }

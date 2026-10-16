@@ -135,3 +135,21 @@
 /* 播放器主体（.player 顶部已 flex 列 + max-height 60vh）：列表区吃掉剩余高度滚动，控制条贴底 */
 .player .ptab { overflow-y: auto; min-height: 0; flex: 1 1 auto; }
 
+
+/* ---- 个人 BGM 池编辑（自研 2026-10-16）---- */
+.pbgm-list { display: flex; flex-direction: column; gap: .04rem; }
+.pbgm-row { display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: .05rem; overflow: hidden; }
+.pbgm-row.is-open { border-color: var(--mint-700); }
+.pbgm-round {
+  display: flex; align-items: baseline; gap: .08rem; width: 100%; padding: .07rem .1rem; text-align: left;
+  background: rgba(255,255,255,.03); border: 0; color: var(--text); cursor: pointer; font-size: .14rem;
+}
+.pbgm-round:hover { background: rgba(255,255,255,.07); }
+.pbgm-round small { color: var(--text-dim); font-size: .12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbgm-picks { display: flex; flex-wrap: wrap; gap: .04rem; padding: .07rem .1rem; background: rgba(0,0,0,.25); }
+.pchip {
+  padding: .04rem .1rem; border: 1px solid var(--line-2); border-radius: .04rem; background: transparent;
+  color: var(--text-md); font-size: .13rem; cursor: pointer;
+}
+.pchip:hover { color: var(--text); border-color: var(--mint-700); }
+.pchip.is-on { color: var(--text-on-mint); background: var(--mint-500); border-color: var(--mint-500); font-weight: 700; }

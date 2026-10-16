@@ -258,13 +258,24 @@ function customBgmTrack(stem) {
  * @param {number|null|undefined} round
  * @returns {string|null} 'cbgm:<stem>' 或 null
  */
-export function personalBgmKey(round) {
+export function personalBgmKey(round, matchKey = '') {
   try {
     const raw = JSON.parse(localStorage.getItem('sp_personal_bgm') || 'null');
     if (!raw || typeof raw !== 'object') return null;
     const r = Number(round);
-    const pick = (Number.isFinite(r) && typeof raw[r] === 'string' ? raw[r] : null) || (typeof raw['*'] === 'string' ? raw['*'] : null);
-    if (!pick) return null;
+    // 值是**池**（数组；旧版单字符串也兼容）。按 回合号 → '*' 的优先级取池。
+    const asPool = (v) => (Array.isArray(v) ? v : [v]).filter((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x));
+    let pool = Number.isFinite(r) ? asPool(raw[String(r)]) : [];
+    if (!pool.length) pool = asPool(raw['*']);
+    if (!pool.length) return null;
+    // 本地确定性随机：同局同回合恒定（不会一边打一边换歌），不同局/回合有变化。
+    // 个人池只影响本机 ⇒ 无需服务器参与（全局池才必须服务器掷，见 customRules.bossBgmTrackFor）。
+    const pick = pool.length === 1 ? pool[0] : (() => {
+      const s = `${matchKey}:${r || 0}:${pool.join(',')}`;
+      let h = 0x811c9dc5;
+      for (let i = 0; i < s.length; i++) { h = (h ^ s.charCodeAt(i)) >>> 0; h = Math.imul(h, 0x01000193) >>> 0; }
+      return pool[h % pool.length];
+    })();
     const key = 'cbgm:' + pick;
     return resolveBgm(null, key) ? key : null;
   } catch { return null; }
@@ -1631,7 +1642,8 @@ export function installAudio(deps) {
           // 自研自定义曲目优先级（2026-10-16 用户定）：**个人替换 > 全局替换（控制台）> 官方日程**。
           // 个人替换只读本机 localStorage（不动服务器、不影响队友），命中即压过全局。
           const manifest = manifestGetter();
-          const personal = personalBgmKey(pub?.round);
+          // matchKey：客户端拿不到 match.seed，用「开赛时间/房间码」这类稳定串代替（同局同回合恒定即可）
+          const personal = personalBgmKey(pub?.round, String(pub?.startedAt || pub?.roomCode || ''));
           audio.playBgm(bgmKeyFor(deps.selectRoute(s), pub, combatTrackFor(pub?.round),
             personal || stemBgmKey(manifest, pub)));
         } catch { /* ignore */ }

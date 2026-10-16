@@ -60,6 +60,8 @@
   .gcard .tg.gold { background:#3a2e14; color:#ffd479; }
   .gempty { color:var(--dim); text-align:center; padding:18px 0; font-size:12.5px; grid-column:1 / -1; }
 .cbrow { margin: 4px 0; padding: 6px 8px; border-left: 2px solid #3a7; background: rgba(255,255,255,.03); }
+.chip { padding: 4px 10px; margin: 2px; border: 1px solid #3a4; border-radius: 4px; background: transparent; color: #9cf; cursor: pointer; font-size: 13px; }
+.chip.on { background: #2a6; color: #fff; border-color: #2a6; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -540,23 +542,50 @@ function renderBgmRules() {
   const hint = $('#bbHint');
   if (hint) hint.textContent = bbStems ? '曲目候选：已从素材清单载入 ' + bbStems.length + ' 首' : '曲目候选：内置列表（清单未载入）';
   box.textContent = '';
+  /** 规则的曲目池（兼容旧配置的单字符串 track）。 */
+  const poolOf = (ru) => (Array.isArray(ru.track) ? ru.track : (ru.track ? [ru.track] : []));
+  const nameOf = (t) => BB_NAMES[t] || (String(t).startsWith('x:') ? String(t).slice(2) : t) || '?';
   cfg.bossBgm.rules.forEach((ru, i) => {
+    const pool = poolOf(ru);
     const row = el('div', { class: 'sub' });
     row.append(el('div', { class: 'subhead' },
-      el('b', { text: `第 ${ru.round ?? '?'} 回合 → ${BB_NAMES[ru.track] || ru.track || '?'}` }),
+      el('b', { text: `第 ${ru.round ?? '?'} 回合 → ${pool.length ? pool.map(nameOf).join(' / ') : '?'}${pool.length > 1 ? '（随机池 ' + pool.length + ' 首）' : ''}` }),
       el('span', { class: 'grow' }),
       el('button', { class: 'danger', text: '删除', onclick: () => { cfg.bossBgm.rules.splice(i, 1); renderBgmRules(); } })
     ));
     const r1 = el('div', { class: 'row' });
     r1.append(numField('回合 round（加时赛 BOSS=18/隐藏=19，未开=14/15）', ru.round, 1, 200, (v) => { ru.round = v; }));
     r1.append(selField('语义 kind', ru.kind || 'round', [['boss', 'boss（BOSS 回合）'], ['round', 'round（任意回合）']], (v) => { ru.kind = v; }));
-    // 曲目：下拉 + 可手填（datalist 兼得）。自定义上传曲目以 x:<stem> 形式并入候选（自研 2026-10-16）。
+    // 曲目池：逗号分隔（多首 = 随机池）。下拉 datalist 兼得手填。自定义上传曲目以 x:<stem> 并入候选。
     const dl = 'bbDl' + i;
-    const inp = el('input', { type: 'text', list: dl, value: ru.track || '', placeholder: 'm_bat_… 或 x:我的曲目' });
-    inp.addEventListener('change', () => { ru.track = inp.value.trim(); renderBgmRules(); });
+    const inp = el('input', { type: 'text', list: dl, value: pool.join(', '), placeholder: 'm_bat_… 或 x:我的曲目（逗号分隔 = 随机池）' });
+    inp.addEventListener('change', () => {
+      const list = inp.value.split(',').map((s) => s.trim()).filter(Boolean);
+      ru.track = list.length > 1 ? list : (list[0] || '');
+      renderBgmRules();
+    });
     const custom = (cbItems || []).map((x) => ({ stem: 'x:' + x.stem, name: '★ ' + (x.name || x.stem) + '（自定义上传）' }));
     const opts = [...custom, ...(bbStems || []).map((x) => ({ stem: x.stem, name: x.name }))].map((x) => el('option', { value: x.stem, label: x.name }));
-    r1.append(el('label', { class: 'f' }, el('span', { text: '曲目 track' }), inp, el('datalist', { id: dl }, ...opts)));
+    r1.append(el('label', { class: 'f' }, el('span', { text: '曲目池 track' }), inp, el('datalist', { id: dl }, ...opts)));
+    // 快捷勾选（自定义曲目 chip 多选）——比手打逗号直观
+    const cbs = (cbItems || []);
+    if (cbs.length) {
+      const chips = el('div', { class: 'row' });
+      for (const it of cbs) {
+        const stem = 'x:' + it.stem;
+        const on = pool.includes(stem);
+        const chip = el('button', { class: 'chip' + (on ? ' on' : ''), text: (on ? '✓ ' : '') + (it.name || it.stem) });
+        chip.addEventListener('click', () => {
+          const cur = poolOf(ru).slice();
+          const k = cur.indexOf(stem);
+          if (k >= 0) cur.splice(k, 1); else cur.push(stem);
+          ru.track = cur.length > 1 ? cur : (cur[0] || '');
+          renderBgmRules();
+        });
+        chips.append(chip);
+      }
+      row.append(chips);
+    }
     row.append(r1);
     box.append(row);
   });

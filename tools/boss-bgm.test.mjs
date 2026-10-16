@@ -60,9 +60,9 @@ describe('bossBgm · normalize', () => {
     ] } });
     const bb = getCustomRules({}).bossBgm;
     assert.ok(bb, '存在合法条目时整段启用');
-    assert.deepEqual(bb.rules.map((r) => [r.round, r.track, r.kind]), [
-      [18, BOSS_TRACK, 'boss'], [19, OTHER_TRACK, 'round'], [5, BOSS_TRACK, 'round'],
-    ], '只剩合法条目；kind 白名单外归 round；5.5 截断为 5');
+    assert.deepEqual(bb.rules.map((r) => [r.round, [...r.pool], r.kind]), [
+      [18, [BOSS_TRACK], 'boss'], [19, [OTHER_TRACK], 'round'], [5, [BOSS_TRACK], 'round'],
+    ], '只剩合法条目（track 归一为 1 元池）；kind 白名单外归 round；5.5 截断为 5');
     assert.ok(Object.isFrozen(bb) && Object.isFrozen(bb.rules) && Object.isFrozen(bb.rules[0]), '冻结防篡改');
   });
 
@@ -266,8 +266,8 @@ describe('bossBgm 规则的两种曲目来源（内置 stem / 自定义 x:）', 
     ] });
     assert.ok(rules.bossBgm, '规则生效');
     assert.equal(rules.bossBgm.rules.length, 2);
-    assert.equal(rules.bossBgm.rules[0].track, 'm_bat_abyssalhunters');
-    assert.equal(rules.bossBgm.rules[1].track, 'x:my_boss_theme', '自定义曲保留 x: 前缀');
+    assert.deepEqual([...rules.bossBgm.rules[0].pool], ['m_bat_abyssalhunters']);
+    assert.deepEqual([...rules.bossBgm.rules[1].pool], ['x:my_boss_theme'], '自定义曲保留 x: 前缀');
     assert.equal(bossBgmTrackFor(rules, 19), 'x:my_boss_theme');
     assert.equal(bossBgmTrackFor(rules, 18), 'm_bat_abyssalhunters');
   });
@@ -280,12 +280,62 @@ describe('bossBgm 规则的两种曲目来源（内置 stem / 自定义 x:）', 
       { round: 4, track: 'x:My-Theme_01' },
     ] });
     assert.equal(rules.bossBgm.rules.length, 1, '只留合法那条');
-    assert.equal(rules.bossBgm.rules[0].track, 'x:My-Theme_01');
+    assert.deepEqual([...rules.bossBgm.rules[0].pool], ['x:My-Theme_01']);
     assert.equal(rules.bossBgm.rules[0].round, 4);
   });
 
   test('全关（enabled:false）= 无 bossBgm 规则（原版行为）', () => {
     const rules = load({ enabled: false, rules: [{ round: 18, track: 'x:any' }] });
     assert.equal(rules.bossBgm, null);
+  });
+});
+
+describe('bossBgm 随机池（2026-10-16 用户要求：18/19 从雨爱/AIZO/心似烟火随机）', () => {
+  const cfgPath = CUSTOM_RULES_PATH;
+  const backup = fs.readFileSync(cfgPath, 'utf8');
+  after(() => { fs.writeFileSync(cfgPath, backup); resetCustomRules(); });
+  const load = (bossBgm) => { fs.writeFileSync(cfgPath, JSON.stringify({ bossBgm }, null, 2)); resetCustomRules(); return getCustomRules({}); };
+
+  test('数组 track = 池；单字符串 = 1 元池（旧配置兼容）', () => {
+    const rules = load({ enabled: true, rules: [
+      { round: 18, track: ['x:yuai', 'x:aizo', 'x:xinsiyanhuo'] },
+      { round: 19, track: 'm_bat_prtsstage1' },
+    ] });
+    assert.equal(rules.bossBgm.rules.length, 2);
+    assert.deepEqual([...rules.bossBgm.rules[0].pool], ['x:yuai', 'x:aizo', 'x:xinsiyanhuo']);
+    assert.deepEqual([...rules.bossBgm.rules[1].pool], ['m_bat_prtsstage1'], '单字符串存成 1 元池');
+  });
+
+  test('池内非法项被剔除、去重、上限 32', () => {
+    const rules = load({ enabled: true, rules: [{ round: 18, track: ['x:ok', 'x:../bad', 'x:ok', 'has.dot', 'm_bat_prtsstage1', ...Array.from({length: 40}, (_, i) => 'x:s' + i)] }] });
+    const pool = [...rules.bossBgm.rules[0].pool];
+    assert.ok(pool.includes('x:ok') && pool.includes('m_bat_prtsstage1'));
+    assert.ok(!pool.some((x) => x.includes('..') || x.includes('.')), '非法项剔除');
+    assert.equal(new Set(pool).size, pool.length, '去重');
+    assert.ok(pool.length <= 32, '上限 32，实际 ' + pool.length);
+  });
+
+  test('确定性随机：同 seed 同回合恒定；不同 seed/回合可不同；不消耗 rngMeta', () => {
+    const rules = load({ enabled: true, rules: [{ round: 18, track: ['x:a', 'x:b', 'x:c'] }, { round: 19, track: ['x:a', 'x:b', 'x:c'] }] });
+    const pick = (seed, round) => bossBgmTrackFor(rules, round, seed);
+    // 同 seed 同回合：反复调用恒定（视图节流/重连 resync 不会换曲）
+    const first = pick(12345, 18);
+    for (let i = 0; i < 20; i++) assert.equal(pick(12345, 18), first, '同局同回合恒定');
+    // 落在池内
+    assert.ok(['x:a', 'x:b', 'x:c'].includes(first));
+    // 不同 seed 应能覆盖到不同曲（统计 200 个 seed，至少出现 2 种）
+    const seen = new Set();
+    for (let s = 1; s <= 200; s++) seen.add(pick(s, 18));
+    assert.ok(seen.size >= 2, '不同局有变化，实际 ' + seen.size + ' 种');
+    // 18 与 19 用同一池但回合不同 ⇒ 各自独立（不要求不同，只要求都合法）
+    assert.ok(['x:a', 'x:b', 'x:c'].includes(pick(12345, 19)));
+  });
+
+  test('无 seed（旧调用）⇒ 取池首；池空/关闭 ⇒ null', () => {
+    const rules = load({ enabled: true, rules: [{ round: 18, track: ['x:first', 'x:second'] }] });
+    assert.equal(bossBgmTrackFor(rules, 18), 'x:first', '省略 seed 退化为池首（纯函数调用点）');
+    assert.equal(bossBgmTrackFor(rules, 5), null, '未命中回合');
+    const off = load({ enabled: false, rules: [{ round: 18, track: ['x:a'] }] });
+    assert.equal(bossBgmTrackFor(off, 18, 1), null, '全关 = null');
   });
 });

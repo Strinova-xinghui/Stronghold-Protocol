@@ -159,7 +159,8 @@ export class MatchViews {
     if (this.phase === PHASE.COMBAT || this.phase === PHASE.FINAL_ASSAULT || this.phase === PHASE.HIDDEN_CORE) {
       let bbRules = null;
       try { bbRules = getCustomRules({ log: this.log }); } catch { bbRules = null; }
-      const track = bossBgmTrackFor(bbRules, this.round);
+      // 池随机用本局 seed 派生（同局同回合恒定 ⇒ 全房同曲、重连/节流广播不换曲；不占 rngMeta/rngShop 流）
+      const track = bossBgmTrackFor(bbRules, this.round, this.seed);
       if (track) v.bgmTrack = track;
     }
     // 最终攻势 / 隐秘核心: when the overtime drain starts (ms epoch; `deadline` is the level's 120 s countdown)

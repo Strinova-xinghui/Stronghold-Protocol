@@ -113,10 +113,10 @@ describe('自定义 BGM 客户端解析（cbgm: 通道 + 个人优先级）', ()
     try {
       assert.deepEqual(mod.readPersonalBgm(), {}, '空 ⇒ {}');
       assert.ok(mod.writePersonalBgm({ 18: 'my_boss', '*': 'all_boss' }));
-      assert.deepEqual(mod.readPersonalBgm(), { 18: 'my_boss', '*': 'all_boss' });
+      assert.deepEqual(mod.readPersonalBgm(), { 18: ['my_boss'], '*': ['all_boss'] }, '值是池（单曲 = 1 元池）');
       // 非法条目被过滤
       assert.ok(mod.writePersonalBgm({ 19: 'ok_stem', 20: '../bad', bad: 'x', 21: 'has.dot' }));
-      assert.deepEqual(mod.readPersonalBgm(), { 19: 'ok_stem' }, '只留合法项');
+      assert.deepEqual(mod.readPersonalBgm(), { 19: ['ok_stem'] }, '只留合法项');
       mod.writePersonalBgm({});
       assert.equal(store.get('sp_personal_bgm'), undefined, '空映射 = 删除键');
     } finally { delete globalThis.localStorage; }
@@ -267,5 +267,53 @@ describe('控制台上传 API（/console/api/bgm）', () => {
     assert.equal(r.status, 200);
     const j = await r.json();
     assert.ok(Array.isArray(j.items), '公开只读列表可用（客户端个人替换面板用）');
+  });
+});
+
+describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
+  const store = new Map();
+  const origLS = globalThis.localStorage;
+  before(() => { globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) }; });
+  after(() => { store.clear(); if (origLS === undefined) delete globalThis.localStorage; else globalThis.localStorage = origLS; });
+
+  test('读写池：单曲/多首/去重/非法过滤/清除', async () => {
+    const m = await import('../public/js/ui/personalBgm.js');
+    store.clear();
+    assert.ok(m.writePersonalBgm({ 18: ['yuai', 'aizo'], '*': 'xinsiyanhuo' }), '单字符串也接受（归一为池）');
+    assert.deepEqual(m.readPersonalBgm(), { 18: ['yuai', 'aizo'], '*': ['xinsiyanhuo'] }, '字符串归一为 1 元池');
+    m.writePersonalBgm({ 18: ['ok', 'ok', '../bad', 'has.dot', 'ok2'] });
+    assert.deepEqual(m.readPersonalBgm(), { 18: ['ok', 'ok2'] }, '去重 + 非法过滤');
+    m.writePersonalBgm({ 18: [] });
+    assert.equal(store.get('sp_personal_bgm'), undefined, '空池 = 删键');
+  });
+
+  test('pickFromPool：确定性（同 matchKey+回合+池恒定），不同输入有变化', async () => {
+    const m = await import('../public/js/ui/personalBgm.js');
+    const pool = ['yuai', 'aizo', 'xinsiyanhuo'];
+    const a = m.pickFromPool(pool, 18, 'roomA');
+    for (let i = 0; i < 20; i++) assert.equal(m.pickFromPool(pool, 18, 'roomA'), a, '同局同回合恒定');
+    assert.ok(pool.includes(a));
+    assert.equal(m.pickFromPool(['only'], 18, 'roomA'), 'only', '单首直接返回');
+    const seen = new Set();
+    for (let i = 1; i <= 200; i++) seen.add(m.pickFromPool(pool, 18, 'room' + i));
+    assert.ok(seen.size >= 2, '不同对局有变化，实际 ' + seen.size + ' 种');
+    assert.equal(m.pickFromPool([], 18, 'x'), null, '空池 null');
+  });
+
+  test('personalBgmKey：个人池优先 + 确定性选曲（audio.js 集成）', async () => {
+    const { personalBgmKey } = await import('../public/js/audio.js');
+    const m = await import('../public/js/ui/personalBgm.js');
+    store.clear();
+    m.writePersonalBgm({ 18: ['yuai', 'aizo'] });
+    const k1 = personalBgmKey(18, 'match1');
+    for (let i = 0; i < 10; i++) assert.equal(personalBgmKey(18, 'match1'), k1, '同局同回合恒定');
+    assert.ok(k1 === 'cbgm:yuai' || k1 === 'cbgm:aizo', '来自个人池：' + k1);
+    assert.equal(personalBgmKey(5, 'match1'), null, '未配置的回合 ⇒ null（回落全局/官方）');
+    m.writePersonalBgm({ '*': ['xinsiyanhuo'] });
+    assert.equal(personalBgmKey(7, 'match1'), 'cbgm:xinsiyanhuo', '通配生效');
+    m.writePersonalBgm({ 18: ['yuai'] });
+    assert.equal(personalBgmKey(18, 'match1'), 'cbgm:yuai', '回合号优先于通配');
+    m.writePersonalBgm({});
+    assert.equal(personalBgmKey(18, 'match1'), null, '清空 ⇒ 回落');
   });
 });
