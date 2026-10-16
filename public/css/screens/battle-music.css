@@ -1,0 +1,39 @@
+/* public/css/screens/battle-music.css — 自研（2026-10-16）战斗音乐替换面板的独立样式。
+ *
+ * 内部功能，与点歌台（game-player.css）解耦：类名统一 bm-* 前缀，本文件不覆盖点歌台的 .p* 类。
+ * 面板外壳复用 components.css 的 Modal（wide），这里只管内部三行「轮次类型 + 曲目池」的排布。 */
+
+.bm { display: flex; flex-direction: column; gap: .06rem; }
+
+.bm-list { display: flex; flex-direction: column; gap: .04rem; margin-top: .04rem; }
+
+.bm-row {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-2); border-radius: .05rem; overflow: hidden;
+}
+.bm-row.is-open { border-color: var(--mint-700); }
+
+/* 行头：左侧轮次名 + 右侧当前池摘要，整行可点开/收起。 */
+.bm-head {
+  display: flex; align-items: baseline; gap: .1rem; width: 100%;
+  padding: .08rem .1rem; text-align: left; cursor: pointer;
+  background: rgba(255, 255, 255, .03); border: 0; color: var(--text); font-size: .14rem;
+}
+.bm-head:hover { background: rgba(255, 255, 255, .07); }
+.bm-title { display: flex; align-items: baseline; gap: .06rem; font-weight: 700; }
+.bm-title small { color: var(--text-dim); font-weight: 400; font-size: .11rem; }
+.bm-pool {
+  margin-left: auto; color: var(--text-md); font-size: .12rem; max-width: 55%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 展开区：曲目 chip 多选（勾选即入池；多首 = 随机池）。 */
+.bm-picks { display: flex; flex-wrap: wrap; gap: .04rem; padding: .08rem .1rem; background: rgba(0, 0, 0, .25); }
+.bm-chip {
+  padding: .04rem .1rem; border: 1px solid var(--line-2); border-radius: .04rem;
+  background: transparent; color: var(--text-md); font-size: .13rem; cursor: pointer;
+}
+.bm-chip:hover { color: var(--text); border-color: var(--mint-700); }
+.bm-chip.is-on { color: var(--text-on-mint); background: var(--mint-500); border-color: var(--mint-500); font-weight: 700; }
+
+.bm-foot { display: flex; justify-content: flex-end; margin-top: .04rem; }

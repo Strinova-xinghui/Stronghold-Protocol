@@ -17,6 +17,7 @@ import { html, Button, Icon, MicroLabel, TextField, PingPill } from '../ui/compo
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { openPlayer } from '../ui/player.js'; // 自研全局点歌台（2026-10-15）
+import { openBattleMusic } from '../ui/battleMusic.js'; // 自研战斗音乐替换（内部功能，独立面板，2026-10-16）
 import { toast } from '../ui/toasts.js';
 import { net, identity } from '../net.js';
 import { store, useStore, shallowEqual } from '../store.js';
@@ -250,6 +251,7 @@ export function TitleScreen() {
       <div>
         <div class="title-corner__tools">
           <${Button} variant="ghost" size="sm" icon="signal" class="title-stats title-player" onClick=${openPlayer} title=${t('音乐播放器')}>${t('点歌')}<//>
+          <${Button} variant="ghost" size="sm" icon="sword" class="title-stats title-battle-music" onClick=${openBattleMusic} title=${t('战斗音乐替换')}>${t('战斗音乐')}<//>
           <${Button} variant="ghost" size="sm" icon="chart" class="title-stats" onClick=${openStats} title=${t('统计数据')}>${t('统计')}<//>
           <${LangToggle} class="title-lang" />
         </div>

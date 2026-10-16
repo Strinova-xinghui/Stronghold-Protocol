@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import { listCustomBgm, saveCustomBgm, removeCustomBgm, customBgmCapacity, CUSTOM_BGM_DIR, MAX_BGM_BYTES } from '../server/match/customBgm.js';
 import { CUSTOM_RULES_PATH, resetCustomRules } from '../server/match/customRules.js';
@@ -103,7 +104,7 @@ describe('自定义 BGM 客户端解析（cbgm: 通道 + 个人优先级）', ()
   });
 
   test('个人替换映射：读写/校验/清除（localStorage 语义）', async () => {
-    const mod = await import('../public/js/ui/personalBgm.js');
+    const mod = await import('../public/js/battleMusicStore.js');
     // Node 环境无 localStorage：注入一个最小实现
     const store = new Map();
     globalThis.localStorage = {
@@ -125,7 +126,7 @@ describe('自定义 BGM 客户端解析（cbgm: 通道 + 个人优先级）', ()
 
   test('优先级：个人 > 全局 > 官方（按轮次类型）', async () => {
     const { bgmKeyFor, personalBgmKey, stemBgmKey } = await import('../public/js/audio.js');
-    const pmod = await import('../public/js/ui/personalBgm.js');
+    const pmod = await import('../public/js/battleMusicStore.js');
     const store = new Map();
     globalThis.localStorage = {
       getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -279,7 +280,7 @@ describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
   after(() => { store.clear(); if (origLS === undefined) delete globalThis.localStorage; else globalThis.localStorage = origLS; });
 
   test('读写池：单曲/多首/去重/非法过滤/清除', async () => {
-    const m = await import('../public/js/ui/personalBgm.js');
+    const m = await import('../public/js/battleMusicStore.js');
     store.clear();
     assert.ok(m.writePersonalBgm({ 18: ['yuai', 'aizo'], '*': 'xinsiyanhuo' }), '单字符串也接受（归一为池）');
     assert.deepEqual(m.readPersonalBgm(), { 18: ['yuai', 'aizo'], '*': ['xinsiyanhuo'] }, '字符串归一为 1 元池');
@@ -290,7 +291,7 @@ describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
   });
 
   test('pickFromPool：确定性（同 matchKey+回合+池恒定），不同输入有变化', async () => {
-    const m = await import('../public/js/ui/personalBgm.js');
+    const m = await import('../public/js/battleMusicStore.js');
     const pool = ['yuai', 'aizo', 'xinsiyanhuo'];
     const a = m.pickFromPool(pool, 18, 'roomA');
     for (let i = 0; i < 20; i++) assert.equal(m.pickFromPool(pool, 18, 'roomA'), a, '同局同回合恒定');
@@ -304,7 +305,7 @@ describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
 
   test('personalBgmKey：按轮次类型取池 + 确定性选曲（audio.js 集成）', async () => {
     const { personalBgmKey } = await import('../public/js/audio.js');
-    const m = await import('../public/js/ui/personalBgm.js');
+    const m = await import('../public/js/battleMusicStore.js');
     store.clear();
     m.writePersonalBgm({ boss: ['yuai', 'aizo'] });
     const k1 = personalBgmKey('boss', 18, 'match1');
@@ -380,7 +381,7 @@ describe('点歌台优先于自动替换（含 bossBgm）—— 2026-10-16 用�
 
   test('个人替换（localStorage）同样让位于手动点歌', async () => {
     const { installAudio, audio } = await import('../public/js/audio.js');
-    const pmod = await import('../public/js/ui/personalBgm.js');
+    const pmod = await import('../public/js/battleMusicStore.js');
     const store = new Map();
     const origLS = globalThis.localStorage;
     globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
@@ -415,5 +416,50 @@ describe('点歌台优先于自动替换（含 bossBgm）—— 2026-10-16 用�
       audio.manualBgm = origManual;
       if (origLS === undefined) delete globalThis.localStorage; else globalThis.localStorage = origLS;
     }
+  });
+});
+
+describe('战斗音乐替换与点歌台解耦（2026-10-16 用户要求：发布节奏不同）', () => {
+  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+  test('点歌台不 import 战斗音乐模块（反之亦然）：零耦合，可各自发布', () => {
+    const player = read('public/js/ui/player.js');
+    const battle = read('public/js/ui/battleMusic.js');
+    // 真正的耦合只算 import / 代码引用；注释里提到对方不算（解耦说明本身要写清关系）
+    const codeLines = (src) => src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.ok(!/battleMusicStore|ui\/battleMusic|BattleMusicHost|openBattleMusic/.test(codeLines(player)), '点歌台不得引用战斗音乐模块');
+    assert.ok(!/ui\/player|openPlayer|PlayerHost|PersonalBgmTab/.test(codeLines(battle)), '战斗音乐模块不得引用点歌台');
+  });
+
+  test('点歌台面板回到三个 tab（战斗音乐不再是它的 tab）', () => {
+    const player = read('public/js/ui/player.js');
+    const m = /const TABS = \[([\s\S]*?)\];/.exec(player);
+    assert.ok(m, '找得到 TABS');
+    const keys = [...m[1].matchAll(/key: '([^']+)'/g)].map((x) => x[1]);
+    assert.deepEqual(keys, ['builtin', 'siren', 'fav'], '只有点歌台的三个 tab');
+    assert.ok(!/mybgm|PersonalBgmTab/.test(player), '战斗音乐 tab 已移除');
+  });
+
+  test('独立入口在四个界面都有，且各自走 openBattleMusic', () => {
+    for (const f of ['public/js/screens/game.js', 'public/js/screens/lobby.js', 'public/js/screens/title.js', 'public/js/screens/room.js']) {
+      const src = read(f);
+      assert.ok(/import \{ openBattleMusic \}/.test(src), f + ' 有 import');
+      assert.ok(/openBattleMusic[\s}>]/.test(src), f + ' 有按钮');
+    }
+    // 宿主由 main.js 全局挂载（与 PlayerHost 平级）
+    const main = read('public/js/main.js');
+    assert.ok(/<\$\{BattleMusicHost\} \/>/.test(main), 'main.js 挂了 BattleMusicHost');
+    assert.ok(/<\$\{PlayerHost\} \/>/.test(main), 'main.js 仍挂着 PlayerHost（点歌台不受影响）');
+  });
+
+  test('存储层可被两边共用且不依赖 UI：battleMusicStore 不 import preact/components', () => {
+    const store = read('public/js/battleMusicStore.js');
+    // 只查 import 行——注释里提到 UI 模块名是解耦说明，不算依赖
+    const imports = store.split('\n').filter((l) => /^\s*import\b/.test(l)).join('\n');
+    assert.ok(!/preact|hooks\.module|components\.js|store\.js|ui\//.test(imports), '存储层的 import 里没有 UI：' + imports);
+    // audio.js 通过存储层取个人池（单一来源）
+    const audio = read('public/js/audio.js');
+    assert.ok(/from '\.\/battleMusicStore\.js'/.test(audio), 'audio.js 走存储层');
   });
 });

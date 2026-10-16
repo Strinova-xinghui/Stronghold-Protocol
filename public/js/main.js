@@ -52,6 +52,7 @@ import { installShadow } from './ui/shadow.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { StatsHost } from './screens/stats.js';
 import { PlayerHost } from './ui/player.js'; // 自研音乐播放器（全局点歌台，2026-10-15）
+import { BattleMusicHost } from './ui/battleMusic.js'; // 自研战斗音乐替换（内部功能，与点歌台解耦，2026-10-16）
 import { recordResult, installStatsRecorder } from './ui/stats.js';
 import { installLoadoutSync, installOwnershipSync, installDiySync } from './ui/loadoutSync.js';
 import { installSkinsSync } from './ui/skins.js';
@@ -331,6 +332,7 @@ function App() {
     <${LoadoutHost} />
     <${StatsHost} />
     <${PlayerHost} />
+    <${BattleMusicHost} />
   </div>`;
 }
 

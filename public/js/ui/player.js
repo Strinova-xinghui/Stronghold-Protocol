@@ -6,7 +6,6 @@ import { audio } from '../audio.js';
 import { data, useData } from '../data.js';
 import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
-import { PersonalBgmTab } from './personalBgm.js'; // 自研个人 BOSS 战 BGM 替换（2026-10-16）
 import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, parseLrc, lrcIndex } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
@@ -95,11 +94,12 @@ function sirenItem(s, album) {
   };
 }
 // ---- 播放器面板 ----------------------------------------------------------------------------------------
+// 点歌台 = 公开功能（随撤回/等待一起发布），只管「玩家主动听歌」。
+// 「战斗音乐替换」是内部功能，已解耦到 ui/battleMusic.js（独立入口/独立浮层，本文件不 import 它）。
 const TABS = [
   { key: 'builtin', label: '内置 BGM' },
   { key: 'siren', label: '塞壬唱片 OST' },
   { key: 'fav', label: '收藏' },
-  { key: 'mybgm', label: '我的战斗音乐' },
 ];
 
 function TrackRow({ track, playing, onPlay, cover, hint }) {
@@ -316,7 +316,6 @@ export function PlayerPanel({ open, onClose }) {
             onPlay=${() => openAlbum(a)} />`)}` : null}
       </div>` : null}
       ${tab === 'fav' ? html`<${FavTab} />` : null}
-      ${tab === 'mybgm' ? html`<${PersonalBgmTab} />` : null}
       <${ControlBar} />
     </div>
   <//>`;

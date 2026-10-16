@@ -21,6 +21,7 @@ import { copyText } from '../ui/clipboard.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { openPlayer } from '../ui/player.js'; // 自研全局点歌台（2026-10-15）
+import { openBattleMusic } from '../ui/battleMusic.js'; // 自研战斗音乐替换（内部功能，独立面板，2026-10-16）
 import { SettingsButton } from '../ui/settings.js';
 import { LoadoutButton } from './loadout.js';
 import { net } from '../net.js';
@@ -318,6 +319,7 @@ export function RoomScreen() {
         </div>
         <${Button} variant="secondary" size="sm" icon="chart" class="stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>${t('统计')}<//>
         <${Button} variant="secondary" size="sm" icon="signal" class="stats-entry music-entry" onClick=${openPlayer} title=${t('音乐播放器')} aria-label=${t('音乐播放器')}>${t('点歌')}<//>
+        <${Button} variant="secondary" size="sm" icon="sword" class="stats-entry battle-music-entry" onClick=${openBattleMusic} title=${t('战斗音乐替换')} aria-label=${t('战斗音乐替换')}>${t('战斗音乐')}<//>
         <${SettingsButton} class="room-settings" variant="secondary" label=${t('设置')} />
         <${GuideButton} class="room-guide" variant="secondary" label=${t('玩法说明')} />
       </div>

@@ -1339,5 +1339,10 @@
   "常规战斗轮": "Regular combat rounds",
   "BOSS 轮（最终攻势 / 隐秘核心）": "BOSS rounds (Final Assault / Hidden Core)",
   "个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（这种轮次每次从中随机一首）。全不勾 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Pick several tracks to make a random pool (one is drawn for each such round). Pick none to use the global/official schedule.",
-  "这里只管「默认战斗音乐」；你自己点歌播放时一切以点歌为准，不会被这里的设置覆盖。": "This only affects the default battle music. When you play a song yourself (the jukebox), that always wins — these settings never override it."
+  "这里只管「默认战斗音乐」；你自己点歌播放时一切以点歌为准，不会被这里的设置覆盖。": "This only affects the default battle music. When you play a song yourself (the jukebox), that always wins — these settings never override it.",
+  "战斗音乐替换": "Battle music override",
+  "战斗音乐": "Battle music",
+  "改的是「默认战斗音乐」：不点歌时，作战期自动放什么。你自己点歌播放时一切以点歌为准，不会被这里覆盖。只影响你这台设备。": "This changes the DEFAULT battle music — what plays automatically during a combat phase when you have not picked a song. When you play a song yourself, that always wins and is never overridden. Affects only this device.",
+  "按轮次类型配：勾选多首 = 随机池（每次都从里面随机一首）。留空 = 用控制台的全局设置或官方日程。": "Configure by round type: tick several tracks to make a random pool (one is drawn each time). Leave empty to use the console-wide setting or the official schedule.",
+  "全部清除（交还全局/官方）": "Clear all (hand back to global/official)"
 }

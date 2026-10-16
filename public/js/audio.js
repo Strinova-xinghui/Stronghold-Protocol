@@ -75,6 +75,8 @@ import { sanitizeVoiceOverrides, voiceLangFor } from './voicePrefs.js';
 import { PHASE } from '../../shared/constants.js';
 import { mediaUrl } from './media.js';
 import { unhashedUrl } from '../../shared/assetPaths.js';
+// 个人战斗音乐池（内部功能的存储层，2026-10-16）：与 UI 解耦，audio 只取「本局本轮次该放哪首」。
+import { pickPersonalPool } from './battleMusicStore.js';
 
 const MAX_VOICES = 8;
 const UNIT_COOLDOWN_MS = 160;
@@ -264,25 +266,11 @@ function customBgmTrack(stem) {
  */
 export function personalBgmKey(scope, round, matchKey = '') {
   try {
-    const raw = JSON.parse(localStorage.getItem('sp_personal_bgm') || 'null');
-    if (!raw || typeof raw !== 'object') return null;
-    const r = Number(round);
-    // 值是**池**（数组；旧版单字符串也兼容）。
-    const asPool = (v) => (Array.isArray(v) ? v : [v]).filter((x) => typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x));
-    // 优先级：轮次类型 → 旧版回合号 → 通配 '*'
-    let pool = (scope === 'boss' || scope === 'combat') ? asPool(raw[scope]) : [];
-    if (!pool.length && scope != null && Number.isFinite(r)) pool = asPool(raw[String(r)]);
-    if (!pool.length) pool = asPool(raw['*']);
-    if (!pool.length) return null;
-    // 本地确定性随机：同局同轮次恒定（不会一边打一边换歌），不同局有变化。
-    // 个人池只影响本机 ⇒ 无需服务器参与（全局池才必须服务器掷，见 customRules.bossBgmTrackFor）。
-    const pick = pool.length === 1 ? pool[0] : (() => {
-      const s = `${matchKey}:${scope || 'r' + (r || 0)}:${pool.join(',')}`;
-      let h = 0x811c9dc5;
-      for (let i = 0; i < s.length; i++) { h = (h ^ s.charCodeAt(i)) >>> 0; h = Math.imul(h, 0x01000193) >>> 0; }
-      return pool[h % pool.length];
-    })();
-    const key = 'cbgm:' + pick;
+    // 存储与确定性选曲都在 battleMusicStore.js（与 UI 解耦的独立模块，内部功能）——audio 只负责
+    // 「把选出的 stem 变成 cbgm: key 并校验可解析」。单一来源，避免两处各写一遍池解析。
+    const stem = pickPersonalPool(scope, round, matchKey);
+    if (!stem) return null;
+    const key = 'cbgm:' + stem;
     return resolveBgm(null, key) ? key : null;
   } catch { return null; }
 }

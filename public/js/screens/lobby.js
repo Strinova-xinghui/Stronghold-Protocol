@@ -20,6 +20,7 @@ import { toast, toastError } from '../ui/toasts.js';
 import { GuideButton } from '../ui/guide.js';
 import { openStats } from './stats.js';
 import { openPlayer } from '../ui/player.js'; // 自研全局点歌台（2026-10-15）
+import { openBattleMusic } from '../ui/battleMusic.js'; // 自研战斗音乐替换（内部功能，独立面板，2026-10-16）
 import { SettingsButton } from '../ui/settings.js';
 import { PwaInstallButton } from '../ui/device.js';
 import { LoadoutButton } from './loadout.js';
@@ -333,6 +334,9 @@ export function LobbyScreen() {
         <${LoadoutButton} from="lobby" size="sm" class="lobby-loadout" label=${t('干员调配')} />
         <${Tooltip} text=${t('音乐播放器')} placement="bottom">
           <${Button} variant="secondary" size="sm" icon="signal" square=${true} class="music-entry" onClick=${openPlayer} aria-label=${t('音乐播放器')} />
+        <//>
+        <${Tooltip} text=${t('战斗音乐替换')} placement="bottom">
+          <${Button} variant="secondary" size="sm" icon="sword" square=${true} class="battle-music-entry" onClick=${openBattleMusic} aria-label=${t('战斗音乐替换')} />
         <//>
         <button type="button" class="me-chip me-chip--btn stats-entry" onClick=${openStats} title=${t('统计数据')} aria-label=${t('统计数据')}>
           <${AvatarFrame} size="sm" name=${me.name} seat=${0} self=${true} />
