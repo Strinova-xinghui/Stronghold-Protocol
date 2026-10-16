@@ -9,6 +9,7 @@
 ## 目录
 
 - [自研规则总览（热更配置）](#自研规则总览热更配置)
+- [WSL Ubuntu 开发环境迁移（2026-10-17）](#wsl-ubuntu-开发环境迁移2026-10-17)
 - 各功能详见下文（monitor 监看 / 影子观战 / 定向甄选 / 皮肤 / 配音 / 等待 / 负债 / 抽奖 / 回合编排 / 对局节奏 / 控制台 / 6 人联机 / 一键开服 …）
 
 ## 自研规则总览（热更配置）
@@ -901,3 +902,44 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
    或起服 + puppeteer。纯文本「标签配对」检查不可靠（htm 多行标签、属性里的 `=>` 会误伤，实测 player.js 就误报）。
 3. 线上验证 dev harness 不在部署包里（`public/dev` 未打包）——需要线上真渲染时，可临时 scp 上去跑一次再删
    （本次就是这么确认修复的：线上 `/dev/game-mock.html` 渲染 6 个角落按钮、**0 pageerror**，随后删除，线上回到 404）。
+
+## WSL Ubuntu 开发环境迁移（2026-10-17）
+
+> 目标：本地全量搬到 WSL 原生文件系统作为**主开发环境**，贴近云服（Azure Ubuntu 24.04）。
+> Windows 副本 `E:\卫戍协议` 保留为备胎；Windows 启动脚本不迁不 Adapt（AGENTS.md §3「WSL 开发环境」有速查）。
+
+### 迁移方法（可复用）
+
+- **传输**：WSL 内一条 tar 管道穿透 9P（12157 素材小文件走归档流，4 分 21 秒完成 ~1 GB）：
+  ```bash
+  cd /mnt/e/卫戍协议 && tar -cf - --exclude=./node_modules --exclude='./%SystemDrive%' \
+    --exclude=./.local --exclude=./logs --exclude=./.npm-cache --exclude=./.cache/ffm . \
+    | tar -xf - -C ~/sp
+  ```
+  排除的都是可再生/垃圾：`node_modules`（Linux 下 `npm ci` 重装，别带 Windows 的原生二进制与 symlink 结构）、`%SystemDrive%`/`.local`（此前脚本事故的杂物）、`logs`、`.cache/ffm`（81M 无关缓存）。**保留**：`.git`、`public/assets`（753M 素材，云服缺的 1197 个文件以后可从 WSL scp 补）、`.cache/gamedata`（89M 官方表，golden/重推导测试要用）、`public/vendor`（反正 postinstall 重建）。
+- **落地即验证**：`npm ci`（196 包 / 10s，postinstall 重建 vendor 7 文件）→ `git status` 干净（`.gitattributes` 已钉死 eol，无 autocrlf 冲突；WSL 全局 autocrlf 本来就 unset）→ `node tools/check-missing-imports.mjs` 通过 → 起服 `SP_MAX_SEATS=6 PORT=24500` `/healthz` 200（`app 0.2.6`）→ 素材 12157/12157 全中。
+- **WSL 侧配置**：`~/bin/sp-start.sh [端口]` 一键起开发服（前台）；`git remote add win /mnt/e/卫戍协议` 双向同步通道。发行版实为 **Ubuntu 26.04.1 LTS**（与云服 24.04 对本项目无差异：Node 24 + 纯 JS），Node v24.21.0 ≥ 云服要求。
+
+### 全量测试基线：双 OS 同提交对照（1f8bf5b2，`--test-concurrency=4`）
+
+| 侧 | tests | pass | fail |
+| --- | --- | --- | --- |
+| Windows | 6572 | 6408 | **148** |
+| WSL | 6572 | 6485 | **58** |
+
+- **共同失败 51 条 = 既有欠账**（与迁移无关，两 OS 一致）：`.github/workflows/*` 全仓失踪（ci.test / pr-labeler / docs-paths 三族；0.2.5 合并时被上游重构删掉未恢复）、golden diy 6 场景 digest 未再生、battleMusic.js 中文未包裹（i18n strict）、op_oblvns S1-S3、悬赏 scale、co-op 长跑不变式（alive with lp 负数）、traffic 环回判定、docs-paths。
+- **WSL 独有 22 条**逐条甄别，**零迁移引入**：
+  1. **热改测试并发互踩**（约 18 条，自研 tools/*.test.mjs 族）：这些套件共享 `config/custom-rules.json`（mtime 热改）——并发跑互踩；`--test-concurrency=1` 单跑 82/82 全绿已证。
+  2. **负载抖动**（co-op 20-seeds 长跑、performance、websocket flooding）：4 并发下 CPU 挤占导致超时/时序断言。
+  3. **平台门缺失**（make-windows-bundle「大小写不敏感」断言）：测试断言 Windows/macOS 文件系统语义，Linux 天然不同；该文件 Windows 侧同跑同样会过，属测试应加平台 skip。
+  4. **git 身份缺失**（test-monitor）：WSL `mk` 用户未配 `user.name/email` 导致其内部 git 操作失败（已配齐后通过）。
+- **Windows 独有 116 条**：主要是基线跑时 6 个 node 进程（含我另起的单跑）互相挤占 + Final Assault 长跑族超时——**Windows 侧全量并发的噪声比 WSL 还大**。
+- **结论**：WSL 迁移后健康度不劣于 Windows（58 < 148）；**开发循环建议**：改完跑相关单文件/单并发组，全量回归留给 `--test-concurrency=1` 或低并发。
+
+### 待办（迁移遗留）
+
+- [ ] `.github/workflows/`（ci.yml、pr-labeler.yml）需重建或恢复：0.2.5 合并事故，连带 6+ 测试红的根因（两侧共同欠账）。
+- [ ] `config/custom-rules.json` 的测试互踩问题值得修（给热改测试发临时 config 副本 / `SP_CUSTOM_RULES_PATH` 环境变量），修好前全量测试用 `--test-concurrency=1`。
+- [ ] golden diy 6 场景 digest 再生（`npm run golden:update` 前先看 diff 是否只是时基/数值演进）。
+- [ ] 云服缺的 1197 个素材可从 WSL `~/sp/public/assets` scp 增量补（比 Windows scp 快）。
+- [ ] WSL 副本的 `mine` remote 推送凭证（GitHub token）未配——WSL 里 push 前先配 `gh auth login` 或 credential helper。

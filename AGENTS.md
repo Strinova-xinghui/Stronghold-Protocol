@@ -33,6 +33,14 @@
 - `--no-local` 跳过明日方舟客户端素材提取（官方 3D 棋盘贴图等可选素材）；之后想要可跑 `node tools/setup.mjs --local`（需本机客户端 + Python 3.8+）。
 - 客户端为原生 ES 模块（无打包器），一般改完刷新页面即可。
 
+### WSL 开发环境（2026-10-17 迁移，主开发阵地）
+
+- **位置**：WSL Ubuntu 26.04（用户 `mk`，默认发行版）`~/sp`——全量复刻自 `E:\卫戍协议`（代码+.git+素材 12157 文件+`.cache/gamedata`），与云服 `~/sp` 完全同名；Node v24.21.0（本机 24.18 / 云服 24.x，engines ≥22 均兼容）；依赖 `npm ci` 重装（Linux 原生 vendor）。
+- **日常同步**：两份 checkout 不共享工作树——WSL 侧 `git remote add win /mnt/e/卫戍协议` 通道已配好，WSL 里 `git fetch win && git merge win/master` 即可拉新；反向在 WSL 提交后从 Windows `git fetch win`（同一 remote 双向可用）或经 GitHub `mine`。
+- **启动/验证**：`sp-start.sh [端口]`（`~/bin`，默认 24500，前台）；验证链与 Windows 相同（`node --test` / `npm run golden` / `node tools/check-missing-imports.mjs`）。⚠️ **热改类测试（tools/*.test.mjs 10 套）共享 `config/custom-rules.json`，并发跑互踩**（单并发 82/82 全绿已证）——跑这组加 `--test-concurrency=1`；若全量测试中途踩脏，`git checkout -- config/custom-rules.json` 恢复。
+- **边界**：Windows 启动脚本（start-online / update-restart / frpc / cloudflared）**不迁不 Adapt**——WSL 定位 = 开发验证；给朋友玩继续走云服 strinova.me（systemd stronghold）或 Windows 双击 `start-online.bat`。WSL2 是 NAT，朋友直连 WSL 服需 portproxy（未配）。
+- **测试基线（2026-10-17 双 OS 同提交 1f8bf5b2 对照）**：全量 `node --test` 两侧共同失败 51 条 = 既有欠账（golden diy 6 场景未再生、docs 引用未跟踪的 `.github/workflows/*`、battleMusic 中文未包裹、op_oblvns S1-S3、悬赏 scale、co-op 长跑不变式、traffic 环回判定等）；「WSL 独有」22 条全部甄别为**并发互踩 / 负载抖动 / 测试平台门缺失**（make-windows-bundle 断言大小写不敏感语义，Linux 天然不适用）——**无一条由迁移引入**。详见 NOTES.md「WSL 迁移」节。
+
 ## 3.5 自研追加功能（详见 NOTES.md）
 
 > 本仓库在官方上游基础上追加的功能（6 人联机、monitor 监看 / 影子观战、定向甄选、中日配音热切换、皮肤子系统、休整期等待投票 / 负债规则、回合抽奖、回合编排（加时赛）、对局节奏、规则控制台、策略搜索、BOSS 血量倍率）的**完整设计、踩坑与验证清单**已外置到 **[NOTES.md](NOTES.md)**——本文件有 64KB 预算，超长会被截断。
