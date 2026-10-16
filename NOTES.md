@@ -758,3 +758,37 @@ views.js 调用点从 `bossBgmTrackFor(bbRules, this.round)` 改为传 `this.see
 `pickFromPool` 确定性、`personalBgmKey` 集成 + 通配 + 回合优先）；五套件串行 73/73；符号审计 ✓；i18n en 100%。
 线上（build 2fa4bed41f02）实测：控制台读到池规则、9 首 chip 全渲染、勾两首持久化为 `{"18":["aizo","daoguanmeng"]}`、
 个人池压过全局（`cbgm:daoguanmeng` > `stem:m_bat_act1autochess`）、60 个 seed 在 R18 抽到全部三首。
+
+### ⚠️ 修正：BOSS 战 BGM 规则从「按回合号」改为「按轮次类型」（2026-10-16 晚，用户当场指出设计错误）
+
+**错误的原设计**：bossBgm 规则用 `round: 18/19` 匹配，我在文档与 UI 里一路写「加时赛 BOSS=18/隐藏=19，未开=14/15」。
+用户指出：**BOSS 不一定是 18/19**。这个号会随「开不开加时赛」整体顺延（gamedata 的 `_erBossAt` 锁定实际触发回合、
+extraRounds 规则把 bossRound/hiddenRound 顺延 count）——所以**按回合号匹配在未开加时赛的局里完全失效**，
+而 UI 又逼着用户去猜那个数字。根因是我把「实现细节（顺延后的号）」当成了「用户概念（BOSS 战）」暴露出去。
+
+**新设计：按作战期的种类匹配（两种）**
+| scope | 含义 | 命中阶段 |
+| --- | --- | --- |
+| `combat` | 常规战斗轮 | `PHASE.COMBAT`（所有非 BOSS 战斗回合） |
+| `boss` | BOSS 轮 | `PHASE.FINAL_ASSAULT`（最终攻势）/ `PHASE.HIDDEN_CORE`（隐秘核心） |
+| `*` | 所有作战期 | 以上两种都覆盖（列表序在前者优先） |
+
+views.js 从 `bossBgmTrackFor(bbRules, this.round, this.seed)` 改为
+`bossBgmTrackFor(bbRules, scope, this.round, this.seed)`，scope 由 phase 推导——
+**再也不用知道 BOSS 落在第几回合**。
+
+**兼容**：`bossBgmTrackFor` 第二参是数字（或纯数字串）时按旧签名解释（视为回合号），
+所以旧测试调用与旧配置的 `{round: N}` 规则继续工作；控制台的旧形态规则会显示一个「（旧形态）回合 round」输入，
+切到 scope 下拉即自动清掉 round 字段。个人池同步改为 `{combat|boss|*: [stem…]}`（旧数字键仍生效）。
+
+**UI**：控制台规则行的「回合 round + 语义 kind」→「轮次类型 scope」三选一下拉；
+客户端「我的战斗音乐」从 6 个回合行（1/5/8/13/18/19）→ **三行：常规战斗轮 / BOSS 轮 / 所有作战期**。
+
+**默认配置**：`combat` 与 `boss` 都 = `["x:yuai","x:aizo","x:xinsiyanhuo"]`（雨爱 / AIZO / 心似烟火随机池）。
+
+**验证**：boss-bgm 26/26（新增 scope 4 例：归一与大小写宽容 + 非法 scope 退回 round、
+**BOSS 轮在 R13/14/15/18/19 全部命中**（正是改设计的理由）、`*` 通配与列表序、轮次池确定性随机）；
+custom-bgm 18/18（个人池改 scope 口径 + 旧数字键兼容）；五套件串行 77/77；符号审计 ✓；i18n en 100%。
+真引擎端到端：R18 BOSS 轮 → `x:aizo`，早期常规轮 → `x:xinsiyanhuo`，中期常规轮 → `x:yuai`（各按类型独立抽取）。
+线上（build 9ccbdf6b153d）实测：规则为 scope 形态、客户端三行渲染正确、勾 BOSS 轮存为 `{"boss":["aizo"]}`、
+`personalBgmKey('boss',…)→cbgm:aizo` 而 `('combat',…)→null`（未配该轮次正确回落）。
