@@ -16,6 +16,7 @@ import { PROTOCOL_VERSION, APP_VERSION } from '../../shared/constants.js';
 import { buildTag } from './buildTag.js';
 import { handleCustomRoutes } from './customRoutes.js';
 import { handleMusicRoutes } from './musicRoutes.js'; // 自研音乐播放器代理（/music/*，2026-10-15）
+import { handleBiliRoutes } from './biliRoutes.js'; // B 站音频本地中转（player/external-sources 分支专用，2026-10-16）
 import { setSecurityHeaders, sendError, sendJson, splitUrl } from './common.js';
 import { clientAddress, isLocalIp } from '../net.js';
 
@@ -83,6 +84,8 @@ export function createRequestHandler({ serveStatic, health, log, custom, trustPr
     // CORS 兜底）。音频/封面走 CDN 直连不经此路由。music 规则关闭（custom-rules.json music.enabled=false）时
     // 内部直接 false 落回静态（404 = 原版没有播放器）。
     if (await handleMusicRoutes(req, res, parts, log, musicEnabled(health))) return;
+    // B 站音频中转（biliRoutes.js）：同 music.enabled 总开关；本地分支专用，云端不部署本分支。
+    if (await handleBiliRoutes(req, res, parts, log, musicEnabled(health))) return;
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('Allow', 'GET, HEAD');
       sendError(req, res, 405, '不支持的请求方法 · Method not allowed');

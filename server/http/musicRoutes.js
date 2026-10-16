@@ -33,6 +33,7 @@ const PROXY_HOST_HEADERS = [
   { re: /(^|\.)kuwo\.cn$/i, h: { Referer: 'http://www.kuwo.cn/', Origin: 'http://www.kuwo.cn' } },
   { re: /(^|\.)kugou\.com$/i, h: { Referer: 'https://www.kugou.com/', Origin: 'https://www.kugou.com' } },
   { re: /(^|\.)migu\.cn$/i, h: { Referer: 'https://music.migu.cn/', Origin: 'https://music.migu.cn' } },
+  { re: /bilibili\.com$/i, h: { Referer: 'https://www.bilibili.com/', Origin: 'https://www.bilibili.com' } }, // 调研文档 §3.4：API 拒绝陌生 Referer/Origin（403）
 ];
 const PROXY_FWD_HEADERS = ['cookie', 'user-agent', 'referer'];
 

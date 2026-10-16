@@ -580,3 +580,23 @@ acc 恒 0」的白嫖路径）→ 恢复全绿。
 互相踩 → 33 红。自研套件必须 `--test-concurrency=1` 串行。踩坏后 `git checkout HEAD -- config/…`
 这次是对的（HEAD 已是 120 行完整版；旧教训「HEAD 是最小版」随提交推进已失效——恢复前先
 `git show HEAD:config/custom-rules.json | grep music` 验证）。
+
+## Bilibili 本地中转音源（player/external-sources 分支，2026-10-16，队友 bili-research）
+
+> 前提：调研文档 docs/BILI-SOURCE-RESEARCH.md 判定「浏览器直连播放 B 站音频结构性不可行」（CDN 全域 Referer 锁：无头/错域 403、仅 bilibili.com 206，3 个异 CDN 节点一致实测）。本功能用**本地服务器中转**绕过——只适用于本分支（家宽免费流量），**本分支永不部署云端**，云端带宽红线天然安全。
+
+- **服务端**：新路由 `server/http/biliRoutes.js`（挂 `routes.js` handleMusicRoutes 之后，同 `music.enabled` 总开关，关掉=404 原版行为）：
+  - `/music/bili/info?url=BV|av|b23.tv|播放页` → view 元数据+分 P（磁盘缓存 1h）；
+  - `/music/bili/search?kw=&page=` → 视频搜索（缓存 5min，strip html / 时长换算）；
+  - `/music/bili/audio?bvid=&p=` → playurl(fnval=0 durl mp4) → 服务器带 Referer 注入拉 CDN → 同源流式转发（**≤50MB 硬上限**、`Cache-Control: no-store`、直链域名白名单 upcdn/bilivideo/mountaintoys，拒任意 URL）。
+  - **访客 buvid cookie**（`/x/frontend/finger/spi` 免登录，缓存 24h）：搜索接口按 B 站文档要 buvid3，否则间歇 **-412** 风控（e2e 里真实命中过一次 502，加 cookie 后稳定）。
+  - UA/Referer/DASH 档位知识取自 lx-music-desktop-enhanced（**Apache-2.0**）与 bilibili-API-collect 文档（GPL-3.0 兼容，已注明来源）。
+  - `musicRoutes.js` 的 `PROXY_HOST_HEADERS` 加一行 `bilibili.com`（lx 脚本元数据请求也能走 /music/proxy 兜底）。
+- **客户端**：外部音源 tab 加「B 站解析」框（粘链接→元数据卡→整 P 列表进队列）；搜索源下拉常驻新增 Bilibili（不再依赖已加载 lx 脚本——搜索区从 `meta.length` 条件里拆出来）；`bili:` 前缀队列项、`kind:'bili'` 收藏重播。播放走同源 URL，`<audio>` 无 CORS 问题。
+- **实测证据**：BV1GJ411x7h7（Never Gonna Give You Up 官方 MV）端到端——curl 200/`video/mp4`/51,973,319B/21.2s；e2e 断言 `mediaEl.currentTime` 前进+时长≈3.5min（真出声）；`SP_E2E=1` 四套件 4/4、音乐单测 34/34。
+- **坑（本分支特有）**：
+  1. **面板 max-height:min(56vh,5.2rem) 裁切**（ff539eb3 出界修复）：外部 tab 加行后，坐标 `page.click('.plist .ptrack--lx')` 被裁掉 → 原播放器 e2e 超时。修：**先 `scrollIntoView({block:'center'})` 再 JS `.click()`**（原 e2e 与我新 e2e 同法）。以后往外部 tab 加行都要想到这堵裁切墙。
+  2. 缓存文件名**禁用冒号**：Windows 把 `view:xxx.json` 当 ADS，缓存静默失效 → 测试断言「第二次不打下游」直接暴露。键改 `view_`/`search_`（musicRoutes.js 早有同款注释）。
+  3. `sendJson(req,res,st,obj)` **只有 4 参**（无 extra headers），多传静默忽略。
+  4. `node --test` 多文件必须 `--test-concurrency=1`（config 互踩老坑，全程遵守）。
+- **本地跑法**：worktree `E:\sp-ext-bili`（junction 复用主仓 node_modules，勿 npm install）→ `PORT=24599 HOST=127.0.0.1 node server/index.js` → 浏览器开 127.0.0.1:24599 → 点歌台 → 外部音源 tab → 粘 BV 号 → B 站解析 → 点播。按端口精确停服，**绝不 taskkill /IM node.exe**（会连线上 24500 一起杀）。

@@ -353,6 +353,28 @@ export function lrcIndex(lines, sec) {
   return ans;
 }
 
+// ---- Bilibili（player/external-sources 本地中转，2026-10-16）------------------------------------------
+// 浏览器直连 B 站音频被 CDN Referer 防盗链锁死（调研文档 §3.3 实测 403/206/403），
+// 元数据/取链/音频全部走同源 /music/bili/*（服务器带 Referer 中转；本分支只跑本地，永不部署云端）。
+/** BV/av/b23/播放页链接 → 元数据（bvid/title/up/pic/duration/pages[{page,part,cid,duration}]）。 */
+export async function biliInfo(raw, signal) {
+  const r = await fetch('/music/bili/info?url=' + encodeURIComponent(String(raw || '').trim()), { signal });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+  return j;
+}
+/** B 站视频搜索（服务器缓存 5min）→ { bvid,title,author,duration,pic }[]。 */
+export async function biliSearch(kw, { signal, page = 1 } = {}) {
+  const r = await fetch('/music/bili/search?kw=' + encodeURIComponent(String(kw || '').slice(0, 64)) + '&page=' + (page | 0), { signal });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || 'HTTP ' + r.status);
+  return j.list || [];
+}
+/** 播放直链（同源）：服务器 playurl(fnval=0 durl mp4) + 带 Referer 拉流转发。 */
+export function biliAudioUrl(bvid, p) {
+  return '/music/bili/audio?bvid=' + encodeURIComponent(String(bvid)) + (p && p > 1 ? '&p=' + p : '');
+}
+
 /** 网易云歌词（内置搜索结果的轮椅取词）：走 /music/proxy（服务器注入 Referer）。返回 LRC 文本或 null。 */
 export async function wyLyric(songmid, signal) {
   const url = 'https://music.163.com/api/song/lyric?id=' + encodeURIComponent(String(songmid)) + '&lv=-1&kv=-1&tv=-1';

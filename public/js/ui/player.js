@@ -6,7 +6,7 @@ import { audio } from '../audio.js';
 import { data, useData } from '../data.js';
 import { createStore, useStore } from '../store.js';
 import { t } from '../../../shared/i18n.js';
-import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, lxSearch, lxLyric, wyLyric, LX_SEARCH_SOURCES, fmtDur, parseLrc, lrcIndex } from './player-core.js';
+import { builtinTracks, sirenAlbums, sirenAlbum, sirenSearch, sirenSongUrl, loadLxScript, fetchLxScript, lxMusicUrl, lxSearch, lxLyric, wyLyric, LX_SEARCH_SOURCES, biliInfo, biliSearch, biliAudioUrl, fmtDur, parseLrc, lrcIndex } from './player-core.js';
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
@@ -41,6 +41,7 @@ function favToggle(f) {
 function favItem(f) {
   if (f.kind === 'siren') return sirenItem({ cid: f.mid, name: f.title, artistes: f.artist ? [f.artist] : [] }, { name: f.album, coverUrl: f.cover });
   if (f.kind === 'builtin') return builtinItem({ key: f.key, name: f.title, url: f.url, scene: f.album });
+  if (f.kind === 'bili') return biliItem({ bvid: f.mid, title: f.album || f.title, up: f.artist }, { page: f.page || 1, part: f.title });
   const mi = { source: f.source, songmid: f.mid, songName: f.title, singerName: f.artist, albumName: f.album };
   return { ...mi, ...lxItemLazy(mi, f.source) };
 }
@@ -127,6 +128,16 @@ export async function playSirenSong(cid, name, signal) {
   audio.playTrack({ url: info.url }, 'siren:' + cid + ':' + name);
 }
 
+/** B 站条目 → 队列项（本地中转同源直链；歌词需 wbi+字幕接口，本期跳过）。 */
+function biliItem(meta, pg) {
+  const page = pg && pg.page ? pg.page : 1;
+  return {
+    key: 'bili:' + meta.bvid + (page > 1 ? '_p' + page : ''), title: (pg && pg.part) || meta.title || meta.bvid,
+    artist: meta.up || 'UP主', album: 'Bilibili · ' + meta.bvid, cover: null,
+    url: async () => biliAudioUrl(meta.bvid, page),
+  };
+}
+
 // ---- 播放器面板 ----------------------------------------------------------------------------------------
 const TABS = [
   { key: 'builtin', label: '内置 BGM' },
@@ -178,6 +189,10 @@ function CustomSourceTab({ favAdd, favHas }) {
   const [songmid, setSongmid] = useState('');
   const [songname, setSongname] = useState('');
   const [busy, setBusy] = useState(false);
+  // —— Bilibili（本地中转）：粘 BV/av/b23/播放页链接 → 元数据 → 分 P 队列播；搜索源下拉含 bili ——
+  const [biliInput, setBiliInput] = useState('');
+  const [biliMeta, setBiliMeta] = useState(null);
+  const [biliBusy, setBiliBusy] = useState(false);
   const apply = async (text) => {
     const res = await loadLxScript(text);
     if (!res.ok) { setErr(res.error || t('加载失败')); setSources(null); setListeners(null); return; }
@@ -213,7 +228,10 @@ function CustomSourceTab({ favAdd, favHas }) {
     const kw = sq.trim();
     if (!kw) { setResults(null); return; }
     setErr(''); setSearching(true);
-    try { setResults(await lxSearch(sk, kw)); }
+    try {
+      if (sk === 'bili') { const list = await biliSearch(kw); setResults(list.map((r) => ({ source: 'bili', songmid: r.bvid, songName: r.title, singerName: r.author, albumName: 'Bilibili', interval: r.duration, bili: r }))); }
+      else setResults(await lxSearch(sk, kw));
+    }
     catch (e) { setResults(null); setErr(t('搜索失败：') + String(e && e.message ? e.message : e)); }
     setSearching(false);
   };
@@ -224,6 +242,28 @@ function CustomSourceTab({ favAdd, favHas }) {
     qPlayList((list || [musicInfo]).map((mi) => lxItem(mi, listeners, source)), list ? list.indexOf(musicInfo) : 0);
   };
   const play = () => playInfo({ source: sk, songmid: songmid.trim(), songName: songname || songmid, singerName: '' });
+  // —— bili：链接 → biliInfo（服务端中转元数据）→ 分 P 展开成队列 ——
+  const biliAddUrl = async () => {
+    const v = biliInput.trim();
+    if (!v) return;
+    setErr(''); setBiliBusy(true); setBiliMeta(null);
+    try { setBiliMeta(await biliInfo(v)); }
+    catch (e) { setErr(t('B 站解析失败：') + String(e && e.message ? e.message : e)); }
+    setBiliBusy(false);
+  };
+  const biliPlayAll = (m, startPage) => {
+    setErr('');
+    const items = (m.pages || []).map((pg) => biliItem(m, pg));
+    if (!items.length) { setErr(t('该稿件没有可播放的分 P')); return; }
+    const targetKey = 'bili:' + m.bvid + (startPage > 1 ? '_p' + startPage : '');
+    const i = startPage ? Math.max(0, items.findIndex((x) => x.key === targetKey)) : 0;
+    qPlayList(items, startPage ? i : 0);
+  };
+  const playBili = (mi) => {
+    setErr('');
+    if (mi.bvid && biliMeta && mi.bvid === biliMeta.bvid) { biliPlayAll(biliMeta, mi.page || 1); return; }
+    biliInfo(mi.bvid).then((m) => biliPlayAll(m, mi.page || 1)).catch((e) => setErr(t('B 站取链失败：') + String(e && e.message ? e.message : e)));
+  };
   const meta = sources ? Object.entries(sources) : [];
   return html`<div class="ptab">
     <p class="phint">${t('粘贴 lx-music 自定义源脚本（规范：lxmusic.toside.cn/desktop/custom-source），或通过 URL 导入。脚本在浏览器本地执行，请求直连第三方，不经过游戏服务器。')}</p>
@@ -232,6 +272,30 @@ function CustomSourceTab({ favAdd, favHas }) {
         placeholder=${t('脚本直链 URL（raw / jsDelivr 等，需 CORS 或纯文本）')} spellcheck=${false} />
       <${Button} size="sm" disabled=${busy || !/^https?:\/\//i.test(url.trim())} onClick=${loadUrl}>${t('URL 导入')}<//>
     </div>
+    <div class="prow">
+      <input class="purl" type="text" value=${biliInput} onInput=${(e) => setBiliInput(e.target.value)}
+        placeholder=${t('B 站链接：BV号 / av号 / b23.tv / 播放页（服务器中转播放）')} spellcheck=${false} />
+      <${Button} size="sm" disabled=${biliBusy || !biliInput.trim()} onClick=${biliAddUrl}>${biliBusy ? t('解析中…') : t('B 站解析')}<//>
+    </div>
+    ${biliMeta ? html`<div class="plist">
+      <div class="pfav-row">
+        <button type="button" class=${cx('ptrack', 'ptrack--lx', (qCur() || {}).key === ('bili:' + biliMeta.bvid) && 'is-on')} onClick=${() => biliPlayAll(biliMeta, 0)}>
+          <span class="ptrack__meta">
+            <b class="ptrack__name">${biliMeta.title}</b>
+            <small class="ptrack__sub">UP: ${biliMeta.up} · ${biliMeta.bvid} · ${biliMeta.pages.length > 1 ? biliMeta.pages.length + ' 个分 P' : fmtDur(biliMeta.duration)}</small>
+          </span>
+          <span class="ptrack__play"><${Icon} name="play" /></span>
+        </button>
+        <button type="button" class=${cx('pfav', favHas('bili:' + biliMeta.bvid) && 'is-on')} title=${t('收藏')} aria-label=${t('收藏')}
+          onClick=${() => favAdd({ key: 'bili:' + biliMeta.bvid, title: biliMeta.title, artist: biliMeta.up, album: 'Bilibili', kind: 'bili', mid: biliMeta.bvid, page: 1 })}><${Icon} name=${favHas('bili:' + biliMeta.bvid) ? 'heartFill' : 'heart'} /><//>
+      </div>
+      ${biliMeta.pages.length > 1 ? biliMeta.pages.map((pg) => html`<div key=${'bili:' + biliMeta.bvid + '_p' + pg.page} class="pfav-row">
+        <button type="button" class=${cx('ptrack', 'ptrack--lx', (qCur() || {}).key === 'bili:' + biliMeta.bvid + '_p' + pg.page && 'is-on')} onClick=${() => biliPlayAll(biliMeta, pg.page)}>
+          <span class="ptrack__meta"><b class="ptrack__name">P${pg.page} ${pg.part || biliMeta.title}</b><small class="ptrack__sub">${fmtDur(pg.duration)}</small></span>
+          <span class="ptrack__play"><${Icon} name="play" /></span>
+        </button>
+      </div>`) : null}
+    </div>` : null}
     <textarea class="pcode" value=${code} onInput=${(e) => setCode(e.target.value)} spellcheck=${false}
       placeholder=${t('/**\n * @name 我的音源\n * @version 1.0.0\n */\nconst { EVENT_NAMES, request, on, send } = globalThis.lx\n…')}></textarea>
     <div class="prow">
@@ -243,17 +307,29 @@ function CustomSourceTab({ favAdd, favHas }) {
       <select value=${source} onChange=${(e) => { setSource(e.target.value); lxLive = { listeners, source: e.target.value }; }}>
         ${meta.map(([k, s]) => html`<option key=${k} value=${k}>${(s && s.name) || k}</option>`)}
       </select>
-      <span class="plabel">${t('搜索源')}<//>
-      <select value=${sk} onChange=${(e) => setSk(e.target.value)}>
-        ${LX_SEARCH_SOURCES.map((s) => html`<option key=${s.key} value=${s.key}>${t(s.name)}</option>`)}
-      </select>
-    </div>
+    </div>` : null}
     <div class="prow">
+      <span class="plabel">${t('搜索源')}<//>
+      <select class="psk" value=${sk} onChange=${(e) => setSk(e.target.value)}>
+        ${LX_SEARCH_SOURCES.map((s) => html`<option key=${s.key} value=${s.key}>${t(s.name)}</option>`)}
+        <option value="bili">Bilibili</option>
+      </select>
       <${SearchBox} value=${sq} onChange=${setSq} onEnter=${doSearch} placeholder=${t('输入歌名 / 歌手，回车搜索…')} />
-      <${Button} size="sm" variant="primary" disabled=${searching || !sq.trim()} onClick=${doSearch}>${searching ? t('搜索中…') : t('搜索')}<//>
+      <${Button} size="sm" variant="primary" disabled=${searching || !sq.trim()} onClick=${doSearch}>${searching ? t('搜索中…') : sk === 'bili' ? t('B 站搜索') : t('搜索')}<//>
     </div>
     ${results ? html`<div class="plist">
-      ${results.length ? results.map((s) => { const key = 'ext:' + (s.source || source) + ':' + s.songmid; return html`<div key=${key} class="pfav-row">
+      ${results.length ? results.map((s) => { if (s.bili) { const key = 'bili:' + s.bili.bvid; return html`<div key=${key} class="pfav-row">
+        <button type="button" class=${cx('ptrack', 'ptrack--lx', (qCur() || {}).key === key && 'is-on')} onClick=${() => playBili(s.bili)}>
+          <span class="ptrack__meta">
+            <b class="ptrack__name">${s.songName}</b>
+            <small class="ptrack__sub">UP: ${s.singerName || '-'} · ${s.bili.bvid}</small>
+          </span>
+          ${s.interval ? html`<span class="ptrack__dur">${fmtDur(s.interval)}</span>` : null}
+          <span class="ptrack__play"><${Icon} name="play" /></span>
+        </button>
+        <button type="button" class=${cx('pfav', favHas(key) && 'is-on')} title=${t('收藏')} aria-label=${t('收藏')}
+          onClick=${() => favAdd({ key, title: s.songName, artist: s.singerName, album: 'Bilibili', kind: 'bili', mid: s.bili.bvid, page: 1 })}><${Icon} name=${favHas(key) ? 'heartFill' : 'heart'} /><//>
+      </div>`; } const key = 'ext:' + (s.source || source) + ':' + s.songmid; return html`<div key=${key} class="pfav-row">
         <button type="button" class=${cx('ptrack', 'ptrack--lx', (qCur() || {}).key === key && 'is-on')} onClick=${() => playInfo(s, results)}>
           <span class="ptrack__meta">
             <b class="ptrack__name">${s.songName}</b>
@@ -266,7 +342,7 @@ function CustomSourceTab({ favAdd, favHas }) {
           onClick=${() => favAdd({ key, title: s.songName, artist: s.singerName, album: s.albumName, kind: s.source || 'ext', mid: s.songmid, source: s.source || source })}><${Icon} name=${favHas(key) ? 'heartFill' : 'heart'} /><//>
       </div>`}) : html`<p class="phint">${t('没有搜索结果。')}</p>`}
     </div>` : null}
-    <details class="plx-adv">
+    ${meta.length ? html`<details class="plx-adv">
       <summary>${t('高级：直接输入 songmid / ID 点播')}<//>
       <div class="prow">
         <input placeholder="songmid / ID" value=${songmid} onInput=${(e) => setSongmid(e.target.value)} />

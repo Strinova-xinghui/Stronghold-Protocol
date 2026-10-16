@@ -117,7 +117,10 @@ test('音乐播放器：三 tab + 内置点播锁 + 回到自动 + 塞壬代理 
       window.__ext = [];
       audio.playTrack = (t, l) => { window.__ext.push({ url: t && t.url, label: l }); };
     });
-    await c.page.click('.plist .ptrack--lx');
+    // 面板 max-height 裁切（ff539eb3）+ 本次新增 B 站行：坐标 click 会被裁掉/遮挡，先滚进行业界面再 JS click（与手工验证一致）
+    await c.page.evaluate(() => { const el = document.querySelector('.plist .ptrack--lx'); if (el) el.scrollIntoView({ block: 'center' }); });
+    await new Promise((r) => setTimeout(r, 300));
+    await c.page.evaluate(() => { document.querySelector('.plist .ptrack--lx').click(); });
     await c.page.waitForFunction(() => window.__ext.length > 0, { timeout: 8000 });
     const ext = await c.page.evaluate(() => window.__ext[0]);
     assert.equal(ext.url, 'https://example.com/e2e/123.mp3', '点行 → 脚本 musicUrl 取链（songmid 来自搜索结果）');
