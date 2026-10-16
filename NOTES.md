@@ -657,3 +657,26 @@ acc 恒 0」的白嫖路径）→ 恢复全绿。
 - 合并策略建议：外部分支以后回灌 master 时**不要整支 merge**（0ae4d636 删的东西会被带回来）；按功能挑 commit 或重放 diff。反向（master→external）rebase 安全。
 - 🗜 **GitHub 直连黑洞的军刀（2026-10-16 实测）**：本机 DNS 把 github.com 解析到 20.205.243.166（路由黑洞，curl 000），但 api.github.com 通、140.82.112.3 等官方 IP 证书有效可达。解法：本地起一个 **CONNECT 代理把 github.com 钉到 140.82.112.3**（端到端 TLS 不降级），git 走 `-c http.proxy=http://127.0.0.1:<port> -c http.version=HTTP/1.1` 推送，秒成。⚠️ 代理必须与 git **异步共存**（node `spawn`）——`spawnSync` 阻塞事件循环会让同进程的代理无法应答，表现为 git 干等到超时、退出码 null。脚本留档 `.cache/`（本轮用过），下次网络再抖直接复用。
 - 推送完成后用 `git update-ref refs/remotes/mine/...` 刷新跟踪引用（直连 fetch 不通时防误判「未推送」）。
+
+### bossBgm 上云 + 分支线性化 + B 站音源本地跑通（2026-10-16 上午）
+
+**bossBgm 已上线 strinova.me**（用户指令）：7 个运行时文件 scp（云端 config 先比对——唯一差异就是缺 bossBgm 段，
+其余 10 段与本地逐字节一致 ⇒ 无人用控制台改过，覆盖安全；覆盖前备份 custom-rules.json.bak-bosabgm）→
+matches=0 闪断 → build 7afd4cc3e3f2。线上 6 文件与 master 做 **md5 逐字节核对全 ✔**；/console 401（公网要密码，
+路由活）、console.html 含 bossBgm 面板 16 处、audio.js 含新函数 14 处、/music/siren 200 无回归。功能默认
+enabled:false ⇒ 线上行为不变，想玩在控制台开。
+
+**⚠️ 分支拓扑坑（本轮踩到并修正）**：队友把 bossBgm 提交在 player/official-only（父=bddeab05），而我的
+「双分支拓扑 NOTES」是 master 上的兄弟提交（dc95a22f，父=bddeab05）——线上跑 official-only 内容而 master 不含它，
+下次从 master 部署会**静默抹掉 bossBgm**。修法：`git branch -f master <远端实况>` 先撤销误强设 → 在 official-only
+上 `git merge dc95a22f`（只撞 NOTES.md 尾部双追加，两段都留）→ master 线性快进 6f5cab3d → 三分支推送。
+**教训：给队友分分支干活时，master 必须同步前进（或明确约定谁负责 rebase），否则「线上=某分支内容」而
+「master 落后」是定时炸弹。**
+
+**B 站音源（player/external-sources d052e100，仅本地，永不部署）**：队友实现 /music/bili/{info,search,audio}
+服务端中转（注入 Referer+访客 buvid，CDN 域名白名单，≤50MB，music.enabled 总开关），外部音源 tab 粘 BV/av/b23.tv
+或直接 B 站搜索点歌。实测 BV1GJ411x7h7 端到端 200/video·mp4/51.9MB/21.2s + e2e 断言 currentTime 前进（真出声）。
+Lead 独立复跑 bili 7/7、音乐全套 34/34（--test-concurrency=1）、远程 sha 一致、ext 工作区干净、24599 已停、
+云端 build 未变（全程未碰）。玩法：`cd E:\sp-ext-bili && PORT=24599 HOST=127.0.0.1 node server/index.js` →
+浏览器 127.0.0.1:24599 → 点歌台 → 外部音源。限制：免登录 128k/192k、无歌词、audio 无 Range（实测 mp4 moov
+前置可播）。调研结论「云端不可行」依然成立——**本地家宽中转是它唯一的合法形态**，该分支因此永不部署。
