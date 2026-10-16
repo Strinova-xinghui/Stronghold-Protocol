@@ -1556,7 +1556,7 @@ function MatchScreen() {
         ${spectator ? null : html`<${EmoteWheel} open=${emoteOpen} onToggle=${setEmoteOpen} onSend=${(id) => actions.emote(id)} disabled=${conn.status !== 'online'} />`}
         <button type="button" class="gm__gear" aria-label=${t('设置')} title=${t('设置')} onClick=${() => setSettingsOpen(true)}><${GIcon} name="gear" /></button>
         <button type="button" class="gm__gear gm__guide" aria-label=${t('玩法说明')} title=${t('玩法说明')} onClick=${() => openGuide(0)}><${Icon} name="book" /></button>
-        <button type="button" class="gm__gear gm__music" aria-label=${t('音乐播放器')} title=${t('音乐播放器')} onClick=${openPlayer}><${Icon} name="signal" /><
+        <button type="button" class="gm__gear gm__music" aria-label=${t('音乐播放器')} title=${t('音乐播放器')} onClick=${openPlayer}><${Icon} name="signal" /></button>
         <button type="button" class="gm__gear gm__battle-music" aria-label=${t('战斗音乐替换')} title=${t('战斗音乐替换')} onClick=${openBattleMusic}><${Icon} name="sword" /></button>
         <${FullscreenButton} class="gm__gear gm__fs" />
       </div>

@@ -868,3 +868,36 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 **已知限制（待办）**：个人池的候选只列**自定义上传曲**（`public/cbgm/`）；内置素材曲（`m_bat_*`）目前只能配在
 控制台的全局规则里。若要把内置曲也纳入个人池，需要让面板拉 `/data/assets.json` 枚举 loop stem 并走
 `stem:` key（客户端 resolveBgm 已支持该分支，只差 UI 候选）。
+
+### 🔥 事故与修复：局内屏 `insertBefore` 白屏（2026-10-16 晚，用户「进游戏就报错」）
+
+**现象**：进游戏（局内屏）立刻弹「界面发生错误 / SYSTEM FAULT：
+`Failed to execute 'insertBefore' on 'Node': parameter 1 is not of type 'Node'`」——整屏不可用。
+标题/大厅/房间三屏正常。
+
+**根因**（我自己的操作失误，值得记住）：给局内屏角落加「战斗音乐」按钮时，`old_string` 是**从被 read 截断的输出里
+复制的**（read 每行截断到 ~150 字符），于是锚点只到 `…<Icon name="signal" /><`，替换后变成：
+
+```jsx
+<button class="gm__gear gm__music" …><${Icon} name="signal" /><        ← 缺 </button>
+<button class="gm__gear gm__battle-music" …><${Icon} name="sword" /></button>  ← 这个闭合"替"上面闭合了
+```
+
+第一个 button 未闭合 ⇒ DOM 结构错乱 ⇒ Preact 渲染该屏时 insertBefore 抛错。**只有真渲染这一屏才炸**——
+单元测试、i18n 检查、符号审计、「按钮文本存在」的断言全部漏过（标题屏的按钮是对的，所以我的 e2e 按钮检查也漏了）。
+
+**修复**：`public/js/screens/game.js` 补回 `</button>`（两行各自闭合）。已 scp 上线（纯客户端 no-cache，无需重启）。
+
+**回归锁**：新增 `test/ui/battle-music.e2e.test.js`（opt-in：`SP_E2E=1 CHROME_PATH=<edge|chrome>`），
+用仓库自带 dev harness `/dev/game-mock.html`（驱动真实 `js/screens/game.js`）做**真渲染**断言：
+① 局内屏零 pageerror + 角落有战斗音乐按钮（本次事故的锁）；② 标题屏两入口在 + 零错误；
+③ 独立面板 0/3 行（空态或有曲）+ 点歌台仍 3 tab。**已用坏版本反向验证**：注入 HEAD 版的 game.js ⇒ 第①条精确失败、
+另两条照常通过（与事故特征一致）；恢复后 3/3 通过。
+
+**教训**：
+1. **`old_string` 绝不要从被截断的 read 输出里复制**——先按 key 读完**完整行**（或让 read 用足够 limit），
+   或改用「行号 + 唯一短锚点」的写法；替换后**回读确认**（这次我回读了 game.js 1559 行，但只看到新按钮那行，没注意上一行少了闭合）。
+2. **改 htm/JSX 结构后必须真渲染那一屏**：本仓库的正确姿势是 `/dev/game-mock.html`（局内）、`/`（标题），
+   或起服 + puppeteer。纯文本「标签配对」检查不可靠（htm 多行标签、属性里的 `=>` 会误伤，实测 player.js 就误报）。
+3. 线上验证 dev harness 不在部署包里（`public/dev` 未打包）——需要线上真渲染时，可临时 scp 上去跑一次再删
+   （本次就是这么确认修复的：线上 `/dev/game-mock.html` 渲染 6 个角落按钮、**0 pageerror**，随后删除，线上回到 404）。
