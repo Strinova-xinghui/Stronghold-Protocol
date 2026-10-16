@@ -646,3 +646,14 @@ acc 恒 0」的白嫖路径）→ 恢复全绿。
   ⇒ 历史遗留，与本次无关；roster/bonds/fields/matches/standins 全 match ⇒ 官方基线路径零 delta。
 - config/custom-rules.json 跑完 verify 与备份逐字节一致（示例规则保留、enabled 仍 false = 官方行为）。
 
+### 播放器双分支拓扑（2026-10-16 凌晨，用户：「官方源版本单独分支，另开分支做外部源」）
+
+| 分支 | HEAD | 内容 |
+| --- | --- | --- |
+| `master` = `player/official-only` | bddeab05 | **仅官方源**（内置 BGM + 塞壬 OST + 队列/控制条/歌词/收藏），无 lx 沙箱、无 /music/proxy。云端 strinova.me 部署的就是它 |
+| `player/external-sources` | bb982255 | 从 ff539eb3（最后一个含完整外部源的全功能播放器）切出 + favStore 水合修复 + 收藏持久化 e2e 锁（四 tab，收藏=els[3]）。**外部源后续开发在此**：lx 沙箱/URL 导入/wy·kg 搜索点歌/proxy 平台头注入全都在 |
+
+- 两分支的 favLoad 修复**等价但不同形**：官方分支顺序 FAV_KEY→favLoad→favStore（cbcf4cd8）；外部分支原顺序 favStore 在前，移植时把 favLoad/FAV_KEY 上移再改初值（bb982255）——直接照搬 patch 会撞 TDZ（favLoad 读未初始化 const）。
+- 合并策略建议：外部分支以后回灌 master 时**不要整支 merge**（0ae4d636 删的东西会被带回来）；按功能挑 commit 或重放 diff。反向（master→external）rebase 安全。
+- 🗜 **GitHub 直连黑洞的军刀（2026-10-16 实测）**：本机 DNS 把 github.com 解析到 20.205.243.166（路由黑洞，curl 000），但 api.github.com 通、140.82.112.3 等官方 IP 证书有效可达。解法：本地起一个 **CONNECT 代理把 github.com 钉到 140.82.112.3**（端到端 TLS 不降级），git 走 `-c http.proxy=http://127.0.0.1:<port> -c http.version=HTTP/1.1` 推送，秒成。⚠️ 代理必须与 git **异步共存**（node `spawn`）——`spawnSync` 阻塞事件循环会让同进程的代理无法应答，表现为 git 干等到超时、退出码 null。脚本留档 `.cache/`（本轮用过），下次网络再抖直接复用。
+- 推送完成后用 `git update-ref refs/remotes/mine/...` 刷新跟踪引用（直连 fetch 不通时防误判「未推送」）。
