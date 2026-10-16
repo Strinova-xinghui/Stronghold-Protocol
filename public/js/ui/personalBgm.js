@@ -136,6 +136,7 @@ export function PersonalBgmTab() {
   const cur = Array.isArray(map[openKey]) ? map[openKey] : [];
   return html`<div class="ptab">
     <p class="phint">${t('个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（这种轮次每次从中随机一首）。全不勾 = 用全局/官方日程。')}</p>
+    <p class="phint">${t('这里只管「默认战斗音乐」；你自己点歌播放时一切以点歌为准，不会被这里的设置覆盖。')}</p>
     ${err ? html`<p class="perr">${err}</p>` : null}
     <div class="pbgm-list">
       ${rows.map((row) => {

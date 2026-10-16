@@ -8,6 +8,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { listCustomBgm, saveCustomBgm, removeCustomBgm, customBgmCapacity, CUSTOM_BGM_DIR, MAX_BGM_BYTES } from '../server/match/customBgm.js';
+import { CUSTOM_RULES_PATH, resetCustomRules } from '../server/match/customRules.js';
 
 /** 一个隔离的假 public 目录（不动真实仓库的 public/）。 */
 let ROOT = '';
@@ -325,5 +326,94 @@ describe('个人 BGM 随机池（客户端，2026-10-16）', () => {
     assert.equal(personalBgmKey('boss', 18, 'match1'), 'cbgm:daoguanmeng', '旧版回合号键仍生效');
     m.writePersonalBgm({});
     assert.equal(personalBgmKey('boss', 18, 'match1'), null, '清空 ⇒ 回落');
+  });
+});
+
+describe('点歌台优先于自动替换（含 bossBgm）—— 2026-10-16 用户约束', () => {
+  // 真实链路：替换曲由**服务器**选好、经 m.public.bgmTrack 下发；客户端只负责「自动模式下采纳它」。
+  // 本组断言的核心不变量：**玩家点歌（manualBgm）优先**，自动替换不得覆盖手动播放。
+  test('手动点歌期间：轮次变化不覆盖（bossBgm 只作用于「默认/自动」战斗音乐）', async () => {
+    const { installAudio, audio } = await import('../public/js/audio.js');
+    const calls = [];
+    const origPlay = audio.playBgm;
+    audio.playBgm = (k) => { calls.push(k); };
+    const origManual = audio.manualBgm;
+    try {
+      const pub = (o) => ({ phase: 'COMBAT', round: 5, bgmTrack: 'x:yuai', ...o }); // 服务器下发的替换曲
+      const state = { route: 'game', match: { public: pub({}) } };
+      let fire = null;
+      installAudio({
+        getManifest: () => ({ audio: {} }), getState: () => state, selectRoute: (s) => s.route,
+        subscribe: (fn) => { fire = fn; return () => {}; },
+      });
+      // ① 自动模式：采纳服务器下发的替换曲（cbgm:<stem>）
+      assert.equal(calls.at(-1), 'cbgm:yuai', '自动模式采纳替换曲');
+      // ② 玩家点歌 → 进入 BOSS 轮（服务器给 x:xinsiyanhuo），自动选曲必须让位
+      audio.manualBgm = { url: '/media/cbgm/yuai', label: 'manual:test' };
+      const before = calls.length;
+      state.match.public = pub({ phase: 'FINAL_ASSAULT', round: 18, bgmTrack: 'x:xinsiyanhuo' });
+      fire(state, {});
+      assert.equal(calls.length, before, '手动播放期间不得调用 playBgm（点歌优先，替换让位）');
+      // ③ 同轮次内反复触发也不覆盖
+      fire(state, {});
+      assert.equal(calls.length, before, '反复触发仍不覆盖');
+      // ④ 玩家点「回到自动」→ 自动链重新接管，且按**当前**轮次取曲
+      audio.clearManualBgm();
+      fire(state, {});
+      assert.ok(calls.length > before, '解除手动锁后自动选曲恢复');
+      assert.equal(calls.at(-1), 'cbgm:xinsiyanhuo', '恢复后按当前轮次（BOSS 轮下发的那首）');
+      // ⑤ 再次上锁依然不覆盖
+      audio.manualBgm = { url: '/media/cbgm/yuai', label: 'manual:test2' };
+      const before2 = calls.length;
+      fire(state, {});
+      assert.equal(calls.length, before2, '再次上锁后依然不覆盖');
+      // ⑥ 未点歌时替换照常（确认不是「被点歌永久禁用」）
+      audio.clearManualBgm();
+      state.match.public = pub({ phase: 'COMBAT', round: 6, bgmTrack: 'x:aizo' });
+      fire(state, {});
+      assert.equal(calls.at(-1), 'cbgm:aizo', '未点歌时替换生效');
+    } finally {
+      audio.playBgm = origPlay;
+      audio.manualBgm = origManual;
+    }
+  });
+
+  test('个人替换（localStorage）同样让位于手动点歌', async () => {
+    const { installAudio, audio } = await import('../public/js/audio.js');
+    const pmod = await import('../public/js/ui/personalBgm.js');
+    const store = new Map();
+    const origLS = globalThis.localStorage;
+    globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+    const calls = [];
+    const origPlay = audio.playBgm;
+    audio.playBgm = (k) => { calls.push(k); };
+    const origManual = audio.manualBgm;
+    try {
+      pmod.writePersonalBgm({ combat: ['daoguanmeng'] });   // 个人池（本机）
+      const pub = (o) => ({ phase: 'COMBAT', round: 4, bgmTrack: 'x:yuai', ...o }); // 服务器全局规则
+      const state = { route: 'game', match: { public: pub({}) } };
+      let fire = null;
+      installAudio({
+        getManifest: () => ({ audio: {} }), getState: () => state, selectRoute: (s) => s.route,
+        subscribe: (fn) => { fire = fn; return () => {}; },
+      });
+      // 个人替换优先于全局（未点歌时）
+      assert.equal(calls.at(-1), 'cbgm:daoguanmeng', '个人替换优先于全局');
+      // 点歌后一律让位
+      audio.manualBgm = { url: '/media/cbgm/daoguanmeng', label: 'manual:mine' };
+      const before = calls.length;
+      state.match.public = pub({ phase: 'FINAL_ASSAULT', round: 19, bgmTrack: 'x:xinsiyanhuo' });
+      fire(state, {});
+      assert.equal(calls.length, before, '点歌期间个人替换也不覆盖');
+      // 回到自动 → 恢复个人替换（BOSS 轮未配个人池 ⇒ 回落服务器下发）
+      audio.clearManualBgm();
+      fire(state, {});
+      assert.equal(calls.at(-1), 'cbgm:xinsiyanhuo', '回到自动后 BOSS 轮用服务器下发（个人只配了常规轮）');
+      pmod.writePersonalBgm({});
+    } finally {
+      audio.playBgm = origPlay;
+      audio.manualBgm = origManual;
+      if (origLS === undefined) delete globalThis.localStorage; else globalThis.localStorage = origLS;
+    }
   });
 });

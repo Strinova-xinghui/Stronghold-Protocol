@@ -1639,6 +1639,11 @@ export function installAudio(deps) {
           }
           // 自研播放器（music player）：手动播放期间锁住自动切换（玩家点了「回到自动」才解锁，ui/player.js）。
           // 自动 BGM 仍按阶段更新（install 订阅继续跑），只是不覆盖手动选择的那首。
+          //
+          // ⚠️ 优先级契约（2026-10-16 用户明确要求，不要破坏）：**点歌台 > 个人替换 > 全局替换(bossBgm) > 官方日程**。
+          // 本函数（含下面的 bossBgm/个人池选曲）只管「默认战斗音乐」——玩家一点歌（manualBgm 上锁）就整体让位，
+          // 无论轮次怎么变都不许覆盖。这条 return 必须留在所有自动选曲之前；回归锁见
+          // tools/custom-bgm.test.mjs「点歌台优先于自动替换（含 bossBgm）」。
           if (audio.manualBgm) return;
           // 开战 BGM: the round's own track out of bgm.combatAlts (骑士之日 / 无畏者 are fixed per round, not drawn),
           // so every client of a room hears the same one, a mid-fight re-render (or a teammate view) never switches,

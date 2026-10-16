@@ -1338,5 +1338,6 @@
   "个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（本回合作战期从中随机一首）。全不勾 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Pick several tracks to make a random pool (one is drawn for that combat phase). Pick none to use the global/official schedule.",
   "常规战斗轮": "Regular combat rounds",
   "BOSS 轮（最终攻势 / 隐秘核心）": "BOSS rounds (Final Assault / Hidden Core)",
-  "个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（这种轮次每次从中随机一首）。全不勾 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Pick several tracks to make a random pool (one is drawn for each such round). Pick none to use the global/official schedule."
+  "个人替换：只影响你这台设备，优先于控制台的全局替换。勾选多首 = 随机池（这种轮次每次从中随机一首）。全不勾 = 用全局/官方日程。": "Personal override: affects only this device and wins over the console-wide override. Pick several tracks to make a random pool (one is drawn for each such round). Pick none to use the global/official schedule.",
+  "这里只管「默认战斗音乐」；你自己点歌播放时一切以点歌为准，不会被这里的设置覆盖。": "This only affects the default battle music. When you play a song yourself (the jukebox), that always wins — these settings never override it."
 }
