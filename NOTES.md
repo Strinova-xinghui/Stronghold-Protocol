@@ -1047,6 +1047,7 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 - 命令：`nohup nice -n 10 node --max-old-space-size=384 tools/fetch-assets.mjs --add-only --concurrency=4 > /tmp/fetch030.log 2>&1 &`
 - `--add-only` 语义（`tools/fetch-assets.mjs` 头注释）：只下缺失文件，**从不重下/重写/删除已有文件**，atlas 与 fonts 都不动——正是「复用旧素材目录」场景的正解。
 - 实测 ~0.6 MB/s、`err=0`；`skip` 是已存在而跳过。**没下完也不影响开服**（缺的那句配音回落中文）。
+- ✅ **2026-10-17 已完成**：326 秒下完，`public/assets` 761M → **947M**；复查 `data/assets.json` 引用的 **18608 项 missing 0**（干员 3258 / 敌人 1005 / 语音 12713 / UI 639 全齐）。重启后日志 `[assets] content hashes: 17932 files, 5779 hashed, 12153 unchanged`，素材索引已重建。
 - ⚠️ 不要用 `--refresh-index`：那会重拉三个官方索引表并按全量 15686 文件重规划，1 GiB 内存下更慢更险。
 
 #### 回滚
