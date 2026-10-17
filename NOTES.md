@@ -985,10 +985,9 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 
 ### 遗留 / 注意
 
-- **`E:\sp-merge-030` worktree 保留**供比对（`node_modules` / `public/vendor` / `public/assets` 三个 junction 指向主仓）。验收后清理：
-  `git worktree remove --force E:/sp-merge-030` **之后**用 `cmd /c rmdir /s /q E:\sp-merge-030`（junction 不能跟删，见 AGENTS.md「删除副本的致命细节」）。
-- **`public/assets` 未随合并更新**：上游 0.3.0 新增英/韩/本土配音与官方特效素材，需要 `node tools/fetch-assets.mjs --refresh-index` 增量补齐（本机 0.2.6 素材已在，但 0.3.0 新清单的差集未拉）。**未拉也不影响开服**（缺的走占位/回落），但「官方特效」设置项会是空的。
-- **云服上线**：`git pull && sudo systemctl restart stronghold`，先 `curl healthz` 确认 `matches == 0`。注意云服素材同样需要 `--refresh-index` 才有官方特效。
+- ✅ **`E:\sp-merge-030` worktree 已清理**（2026-10-17）：`git worktree remove --force` 后用 `cmd /c rmdir /s /q` 清 junction 残留，主仓 `public/assets` 12157 / `public/vendor` 9 / `node_modules` 122 复查完好。
+- ✅ **云服已上线 0.3.0（2026-10-17）**：详见下节「云服 0.3.0 部署记录」。
+- **素材差集**：云服沿用 0.2.6 的 `public/assets`（761M），0.3.0 清单 16705 项里缺 5749（英 2548 / 韩 2548 / 本土 616 配音 + 37 统计页素材）。已用 `node tools/fetch-assets.mjs --add-only --concurrency=4`（`--max-old-space-size=384`，避开 1 GiB 内存）增量补齐。**缺配音不影响开服**（缺的那句回落中文）。
 
 ### 插件/studio 套件在本机的失败甄别（2026-10-17）
 
@@ -1004,3 +1003,60 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 | `pr-labeler` | 我们历来不跟踪 `.github/workflows/`（0.2.5 起） | 既有欠账 |
 
 **结论**：插件/studio 套件里唯一由合并引入的红是 `loopCaps`，已修。其余要跑绿需：Windows 开发者模式（符号链接）+ Python 3.12+（`python3` 指向 3.12 及以上）。
+
+### 云服 0.3.0 部署记录（2026-10-17）
+
+> 云服 `strinova.me` 已从 app **0.2.6 → 0.3.0**。本节记录真实部署形态与流程，下次升级照做。
+
+#### 关键事实：云服是「解压包部署」，不是 git 仓库
+
+- systemd 单元 `/etc/systemd/system/stronghold.service` 的 `WorkingDirectory` 曾指向 **`/home/azureuser/sp-025`**（0.2.6 解压包），**`~/sp` 与 `~/sp-025` 都没有 `.git`**。所以 AGENTS.md 里那句「`cd ~/sp && git pull`」在云服上**不成立**（`~/sp` 是更早的 0.2.5 残留目录，无 git）。
+- 本次改为**新目录 + 保留旧版**：`~/sp-030`（`git clone --depth 1` 自 `mine`），旧 `~/sp-025` 原样留着随时回滚。
+
+#### 部署步骤（已验证）
+
+1. **闸门**：`curl.exe -s https://strinova.me/healthz` 确认 `matches/sockets/sessions/humans` 全 0（闪断授权）。
+2. **克隆**：`cd ~ && git clone --depth 1 https://github.com/Strinova-xinghui/Stronghold-Protocol.git sp-030`
+3. **复用重资产**（省掉 761 MB 素材重下）：
+   ```bash
+   cp -al ~/sp-025/node_modules ./node_modules      # 硬链接，秒级
+   cp -al ~/sp-025/public/assets ./public/assets    # 761 MB 硬链接
+   cp -a  ~/sp-025/public/vendor ./public/vendor
+   cp -a  ~/sp-025/config/custom-rules.json ./config/   # 自研热改配置必须带过来
+   cp -a  ~/sp-025/.cache ./                            # asset-hashes 等
+   ```
+   ⚠️ `custom-rules.json` **必须从旧目录复制**：它是运行时热改文件（含 `SP_CONSOLE_PASSWORD` 之外的全部自研参数），git 里的是模板值。
+4. **补新依赖**：`npm install --no-audit --no-fund`（0.3.0 新增 `ses@2.3.0` + `acorn@8.18.0`；`postinstall` 重建 vendor 到 9 文件，含 `ses.umd.js` / `acorn.mjs`）。云服 1 GiB 内存下只装增量，3 秒完成、未 OOM。
+5. **隔离冒烟**（不动线上）：`SP_MAX_SEATS=6 PORT=24599 HOST=127.0.0.1 timeout 25 node server/index.js` → `curl 127.0.0.1:24599/healthz` 得 `app 0.3.0` / `maxSeats 6` / `content.vanilla a3126235cb43`。
+6. **切换**：`sudo sed -i 's#sp-025#sp-030#' /etc/systemd/system/stronghold.service && sudo systemctl daemon-reload && sudo systemctl restart stronghold`
+7. **复验**：`curl https://strinova.me/healthz` → `app 0.3.0`、`build 48653032c6a1`；明文口 `http://20.89.110.22:24500` 同样 0.3.0；`systemctl show stronghold -p NRestarts` = 0。
+8. **真实 WS 全链路**（`test/helpers/wsClient.js` 的 `TestClient` 连 `wss://strinova.me/ws`）：welcome（`content.vanilla` 正确、`diyKitted` 90）→ `room.create` → `room.state`（`maxSeats 6`、6 槽）→ `room.setPlugins`（上游 0.3.0 新协议）→ `room.addBot` → `room.skins`（自研皮肤）全部 `ok`。
+
+#### 线上路由现状（符合预期，不是故障）
+
+| 路由 | 状态 | 说明 |
+| --- | --- | --- |
+| `/` | 200 | 标题页正常 |
+| `/console` | **401** | 自研规则控制台，云服设了 `SP_CONSOLE_PASSWORD`（systemd 环境变量），需密码 |
+| `/monitor` | 200 | 自研监看面板 |
+| `/studio/` | **404** | **上游有意设计**：插件工作台只对本机/局域网开放（`server/studio/gate.js`），公网一律回 404；Caddy 反代后来源是公网 IP，故 404。要用工作台需在 VM 上 `ssh -L 24500:127.0.0.1:24500` 隧道后访问 `http://localhost:24500/studio/#key=…`（key 见 `~/sp-030/plugins/.studio-key` 或启动横幅） |
+
+#### 素材补齐（`--add-only`）
+
+- 0.3.0 清单 16705 项，云服旧素材缺 **5749**：`voice/en` 2548、`voice/kr` 2548、`voice/native` 616、`ui/statistics` 37。
+- 命令：`nohup nice -n 10 node --max-old-space-size=384 tools/fetch-assets.mjs --add-only --concurrency=4 > /tmp/fetch030.log 2>&1 &`
+- `--add-only` 语义（`tools/fetch-assets.mjs` 头注释）：只下缺失文件，**从不重下/重写/删除已有文件**，atlas 与 fonts 都不动——正是「复用旧素材目录」场景的正解。
+- 实测 ~0.6 MB/s、`err=0`；`skip` 是已存在而跳过。**没下完也不影响开服**（缺的那句配音回落中文）。
+- ⚠️ 不要用 `--refresh-index`：那会重拉三个官方索引表并按全量 15686 文件重规划，1 GiB 内存下更慢更险。
+
+#### 回滚
+
+```bash
+sudo sed -i 's#sp-030#sp-025#' /etc/systemd/system/stronghold.service
+sudo systemctl daemon-reload && sudo systemctl restart stronghold
+```
+`~/sp-025` 全程未改动，可立即退回 0.2.6。
+
+#### 下次升级（0.3.x → 0.4.x）照做
+
+新目录 `~/sp-0XX` 克隆 → `cp -al` 复用 `node_modules`/`public/assets`/`public/vendor` → **必带 `config/custom-rules.json`** → `npm install` 补新依赖 → 24599 隔离冒烟 → sed 切 `WorkingDirectory` → `daemon-reload` + `restart` → healthz/WS 复验 → `--add-only` 补素材差集。
