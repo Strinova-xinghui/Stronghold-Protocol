@@ -88,6 +88,7 @@ export class MatchSettle {
       // 负债清算（自研 2026-10-07）：lp ≤ 0 进入负债继续作战；全队血量总和 < 0 时，从负债最深者开始逐个
       // 淘汰（每淘汰一人移除其负数 LP，总和回升），直到总和 ≥ 0——「队友兜不住你了才死，死后队友压力减轻」。
       let guard = alive.length + 1;
+      // loop-cap: guard = alive.length + 1（每轮淘汰一人并清零其负数 LP，总和必然收敛；守卫只防「淘汰后仍未被移除」的意外）
       while (this.alivePlayers().reduce((s, p) => s + p.lp, 0) < 0 && guard-- > 0) {
         const debtors = this.alivePlayers().filter((p) => p.lp < 0).sort((a, b) => a.lp - b.lp);
         const ps = debtors[0];
