@@ -989,3 +989,18 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
   `git worktree remove --force E:/sp-merge-030` **之后**用 `cmd /c rmdir /s /q E:\sp-merge-030`（junction 不能跟删，见 AGENTS.md「删除副本的致命细节」）。
 - **`public/assets` 未随合并更新**：上游 0.3.0 新增英/韩/本土配音与官方特效素材，需要 `node tools/fetch-assets.mjs --refresh-index` 增量补齐（本机 0.2.6 素材已在，但 0.3.0 新清单的差集未拉）。**未拉也不影响开服**（缺的走占位/回落），但「官方特效」设置项会是空的。
 - **云服上线**：`git pull && sudo systemctl restart stronghold`，先 `curl healthz` 确认 `matches == 0`。注意云服素材同样需要 `--refresh-index` 才有官方特效。
+
+### 插件/studio 套件在本机的失败甄别（2026-10-17）
+
+上游 0.3.0 新增的 `test/plugins/*`（32 文件）与 `test/studio/*`（9 文件）在本机 Windows 上有若干红，**逐条甄别后全部为平台/环境限制，非合并引入**：
+
+| 失败族 | 根因 | 证据 |
+| --- | --- | --- |
+| `install.test.js`「a symlink id is not followed」、`studio.test.js` 的 `lnk-*` 夹具、`remove`/`files`/`links` 族 | **Windows 创建符号链接需要管理员权限或开发者模式** | `Error: EPERM: operation not permitted, symlink ...` |
+| `forgeImport.test.js` 大部分 | 同上（导入器写盘路径含 link 检查） | 报告 `PLUGIN_FORGE_ZIP：the import could not be written (EPERM)` |
+| `board3d-extract` / `board3d-scene`（8 条） | 上游新增 `tools/local-extract/fx.py` 用了 **PEP 701 f-string 嵌套引号**，需 Python **3.12+**；本机 `python3` 是 3.11.9（`python` 是 3.14） | `SyntaxError: f-string: unmatched '['`；把 `python3` 指向 3.14 后 **34/34 全绿** |
+| `loopCaps`「every while names its loop cap」 | **真合并回归**（已修）：自研 `settle.js` 负债清算 while 缺 `loop-cap:` 注释 | 补注释后 14/14 绿 |
+| `plugin-package` Docker 断言 | **环境**：`core.autocrlf=true` 让无扩展名的 `.dockerignore`/`Dockerfile` 检出成 CRLF | 已在 `.gitattributes` 钉 `eol=lf` 后转绿 |
+| `pr-labeler` | 我们历来不跟踪 `.github/workflows/`（0.2.5 起） | 既有欠账 |
+
+**结论**：插件/studio 套件里唯一由合并引入的红是 `loopCaps`，已修。其余要跑绿需：Windows 开发者模式（符号链接）+ Python 3.12+（`python3` 指向 3.12 及以上）。
