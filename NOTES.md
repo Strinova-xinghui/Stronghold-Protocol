@@ -1061,3 +1061,37 @@ sudo systemctl daemon-reload && sudo systemctl restart stronghold
 #### 下次升级（0.3.x → 0.4.x）照做
 
 新目录 `~/sp-0XX` 克隆 → `cp -al` 复用 `node_modules`/`public/assets`/`public/vendor` → **必带 `config/custom-rules.json`** → `npm install` 补新依赖 → 24599 隔离冒烟 → sed 切 `WorkingDirectory` → `daemon-reload` + `restart` → healthz/WS 复验 → `--add-only` 补素材差集。
+
+### 两条验证/素材经验（2026-10-17，本次实测新增）
+
+**1. 本机拉素材必须走镜像源**：`web.hg-cdn.com` / `ak.hg-cdn.com` 在本机**直连不通**（curl 返回 000，`err` 一路涨而 `ok` 不涨），但 `https://gh-proxy.com` 可达。云服反过来——云服直连 `direct` 正常（0.6 MB/s）。所以：
+
+```bash
+# 云服（Azure 东京，直连官方 CDN 正常）
+node tools/fetch-assets.mjs --add-only --concurrency=4
+# 本机 Windows（官方 CDN 不通，走 gh-proxy 镜像）
+SP_ASSET_SOURCE=mirror node tools/fetch-assets.mjs --add-only --concurrency=8
+```
+判据：日志里 `err` 持续增长而 `ok` 不涨 ⇒ 源不通，换 `SP_ASSET_SOURCE=mirror`。
+
+**2. 本机跑浏览器 e2e 必须用 `puppeteer.connect`，不能 `puppeteer.launch`**：本机没装 Chrome，只有 Edge（`C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`）。`puppeteer.launch()`（内部 `spawn` + 管道 stdio）在本会话环境里**必然失败**——`Failed to launch the browser process: Code: 0`，stderr 全空。绕法：
+
+```powershell
+# 先分离启动 Edge（Start-Process 不经管道，能活）
+Start-Process msedge.exe -ArgumentList '--headless=new','--disable-gpu','--no-sandbox',
+  "--user-data-dir=E:\卫戍协议\.cache\edge-profile",'--remote-debugging-port=9333','about:blank'
+```
+```js
+// 再连上去（puppeteer.connect 不 spawn）
+const browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:9333', defaultViewport: null });
+```
+`page.goto` 用 `domcontentloaded` 而非 `networkidle2`（局内屏按需拉几百个素材，networkidle2 会 60s 超时），随后手动 `sleep`。收尾记得 `Stop-Process msedge`。
+
+**本次 e2e 实测结果（0.3.0 合并后，零 pageerror）**：
+
+| 页面 | 关键指标 |
+| --- | --- |
+| `/`（标题屏） | `title` 正确、`appHtml` 16917 字节、双语文案与语言切换俱全、**0 error** |
+| `/dev/game-mock.html`（局内屏） | `cornerButtons 6` · `music true` · `battleMusic true` · `canvas 1` · `sysFault false`、**0 error** |
+
+即：Preact/htm 界面、渲染器 canvas、点歌台、战斗音乐按钮在合并后全部真渲染成功，**`insertBefore` 白屏回归锁仍然成立**。
