@@ -216,18 +216,17 @@ describe('applyGrants：发钱（2026-10-09 追加）', () => {
 });
 
 describe('applyGrants：边界', () => {
-  test('整备区（手牌10+暂存5）满 → 发放失败且不静默', () => {
+  test('整备区不再因暂存排队而「满」：16 件全发成功、超出手牌的部分进暂存队列', () => {
+    // 上游 0.3.0（PR #630）起暂存区是「可展开队列 + 自动补位」，不再有 5 格硬上限 ⇒ 旧断言「第 16 件失败」
+    // 已不成立。这里改断言新语义：16 件全部拿到，手牌填满，其余排在暂存队列里（可见 5 格 + 隐藏队列）。
     const { h, m, ps } = setup();
     const ids = normalChessIds(16);
     assert.ok(ids.length >= 16, `数据里普通干员不足 16 个`);
-    // 前 15 个不同干员填满手牌 + 暂存（不同 id 不触发合成）
-    const res15 = applyGrants(m, ps, ids.slice(0, 15).map((id) => ({ kind: 'chess', id })));
-    assert.ok(res15.every((r) => r.ok), '填满 15 格失败');
-    assert.equal(ownedIds(ps).length, 15);
-    const res = applyGrants(m, ps, [{ kind: 'chess', id: ids[15] }]);
-    assert.equal(res[0].ok, false);
-    assert.match(res[0].error, /整备区已满/);
-    assert.equal(ownedIds(ps).length, 15, '失败发放不应改变所有权');
+    const res = applyGrants(m, ps, ids.map((id) => ({ kind: 'chess', id })));
+    assert.ok(res.every((r) => r.ok), '16 件应全部发放成功');
+    assert.equal(ownedIds(ps).length, 16, '所有权共 16 件');
+    assert.equal(ps.hand.filter(Boolean).length, ps.hand.length, '手牌已满');
+    assert.equal(ps.temp.filter(Boolean).length, 16 - ps.hand.length, '其余在暂存队列');
     h.invariants();
   });
 

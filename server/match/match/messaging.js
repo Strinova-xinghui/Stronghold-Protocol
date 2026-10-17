@@ -125,9 +125,12 @@ export class MatchMessaging {
     const json = JSON.stringify(rest);
     if (!force && json === this._lastPubJson) return;
     this._lastPubJson = json;
-    this._lastPubAt = now;
+    // Snapshot building / serialization can take time; throttle from the actual broadcast, not its start.
+    this._lastPubAt = this.sched.now();
     this.broadcast(view);
     // monitor 影子监看者（自研）: 也要收到 m.public（否则客户端不知道阶段/回合/玩家列表）
-    for (const watcherId of this._monitorIds()) this.sendTo(watcherId, view);
+    // `_monitorIds` 由 match/custom.js 提供；上游 0.3.0 的单元测试会拿一个裸对象冒充 this（只带
+    // publicView/broadcast/sched），所以这里必须容忍它不存在（没有 monitor ⇒ 没有影子监看者）。
+    if (typeof this._monitorIds === 'function') for (const watcherId of this._monitorIds()) this.sendTo(watcherId, view);
   }
 }

@@ -9,6 +9,7 @@
 ## 目录
 
 - [自研规则总览（热更配置）](#自研规则总览热更配置)
+- [上游 0.3.0 同步（2026-10-17）](#上游-030-同步2026-10-17)
 - [WSL Ubuntu 开发环境迁移（2026-10-17）](#wsl-ubuntu-开发环境迁移2026-10-17)
 - 各功能详见下文（monitor 监看 / 影子观战 / 定向甄选 / 皮肤 / 配音 / 等待 / 负债 / 抽奖 / 回合编排 / 对局节奏 / 控制台 / 6 人联机 / 一键开服 …）
 
@@ -943,3 +944,48 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 - [ ] golden diy 6 场景 digest 再生（`npm run golden:update` 前先看 diff 是否只是时基/数值演进）。
 - [ ] 云服缺的 1197 个素材可从 WSL `~/sp/public/assets` scp 增量补（比 Windows scp 快）。
 - [ ] WSL 副本的 `mine` remote 推送凭证（GitHub token）未配——WSL 里 push 前先配 `gh auth login` 或 credential helper。
+
+## 上游 0.3.0 同步（2026-10-17，agent 自动执行）
+
+> 命令式任务：「对齐上游 0.3.0 的 release」。本节给下一次同步/排查用。
+> 上游 release：<https://github.com/sganggs/Stronghold-Protocol/releases/tag/v0.3.0>（tag `v0.3.0` = `c24e17ee`，2026-10-15 发布）。
+
+### 结果
+
+- `master` 已合并 **v0.3.0**（`c24e17ee`），merge-base `488db49f`（0.2.6）。合并前本地 **领先 221 / 落后 390** 提交；合并提交在 `master` 上，tag `v0.3.0`。
+- **28 个冲突文件**全部手工解完（无 `<<<<<<<` 残留）：服务端 6（lobby/routes/websocket/index/gamedata/acquire）、共享 1（protocol）、客户端 10（main/audio/render.app/render.units/game/title/settings/briefing.css/i18n×4）、工具与文档 5（README/THIRD-PARTY/package.mjs/package-lock/assets.json）、测试 1（simClient）。
+- **冲突量最大的是 i18n**（4 语言 × 各 ~550 行上游新增）：用一次性脚本按「上游为主 + 补回我们独有的键」合并（en 补回 123、ja/ko 53、zh-TW 54），比手工合并安全。
+- **`package-lock.json` 直接取上游**再 `npm install`：上游新增 `ses@2.3.0` + `acorn@8.18.0`（沙箱脚本运行时），我们的 devDeps 与上游完全一致，无自有依赖需保留。
+- **`data/assets.json` 取上游后必须重跑 `node tools/inject-skins-assets.mjs`**：上游清单没有我们的 174 套皮肤条目，直接取 theirs 会让 `tools/skins-pack.test.mjs` 红 8 条。重注入后 16/16 全绿（115 名干员 / 174 套）。
+- **`THIRD-PARTY-NOTICES.md` 取上游**：我们那两段（libnode.so / libc++_shared.so）是安卓壳专用，安卓工程 10-06 已删，属死引用。
+- **`.github/workflows/pr-labeler.yml` 维持删除**：我们仓库历来不跟踪 `.github/workflows/`（0.2.5 起就这样），上游新增的 ci.yml 也不引入。
+
+### 上游 0.3.0 的关键变化（影响未来同步）
+
+- **插件系统（DESIGN §32）是最大新面**：`server/plugins/*`（22 文件）、`shared/plugins/*`（23）、`server/studio/*`（31）、`public/studio/`、`plugins/_template/`、`docs/PLUGIN-*.md` 全是新增目录，与自研功能**零文件重叠**，无需解冲突。
+- **Match 新增第 18 个方法模块 `match/rehearsal.js`（MatchRehearsal）**：房主浏览器替 AI 试算布阵（`SP_BOT_REHEARSAL=host`）。我们的 `MatchCustom` 仍排在它之后注册（`Match.js` 的 `for (const part of [...])` 数组末尾），同名方法会 throw，已确认无重名。
+- **`Lobby` 构造函数新增 `content` / `plugins` / `hosts` 三个依赖**（`server/http/websocket.js` 传入）：我们在此处叠加 `SP_MAX_SEATS` 钩子，两者共存已验。
+- **`Room` 构造函数签名不变**（`(code, mode, difficulty, now, maxSeats)`），但 `createRoom` 里多了 `room.content = this.vanilla` + 默认插件应用块 —— 与我们的 `maxSeats` 传参共存。
+- **`createRequestHandler` 新增 `csp` / `studio` / `trustedRuntime` 三个参数**：我们在同一处叠加自研 `custom`（publicDir）参数与 `/healthz`+customRoutes+musicRoutes 三条前置路由。**注意顺序**：`/x/` 与 studio 必须在 `/healthz` 之前（上游原顺序），自研路由在其后、405 检查之前。
+- **`healthReport` 新增 `content` / `trusted` 字段**：我们保留 `customRules` 读取器（音乐播放器开关）叠加在同一个 health 对象里。
+- **`poolCopies(baseId)` 上游去掉了 `players` 参数**，且去掉了 `isDiy` 对 `coopPoolMultiplier` 的豁免（#650：自选库存也要翻倍）。我们恢复 `players` 形参并保留 `poolCopyMulFor(players)` 座位缩放，**同时采纳上游 #650 的语义**（不再按 `isDiy` 跳过 coop 倍率）。
+- **`server/sim/rng.js` 新增 `clone()`，我们的 `setState()` 并存**（撤回功能用）。
+- **奖励 offer 不再在休整期结束清空**（`player/round.js` 的 `endPrep` 去掉了 `this.offers = []`，改为「kept until picked」，维护者 2026-10-15 决定）。⇒ 自研「回合抽奖」发的 offer 会跨回合保留到被领取，`tools/round-lottery.test.mjs` 的「第 4 回合不发」断言已按新语义重写（断言「不新增」而非「清零」）。
+- **暂存区从 5 格硬上限改为可展开队列 + 自动补位**（PR #630）⇒ `applyGrants` 的「整备区已满」分支实际上不再触发，`tools/grant.test.mjs` 对应断言已按新语义重写（16 件全发成功，超出 10 格手牌的部分进 temp 队列）。
+- **客户端**：`main.js` 新增 `installContent`/`installContentSet`/`installRehearsal`/`registerImportedAssetWorker`；`audio.js` 新增 `refreshBgm()`（外观插件换曲后重放当前曲）与 `VOICE_LANGS`（英/韩/本土语言，我们原来的 `cn|jp` 二值判断被上游多语种取代，**自研 `voiceGate.reset()` 热切换钩子保留**）；`render/app.js` 的 `deploy`/`die` 事件接 `wiring.*`（官方特效）；`render/units.js` 抽出 `_pictureUrl()` / `_modelEntry()`（我们把 `{ skin }` 选项塞进这两个新函数，皮肤功能完整保留）。
+- **官方战斗特效**（`public/assets/local/fx/` + `data/local-fx.json`）：新增可选素材，`tools/package.mjs` 增加 `FULL_ZIP_FX` / `FX_ART_PREFIX` 两个常量。我们的 `SKIN_AVATAR_DIR` / `SKINS_RESEARCH` 与它们并存，`artPlan` 同时收集皮肤与特效。
+
+### 测试结果（本机 Windows，Node v24.18.0）
+
+- `node tools/check-missing-imports.mjs` ✅ 无「调用但未导入」符号（0.2.5 血案的常规闸门）。
+- 自研 10 套 + 相关：`pacing` / `extra-rounds` / `extra-rounds-hot` / `round-lottery` / `directed-pick` / `item-pick` / `prep-debt` / `grant` / `prep-undo` / `custom-bgm` / `music-player` / `music-routes` / `skins-pack` — **全部绿**（`--test-concurrency=1`，避免共享 `config/custom-rules.json` 互踩）。
+- `test/content/**`（`SP_OFFICIAL_RULES=1`）：**2351 项，2348 绿 / 3 红**，红的全部是 `op_oblvns.test.js` 的 S1–S3（**NOTES 早有记录的既有欠账**，与本次合并无关）。
+- `node tools/golden.mjs`（官方基线）：**148 场景 match，只有 diy 6 场景 differ**（`diy-136`…`diy-141`）——同样是 NOTES 已记录的既有欠账（自选池重建后 digest 未再生），非本次引入。
+- 素材：`data/assets.json` 16705 文件清单（上游）+ 174 套皮肤注入；`public/assets` 用 junction 复用主仓库（worktree 不含 gitignore 素材）。
+
+### 遗留 / 注意
+
+- **`E:\sp-merge-030` worktree 保留**供比对（`node_modules` / `public/vendor` / `public/assets` 三个 junction 指向主仓）。验收后清理：
+  `git worktree remove --force E:/sp-merge-030` **之后**用 `cmd /c rmdir /s /q E:\sp-merge-030`（junction 不能跟删，见 AGENTS.md「删除副本的致命细节」）。
+- **`public/assets` 未随合并更新**：上游 0.3.0 新增英/韩/本土配音与官方特效素材，需要 `node tools/fetch-assets.mjs --refresh-index` 增量补齐（本机 0.2.6 素材已在，但 0.3.0 新清单的差集未拉）。**未拉也不影响开服**（缺的走占位/回落），但「官方特效」设置项会是空的。
+- **云服上线**：`git pull && sudo systemctl restart stronghold`，先 `curl healthz` 确认 `matches == 0`。注意云服素材同样需要 `--refresh-index` 才有官方特效。

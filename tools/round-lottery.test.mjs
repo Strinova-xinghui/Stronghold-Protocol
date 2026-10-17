@@ -45,10 +45,21 @@ describe('回合抽奖 · 发放', () => {
   });
 
   test('未命中回合：不发抽奖（第 4 回合）', () => {
+    // 上游 0.3.0 起奖励 offer 不再在休整期结束时清空（player/round.js startRound：「kept until picked」，
+    // 社区反馈 → 维护者 2026-10-15 决定），所以第 3 回合发的抽奖会留到第 4 回合。断言改为「第 4 回合没有新增」：
+    // 第 3 回合 2 轮，第 4 回合仍是同样 2 轮（同一批 offer 对象），而不是 4 轮。
     writeCfg({ roundLottery: { enabled: true, rolls: 2, choices: 5, rounds: [{ round: 3, minTier: 1 }, { round: 6, minTier: 2 }] } });
-    const { players } = setup(4);
-    for (const ps of players) {
-      assert.equal(ps.offers.filter((o) => o.source === 'lottery').length, 0, '第 4 回合不发');
+    const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', humans: 2, seed: 41, registry: REG, fake: true });
+    h.start();
+    h.toPrep(3);
+    const at3 = new Map([...h.m.players.values()].filter((p) => !p.isBot)
+      .map((ps) => [ps.playerId, ps.offers.filter((o) => o.source === 'lottery')]));
+    h.toPrep(4);
+    for (const [pid, before] of at3) {
+      assert.equal(before.length, 2, `${pid} 第 3 回合发 2 轮`);
+      const after = h.m.players.get(pid).offers.filter((o) => o.source === 'lottery');
+      assert.equal(after.length, 2, `${pid} 第 4 回合不新增（仍是被保留的 2 轮，实际 ${after.length}）`);
+      assert.ok(after.every((o) => before.includes(o)), '第 4 回合的是第 3 回合留下的同一批 offer');
     }
   });
 

@@ -15,6 +15,11 @@
 *.json text eol=lf
 *.md   text eol=lf
 *.yml  text eol=lf
+# Text files without an extension (.dockerignore, Dockerfile, LICENSE): LF everywhere, like the listed types —
+# core.autocrlf=true would otherwise hand a Windows checkout CRLF and break tests that read them line by line.
+.dockerignore text eol=lf
+Dockerfile text eol=lf
+LICENSE text eol=lf
 # binary assets
 *.png binary
 *.jpg binary
@@ -25,3 +30,6 @@
 *.ttf binary
 *.mp3 binary
 *.ogg binary
+
+# The attributes file itself, and every other extensionless text file above.
+.gitattributes text eol=lf
