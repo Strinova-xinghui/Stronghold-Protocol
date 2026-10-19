@@ -69,6 +69,8 @@ node --test tools/pacing.test.mjs tools/extra-rounds.test.mjs tools/extra-rounds
 npm run golden                    # 官方基线安全网（SP_OFFICIAL_RULES=1 屏蔽全部自研规则）
 node tools/verify-console-ui.mjs <port>   # 控制台 UI（无头浏览器）
 node tools/check-missing-imports.mjs      # 符号审计
+npm run ci                        # 上游 0.3.1 起的统一 CI 闸门（tools/ci.mjs：test + smoke + lint + imports + types）
+node --test test/<area>/<file>.test.js    # 单个测试文件
 ```
 
 

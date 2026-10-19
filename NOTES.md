@@ -9,6 +9,7 @@
 ## 目录
 
 - [自研规则总览（热更配置）](#自研规则总览热更配置)
+- [上游 0.3.1 同步（2026-10-19）](#上游-031-同步2026-10-19)
 - [上游 0.3.0 同步（2026-10-17）](#上游-030-同步2026-10-17)
 - [WSL Ubuntu 开发环境迁移（2026-10-17）](#wsl-ubuntu-开发环境迁移2026-10-17)
 - 各功能详见下文（monitor 监看 / 影子观战 / 定向甄选 / 皮肤 / 配音 / 等待 / 负债 / 抽奖 / 回合编排 / 对局节奏 / 控制台 / 6 人联机 / 一键开服 …）
@@ -944,6 +945,60 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 - [ ] golden diy 6 场景 digest 再生（`npm run golden:update` 前先看 diff 是否只是时基/数值演进）。
 - [ ] 云服缺的 1197 个素材可从 WSL `~/sp/public/assets` scp 增量补（比 Windows scp 快）。
 - [ ] WSL 副本的 `mine` remote 推送凭证（GitHub token）未配——WSL 里 push 前先配 `gh auth login` 或 credential helper。
+
+## 上游 0.3.1 同步（2026-10-19，agent 自动执行）
+
+> 命令式任务：「上游 0.3.1」。上游 tag `v0.3.1` = `b3deebda`（2026-10-18 发布）。
+> 本次合并前本地领先 227 / 落后 215 提交，merge-base `c24e17ee`（0.3.0）。
+
+### 结果
+
+- `master` 已合并 **v0.3.1**，**40 个冲突文件**全部手工解决，无 `<<<<<<<` 残留；自研文件 11 个全部在位。
+- 0.3.1 是**插件系统的大迭代**（声明式干员特质、盟约/道具/交互窗口模板、Forge 导入大幅补齐、名单外官方干员美术提取、内容插件四个房间规则、主题变量与公告等），`server/plugins/`、`shared/plugins/`、`server/studio/` 新增面与自研零重叠。
+
+### 本次真正踩到的「同名硬冲突」（**必须知道**）
+
+上游 0.3.1 把**皮肤子系统正式内建**，导致我们 0.3.0 的自研皮肤代码与上游**同名方法/同名导出**直接对撞。JS 不会报「重复导入」，但会有三种不同的爆法：
+
+| 症状 | 位置 | 处理 |
+| --- | --- | --- |
+| `SyntaxError: Identifier 'freezeSkins' has already been declared` | `server/lobby.js` | 删我们的旧 `freezeSkins`（上游版带 `checkSkinSelection` 校验） |
+| `SyntaxError: Identifier 'SKIN_LIMITS' has already been declared` | `shared/protocol.js` | 删我们的旧 `SKIN_LIMITS/isSkinId/isSkinSelection`（上游版 key 是 **charId** 不是 chessId，上限 256） |
+| `Error: Match.setSkins is defined twice` | `server/match/match/custom.js` + `match/platform.js` | 删我们的 `Match.setSkins`（上游 platform.js 已有） |
+| 同上（PlayerState） | `server/match/player/custom.js` + `player/basics.js` | 删我们的 `PlayerState.setSkins`，保留 `_chessHasBond`/`_rewardOfferPlan` |
+
+**教训（写进同步方法论）**：上游内建某个自研功能时，冲突不只出现在 `<<<<<<<` 标记里——**同名函数/导出的重复声明在合并后才会在 `node --check` / 运行时炸出来**。所以合并后必须：
+1. `node --check` 每个改过的文件（本次靠它抓到 `freezeSkins` 和 `SKIN_LIMITS`）；
+2. 跑一遍任意会 `import Match.js` 的测试（本次靠 `tools/pacing.test.mjs` 抓到 `Match.setSkins`）。
+
+### 其他关键取舍
+
+- **皮肤改为完全采用上游实现**：`ui/skins.js`、`ui/skinPicker.js`、`js/assets.js`、`render/units.js`、`render/app/info.js` 全部取 theirs。上游架构是**插件 overlay 驱动**（`chars[charId].skins` 由外观插件写入），比我们的 `data/skins.json` 目录式更完整，还多了 `avatarE2`、`shownSkin`（设置「显示其他玩家的皮肤」）、`hasBackSpine`。
+  - ⚠️ **`data/skins.json` 已无代码引用**（`tools/build-skins.mjs` 仍生成它，但 server/client 都不读了）——保留未删，留待确认是否移除生成链。
+  - 我们 `render/app.js` 的 `announceDeploy`（部署语音钩子）与 die 分支的 `finishAttack` 收束**都保住了**。
+- **`pool.js` 的 `rollItem` 签名冲突**（本次最需要动脑的一处）：上游把第 4 参数从我们的 `opts { bondBoost, onTierMiss, mode }` 改成了 `bias: Set`（shopBias 纯筛选）。合并方案：**统一成 `biasOrOpts`**——传 `Set` 就是上游语义，传对象就是自研装备甄选（对象里可再带 `bias`）。实现上先按上游 `bias` 筛选候选，再套自研的加权/层级回退，两套偏好可同时生效。`economy.js` 的调用方同步改为一起传 `{ bias, bondBoost, onTierMiss, mode }`。
+- **`settle.js`**：上游把「lp ≤ 0 淘汰」抽成 `eliminateBroken()`。自研负债规则改为在 `eliminateBroken()` **内部提前 return**（`if (this._debtRule?.enabled) return;`），再由 settle 末尾的团队总和清算接手——比原来「循环里 break」更干净。
+- **`lobby.js`**：上游新增 `testMode`（`SP_TEST_MODE` 测试房间）与我们 `SP_MAX_SEATS` 座位钳制并存；`createRoom` 的 `new Room(..., maxSeats)` 与 `room.test = test === true` 并存。
+- **`data/backups.json`**：单行大 JSON，两边都改过。用 JSON 语义合并（以上游为基，补回我们的**丰川祥子 `char_4182_oblvns` 解锁**三处：`units` +1、`diy.excluded` −1、`diy.ownedPool` +1）。
+- **`intents.js`**：自研 `_undoWrap` 撤回栈包住上游新增的 `g.unequip`。
+- **`fieldHost.js`**：上游新增异形屏 `oy` 偏移，与我们的 `stripBottom`/`coarse`（手机盟约条遮挡）并存。
+- **CSS**（`devices.css`、`game-panels.css`）、`docs/SKINS.md`、`test/skins.test.js` 取上游（官方视觉对齐 / 上游重写的测试套件）。
+- **`.github/workflows/ci.yml` 维持不跟踪**（同 0.3.0 口径）。
+
+### 测试结果（本机 Windows，Node v24.18.0）
+
+- `node tools/check-missing-imports.mjs` ✅
+- **自研 13 套 172/172 全绿**（pacing/extra-rounds×2/lottery/directed-pick/item-pick/prep-debt + grant/prep-undo/custom-bgm/music-player/music-routes/skins-pack，`--test-concurrency=1`）
+- **`npm run golden`（SP_OFFICIAL_RULES=1）：148 场景 match，只有 diy 6 场景 differ** —— 与 0.3.0 合并时**完全相同的既有欠账**，非本次引入。
+- `test/match/**`：见下方「已知红」。
+
+### 已知红（均为既有欠账或平台限制，非本次引入）
+
+- `test/content/op_oblvns.test.js` S1–S3（0.2.5 起就红）
+- golden diy 6 场景（同上）
+- `test/ui/text-scale.test.js` 的播放器 CSS rem 白名单（0.2.6 起就红）
+- 上游 `tools/local-extract/fx.py` 需 **Python 3.12+**（PEP 701 f-string），本机 `python3` 是 3.11 → `board3d-extract`/`board3d-scene` 8 条红；把 `python3` 指向 3.14 后 34/34 绿
+- 插件/studio 套件里涉及符号链接的用例在 Windows 上 `EPERM`（需开发者模式/管理员）
 
 ## 上游 0.3.0 同步（2026-10-17，agent 自动执行）
 

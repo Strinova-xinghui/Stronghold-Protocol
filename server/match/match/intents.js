@@ -35,10 +35,16 @@ export class MatchIntents {
       case 'g.equip': return ps._undoWrap('equip', msg, () => ps.equip(msg.itemUid, msg.targetUid, msg.replaceUid ?? null));
       case 'g.art': return ps._undoWrap('art', msg, () => ps.useArt(msg.itemUid, msg.row, msg.col, msg.dir));
       case 'g.destroy': return ps._undoWrap('destroy', msg, () => ps.destroy(msg.uid));
+      // 自研 prepUndo：卸下装备也进撤回栈
+      case 'g.unequip': return ps._undoWrap('unequip', msg, () => ps.unequip(msg.itemUid));
       case 'g.reward': return ps._undoWrap('reward', msg, () => ps.pickReward(msg.idx));
       case 'g.choice': return msg.choiceId !== undefined
         ? this.pickPersonalChoice(ps, msg.idx, msg.choiceId)
         : this.pickCard(ps, msg.idx);
+      // a plugin interaction window (PLUGIN API v2, docs/PLUGINS.md §10b): the window's own id, not a draft card —
+      // the host applies the declared primitive, a plugin never reaches the match state itself
+      case 'g.offer': return this.requestOffer(ps, msg.offerId, msg.idx, msg);
+      case 'g.offerRefresh': return this.requestOfferRefresh(ps, msg.offerId, msg.idx, msg);
       case 'g.ready': return ps.setReady(!!msg.ready);
       // 休整期撤回（自研 prepUndo）：弹栈恢复上一次可撤回操作
       case 'g.undo': return ps.undo();
@@ -51,6 +57,7 @@ export class MatchIntents {
       // the stats the board's units start their next battle with (the detail card in prep, user playtest #4 item 7)
       case 'g.unitStats': return this.unitStats(ps, msg.seq ?? null);
       case 'g.leave': this.onLeave(ps.playerId); return OK;
+      case 'g.test': return this.applyTestCommand(ps, msg);
       case 'b.progress': return this._onProgress(ps, msg);
       case 'b.result': return this._onResult(ps, msg);
       // the host's answer to a delegated bot layout rehearsal (DESIGN §14): a report, never an error — an unknown,
@@ -82,6 +89,7 @@ export class MatchIntents {
   /** Let the bot act for a (newly) bot-controlled seat in the current phase. */
   kickBot(ps) {
     if (!ps.botControlled || this.ended) return;
+    this.offersChanged();
     if (this.phase === PHASE.INFO_CHECK && !ps.infoReady) { ps.infoReady = true; this.markPublic(); this.maybeEndInfo(); }
     else if (this.phase === PHASE.BAND_DRAFT && this.draftTurn() === ps.playerId) this.scheduleBandBot();
     else if (this.phase === PHASE.SP_DRAFT && this.spTurn() === ps.playerId) this.scheduleSpBot();

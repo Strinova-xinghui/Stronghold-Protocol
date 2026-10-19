@@ -1,32 +1,13 @@
 // server/match/player/custom.js — PlayerState 自研方法模块（第 11 个 part，2026-10-13 上游 0.2.5 同步时从旧单体重建）。
 // 上游 0.2.5 把 PlayerState 拆成 server/match/player/* 子模块；本文件承载自研方法，
 // PlayerState.js 在 parts 数组末尾挂载本模块（同名方法两次定义会 throw，故不与上游重名）。
-// 涵盖：皮肤 setSkins（docs/SKINS.md）/ 定向甄选 rewardOffer 的盟约解析（_rewardOfferPlan 群）。
+// 涵盖：定向甄选 rewardOffer 的盟约解析（_rewardOfferPlan 群）。
+// 注意：干员皮肤 setSkins / skinFor 自 0.3.1 起由上游 player/basics.js 原生提供（checkSkinSelection 校验、
+// 支持自选与补位、per-charId 键），本模块的同名实现已删除——同名方法会触发 PlayerState 的「defined twice」硬错。
 
 import { getCustomRules } from '../customRules.js';
 
 export class PlayerCustom {
-  /**
-   * 干员皮肤 (docs/SKINS.md): replace this player's skin choices. `{ [chessId]: skinId }`.
-   * @param {Record<string, string>|null} skins
-   * @returns {boolean} whether anything was accepted
-   */
-  setSkins(skins) {
-    if (this.isBot) return false;
-    const out = {};
-    if (skins && typeof skins === 'object' && !Array.isArray(skins)) {
-      for (const [id, skinId] of Object.entries(skins)) {
-        if (typeof skinId !== 'string' || !skinId) continue;
-        const rec = this.gd.chess(id);
-        if (!rec || rec.isGolden || rec.visible === false || rec.isHidden || rec.isDiy || (rec.baseId && rec.baseId !== id)) continue;
-        out[id] = skinId;
-      }
-    }
-    this.skins = Object.freeze(out);
-    if (this.m?._privDirty) this.dirty();
-    return Object.keys(out).length > 0;
-  }
-
   /** 某干员（base 或 golden id）是否带盟约 `bond`。（自研「定向甄选」辅助） */
   _chessHasBond(id, bond) {
     const c = this.gd.chess(id);

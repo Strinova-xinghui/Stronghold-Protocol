@@ -2,7 +2,7 @@
 // 上游 0.2.5 把 Match 拆成 server/match/match/* 子模块；本文件承载我们的全部纯自研方法，
 // Match.js 在 parts 数组末尾挂载本模块（同名方法两次定义会 throw，故自研方法不与上游重名）。
 // 修改上游方法行为的钩子（sendTo 镜像、settle 负债清算等）直改对应上游子模块并以「自研」注释标记。
-// 涵盖：monitor 监看 / 皮肤 setSkins / 负债规则 prepDebt / 对局节奏 pacing / 回合抽奖 roundLottery /
+// 涵盖：monitor 监看 / 负债规则 prepDebt / 对局节奏 pacing / 回合抽奖 roundLottery /
 //       休整期等待投票 prepWait（协议见 shared/protocol.js）。
 
 import { PHASE, ERR } from '../../../shared/constants.js';
@@ -97,26 +97,6 @@ export class MatchCustom {
     let n = 0;
     for (const t of this.monitorWatchers.values()) if (t === targetPlayerId) n++;
     return n;
-  }
-
-  // ---- 皮肤（自研，docs/SKINS.md） ----------------------------------------------------
-
-  /**
-   * The match accepted the room's skin selection mid-prep (room.skins → lobby → match.setSkins):
-   * re-checked against the game data by the caller (lobby freezeSkins); PlayerState re-checks per chess.
-   * @param {string} playerId
-   * @param {Record<string, string> | null} skins
-   * @returns {{ ok: true } | { error: string, detail?: string }}
-   */
-  setSkins(playerId, skins) {
-    const ps = this.players.get(playerId);
-    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
-    let res = OK;
-    this.guard(() => {
-      ps.setSkins(skins);
-      this.markPublic();
-    });
-    return res;
   }
 
   // ---- 休整期负债规则（自研 2026-10-07） ----------------------------------------------

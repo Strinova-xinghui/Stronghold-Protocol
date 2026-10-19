@@ -300,7 +300,8 @@ describe('match UI of a not-owned chess', () => {
     // them by UnitInfo spine, the stand-in's model) — never the operator it replaces
     // 自研语音门控（fork 0.1.6）: the same isOwnedOrDeployed gate as selectKey — shop / reward previews stay silent
     assert.match(readFileSync(path.join(ROOT, 'public/js/ui/detailPanel.js'), 'utf8'),
-      /const selectChar = voice && (isOwnedOrDeployed && )?detail\?\.type === 'chess' \? detail\.standIn\?\.charId \|\| detail\.chess\?\.charId \|\| null : null;/);
+      // 自研 isOwnedOrDeployed 门控 + 上游 assets.voice（插件干员的语音来源）并存
+      /const selectChar = voice && isOwnedOrDeployed && detail\?\.type === 'chess' \? detail\.standIn\?\.assets\?\.voice \|\| detail\.standIn\?\.charId \|\| detail\.chess\?\.assets\?\.voice \|\| detail\.chess\?\.charId \|\| null : null;/);
   });
 
   test('own prep pieces with stand-ins get a small 「替补」 tag (hand, temp, board); others none', () => {

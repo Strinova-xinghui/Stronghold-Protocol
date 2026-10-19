@@ -10,7 +10,7 @@ import { audio } from '../audio.js';
 const SUCCESS_SFX = {
   'g.buy': 'buy', 'g.sell': 'sell', 'g.refresh': 'refresh', 'g.freeze': 'freeze', 'g.levelUp': 'levelup',
   'g.move': 'drop', 'g.equip': 'equip', 'g.art': 'artPlace', 'g.reward': 'pick', 'g.choice': 'pick',
-  'g.band': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back',
+  'g.band': 'confirm', 'g.bandSkip': 'back', 'g.infoReady': 'ready', 'g.emote': 'emote', 'g.destroy': 'back', 'g.unequip': 'back',
   'g.undo': 'back', // 休整期撤回（自研 prepUndo）
 };
 
@@ -91,7 +91,9 @@ export const actions = {
   destroy: (uid) => act('g.destroy', { uid }),
   // 休整期撤回（自研 prepUndo）：撤回本休整期的上一次可撤回操作；canUndo=0 时按钮已灰，这里是最后防线
   undo: () => act('g.undo', {}, { sfx: 'back' }),
+  unequip: (itemUid) => act('g.unequip', { itemUid }),
   reward: (idx) => act('g.reward', { idx }),
+  offer: (offer, idx, refresh = false, cardId) => act(refresh ? 'g.offerRefresh' : 'g.offer', { offerId: offer.id, pluginId: offer.pluginId, seq: offer.seq, idx, cardId }),
   choice: (idx, choiceId) => act('g.choice', choiceId === undefined ? { idx } : { idx, choiceId }),
   ready: (ready) => act('g.ready', { ready }, { sfx: ready ? 'ready' : 'back' }),
   // 休整期等待投票（自研）：已就绪时按「等待」暂停本回合倒计时，等最后一名未就绪的活人

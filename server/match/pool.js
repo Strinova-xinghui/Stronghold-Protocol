@@ -168,18 +168,27 @@ export class SharedPool {
   /**
    * Item roll for the shop's item slot: tier by the chess tier shares at this level, uniform item within the tier,
    * falling back to lower tiers when a tier has no item. Returns an item id or null.
+   * `bias` (shopBias bondBias): a Set of active bond ids. A tier is drawn from items whose giveBondId is in that set
+   * when any remain after the stock gate; an empty filtered tier falls back to the official list of that tier.
+   * null or an empty Set keeps today's rng (one draw for the tier, one for the pick). Bias never grants an item.
    *
-   * 自研「装备甄选」（opts.bondBoost / opts.onTierMiss）：把 `giveBondId === 目标盟约` 的装备（= 能与变形同构体
-   * 配合转职的那一类，数据驱动判定，不硬编码清单）权重提高到 `left × mult`。`onTierMiss='fallback'` 时，当前 tier
-   * 层没有该阵营装备就退到最近的有该装备的层（保证命中，代价是可能给出低阶装备）；'random' 则保持层级退回随机。
-   * 只改抽中的概率分布，不碰任何其它路径。
+   * 自研「装备甄选」（opts.bondBoost / opts.onTierMiss / opts.mode）：把 `giveBondId === 目标盟约` 的装备（= 能与
+   * 变形同构体配合转职的那一类，数据驱动判定，不硬编码清单）权重提高到 `left × mult`（mode='weight'）或只在其中
+   * 抽（mode='filter'）。`onTierMiss='fallback'` 时，当前 tier 层没有该阵营装备就退到最近的有该装备的层（保证命中，
+   * 代价是可能给出低阶装备）；'random' 则保持层级退回随机。只改抽中的概率分布，不碰任何其它路径。
+   * 两套偏好可以同时给：`bias`（上游 shopBias，Set，纯筛选）先筛，`bondBoost`（自研，Map，加权）再在结果里加权。
    * @param {Function} rng
    * @param {number} maxTier
-   * @param {{ bondBoost?: Map<string, number> | null, onTierMiss?: 'fallback' | 'random' }} [opts]
+   * @param {object|null} stock
+   * @param {Set<string>|{ bondBoost?: Map<string, number>|null, onTierMiss?: 'fallback'|'random', mode?: 'weight'|'filter' }|null} [biasOrOpts]
+   *   a Set = the upstream shopBias; an object = the fork's 装备甄选 options (a Set may ride in it as `bias`)
    */
-  rollItem(rng, maxTier, stock = null, opts = {}) {
-    const boost = opts.bondBoost;
-    const gd = boost && boost.size ? this.gd : null;
+  rollItem(rng, maxTier, stock = null, biasOrOpts = null) {
+    // 归一化：上游传 Set，自研传 options 对象
+    const opts = biasOrOpts instanceof Set || biasOrOpts == null ? { bias: biasOrOpts } : biasOrOpts;
+    const bias = opts.bias instanceof Set ? opts.bias : null;
+    const boost = opts.bondBoost instanceof Map && opts.bondBoost.size ? opts.bondBoost : null;
+    const gd = boost ? this.gd : null;
     const shares = this.tierShares(maxTier);
     const tiers = Object.keys(shares).map(Number).sort((a, b) => a - b);
     let tier = null;
@@ -190,7 +199,18 @@ export class SharedPool {
     } else {
       tier = 1 + Math.floor(rng() * Math.max(1, maxTier));
     }
-    const pickFrom = (list) => {
+    const useBias = bias instanceof Set && bias.size > 0;
+    /** 上游 shopBias 的候选筛选：本层有命中盟约的装备就只在其中抽，否则退回整层。 */
+    const biased = (list) => {
+      if (!useBias) return list;
+      const hit = list.filter((id) => {
+        const rec = this.gd.item(id);
+        return !!(rec && typeof rec.giveBondId === 'string' && bias.has(rec.giveBondId));
+      });
+      return hit.length ? hit : list;
+    };
+    const pickFrom = (list0) => {
+      const list = biased(list0);
       if (!gd) return stock ? stock.pick(rng, list) : list[Math.floor(rng() * list.length)];
       // 目标阵营装备（giveBondId 命中 boost）
       const isTarget = (id) => {

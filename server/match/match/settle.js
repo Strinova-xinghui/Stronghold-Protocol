@@ -75,20 +75,14 @@ export class MatchSettle {
       this.dispatch(ps, 'onBattleResult', { result: r, lpLoss: loss, perfect: counted === 0 && r.perfect !== false, unite: uniteResult || null });
       ps.recompute();
     }
-    for (const ps of alive) {
-      if (this._debtRule?.enabled) break;   // 负债规则（自研）：lp ≤ 0 不在此淘汰，改由下方团队清算
-      if (ps.lp <= 0) {
-        ps.lp = 0;
-        ps.eliminate(this.round);
-        this.toast(ps, 'error', '你的目标生命值耗尽，已被淘汰');
-        this.tickerText(msg('{name}博士的目标生命值已耗尽', { name: ps.name }), FLOW_TICKER_PRIORITY);
-      }
-    }
+    this.eliminateBroken();
     if (this._debtRule?.enabled) {
       // 负债清算（自研 2026-10-07）：lp ≤ 0 进入负债继续作战；全队血量总和 < 0 时，从负债最深者开始逐个
       // 淘汰（每淘汰一人移除其负数 LP，总和回升），直到总和 ≥ 0——「队友兜不住你了才死，死后队友压力减轻」。
-      let guard = alive.length + 1;
-      // loop-cap: guard = alive.length + 1（每轮淘汰一人并清零其负数 LP，总和必然收敛；守卫只防「淘汰后仍未被移除」的意外）
+      // 注意 eliminateBroken() 已按上游口径处理 lp ≤ 0；负债模式下需要「保留负 LP 继续作战」，
+      // 所以下面这段在 eliminateBroken 之后把规则拉回来（见 _debtRule 分支里的 while）。
+      let guard = this.alivePlayers().length + 1;
+      // loop-cap: guard = alivePlayers().length + 1（每轮淘汰一人并清零其负数 LP，总和必然收敛；守卫只防「淘汰后仍未被移除」的意外）
       while (this.alivePlayers().reduce((s, p) => s + p.lp, 0) < 0 && guard-- > 0) {
         const debtors = this.alivePlayers().filter((p) => p.lp < 0).sort((a, b) => a.lp - b.lp);
         const ps = debtors[0];
@@ -129,6 +123,25 @@ export class MatchSettle {
     }
   }
 
+  /**
+   * Drop every alive player whose LP is already gone. Settlement calls this after the round's LP loss.
+   * An accepted test round jump calls the same helper before the next round starts, so LP 0 cannot be
+   * written back into a new prep. The LP command itself stays a raw write.
+   */
+  eliminateBroken() {
+    // 自研「休整期负债」（prepDebt）：开启后 lp ≤ 0 不再当场淘汰，而是带着负 LP 继续作战，
+    // 由 settle 末尾的团队总和清算（全队总和 < 0 才逐个淘汰最深负债者）接手。
+    if (this._debtRule?.enabled) return;
+    for (const ps of this.alivePlayers()) {
+      if (ps.lp <= 0) {
+        ps.lp = 0;
+        ps.eliminate(this.round);
+        this.toast(ps, 'error', '你的目标生命值耗尽，已被淘汰');
+        this.tickerText(msg('{name}博士的目标生命值已耗尽', { name: ps.name }), FLOW_TICKER_PRIORITY);
+      }
+    }
+  }
+
   afterSettle() {
     if (!this.alivePlayers().length) { this.finish({ victory: false, reason: 'eliminated' }); return; }
     resetRoundCounters(this); // AI bot merge-counter resets each round (server/match/botEmotes.js)
@@ -136,7 +149,10 @@ export class MatchSettle {
   }
 
   finish({ victory, hiddenCleared = false, reason = 'defeat' }) {
+    // A command that ends a test match must be audited/counted before publishing its result.
+    if (this.test && this._testApplying) { this._testOutcome = { victory, hiddenCleared, reason }; return; }
     if (this.ended || this.disposed) return;
+    this.offersDispose();
     this.ended = true;
     if (this.runner) { try { this.runner.stop(); } catch { /* ignore */ } this.runner = null; }
     this._stopClientCombat();
@@ -154,6 +170,11 @@ export class MatchSettle {
     } catch (e) {
       this.reportError('buildResult', e);
       result = { t: 'm.result', victory: !!victory, roundsPassed: 0, reason, modeId: this.modeId, difficulty: this.difficulty, players: [] };
+    }
+    if (this.test) {
+      result.test = true;
+      result.testActions = this.testActions;
+      if (this.testReplayable === false) result.testReplayable = false;
     }
     this.lastResultMsg = result;
     this.markPublic();
