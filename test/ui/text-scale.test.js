@@ -87,6 +87,8 @@ const notScaled = (selector) => NOT_SCALED.some((re) => re.test(selector));
 const NOT_SCALED_FILES = [
   `${CSS}/devices.css`, `${CSS}/screens/briefing.css`, `${CSS}/screens/draft.css`, `${CSS}/screens/title.css`,
   `${CSS}/screens/game-shop.css`, `${CSS}/screens/loadout.css`, `${CSS}/screens/stats.css`,
+  // 自研面板（点歌台 / 战斗音乐替换）：固定字号的自定义控件，不参与全局「文字大小」缩放
+  `${CSS}/screens/game-player.css`, `${CSS}/screens/battle-music.css`,
 ];
 
 /** A font-size value that is neither scaled nor an exclusion: a plain `rem`, or `max(<rem>, …)`. */
