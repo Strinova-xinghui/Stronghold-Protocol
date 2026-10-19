@@ -22,7 +22,9 @@ const TOP = /^(?:server|shared|public|data|tools|test|docs|types|scripts|\.githu
 /** … or is one of these root files (README.md is left out: a bare `README.md` often means a folder's own). */
 const ROOT_FILES = new Set(['package.json', 'eslint.config.js', 'jsconfig.json', 'CHANGELOG.md', 'CONTRIBUTING.md']);
 /** Git-ignored or made at install time. */
-const EXEMPT = ['public/assets/', 'public/fonts/', 'public/vendor/', 'data/local-assets.json'];
+// `.github/workflows/`：本 fork 不跟踪它——推送 workflow 文件需要 GitHub token 的 `workflow` scope，
+// 而本机凭据只有 repo/gist/read:org。上游文档仍会提到 ci.yml（那是上游的 CI），故整体豁免。
+const EXEMPT = ['public/assets/', 'public/fonts/', 'public/vendor/', 'data/local-assets.json', '.github/workflows/'];
 
 /** Repository paths named in a Markdown text (inline code and fenced blocks), without duplicates. */
 function namedPaths(md) {
@@ -159,7 +161,8 @@ test('shipped markdown: a source link exists or is releases/latest, and the pack
       const raw = href.replace(/#.*$/, '');
       const norm = normalize(join(dirname(rel), raw)).split('\\').join('/');
       if (norm.startsWith('..')) assert.match(norm, /^(?:\.\.\/)+releases\/latest$/, `${rel} → ${href}`);
-      else assert.ok(existsSync(join(ROOT, norm)), `${rel} → ${href}`);
+      // .github/workflows/ 不在本 fork 的跟踪范围（见 EXEMPT），上游 README 对 ci.yml 的链接照旧豁免
+      else if (!EXEMPT.some((e) => norm === e || norm.startsWith(e))) assert.ok(existsSync(join(ROOT, norm)), `${rel} → ${href}`);
     }
     const next = rewritePlayerDoc(md, rel, shipped, version);
     for (const m of next.matchAll(/\]\(([^)\s]+)\)/g)) {
