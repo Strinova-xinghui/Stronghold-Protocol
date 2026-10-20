@@ -992,6 +992,23 @@ blob → tree(base_tree=远程 parent tree) → commit(author/committer/date/mes
 - **`npm run golden`（SP_OFFICIAL_RULES=1）：148 场景 match，只有 diy 6 场景 differ** —— 与 0.3.0 合并时**完全相同的既有欠账**，非本次引入。
 - `test/match/**`：见下方「已知红」。
 
+### 云服 0.3.1 部署记录（2026-10-20）
+
+按「云服 0.3.0 部署记录」同一套流程升级，**12 分钟完成**：
+
+1. 闸门：`curl https://strinova.me/healthz` 确认 `matches/sockets/sessions` 全 0。
+2. `cd ~ && git clone --depth 1 https://github.com/Strinova-xinghui/Stronghold-Protocol.git sp-031`
+3. 硬链接复用 0.3.0 的重资产：`cp -al ~/sp-030/{node_modules,public/assets}`、`cp -a ~/sp-030/public/{vendor,fonts}`、**`cp -a ~/sp-030/config/custom-rules.json ./config/`**（热改配置，git 里只有模板值）、`cp -a ~/sp-030/.cache ./`
+4. `npm install`（0.3.1 的 `ses`/`acorn` 已在 0.3.0 装过，本次 841ms「up to date」）。
+5. 隔离冒烟：`SP_MAX_SEATS=6 PORT=24596 HOST=127.0.0.1 node server/index.js` → `app 0.3.1 / maxSeats 6 / content bf640da5790d`。
+6. `sudo sed -i 's#sp-030#sp-031#' /etc/systemd/system/stronghold.service && sudo systemctl daemon-reload && sudo systemctl restart stronghold`
+7. 复验：HTTPS + 明文口都是 `app 0.3.1`、`NRestarts=0`；线上真实 WS 走通 welcome→create→setPlugins→**setMode**（0.3.1 新协议）→skins→addBot，且 `chessId` 键被正确拒为 `BAD_MSG`。
+8. **回滚**：`sudo sed -i 's#sp-031#sp-030#' ...` + `daemon-reload` + `restart`，`~/sp-030` 全程未动。
+
+素材：云服沿用 0.3.0 的 947M，0.3.1 清单 18588 项里**只缺 4 个**（`p_atk_richfan_s` 等），是**上游 manifest 引用了源站根本没有的文件**——与本地、与 0.3.0 时甄别出的同类问题一致，非本次引入、无需处理。
+
+> **⚠️ 本次踩坑复现：Mihomo TUN 劫持 SSH**。用户「关掉 Clash」后 SSH 仍不通，因为**只关了界面，内核 `verge-mihomo`/TUN 路由还在**（`Find-NetRoute` 仍显示 `InterfaceAlias = Mihomo`）。真正恢复的标志是 **`Get-NetRoute -DestinationPrefix '0.0.0.0/0'` 里只剩 WLAN/Radmin 而**没有** Mihomo 条目**；**这时 SSH 自动通，无需任何代理技巧。** 诊断键：`ssh -v` 能 `Connection established` 但 banner 不回 = TUN 劫持（不是防火墙）。
+
 ### 已知红（均为既有欠账或平台限制，非本次引入）
 
 - `test/content/op_oblvns.test.js` S1–S3（0.2.5 起就红）
